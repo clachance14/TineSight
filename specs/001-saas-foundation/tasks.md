@@ -3,7 +3,7 @@
 **Input**: Design documents from `/specs/001-saas-foundation/`
 **Prerequisites**: plan.md (required), spec.md (required), research.md, data-model.md, contracts/auth-api.yaml
 
-**Tests**: No automated tests in this phase (manual integration testing per constitution)
+**Tests**: No automated tests in this phase. Per Constitution V, "working user flows are the metric" - manual integration testing via quickstart.md checklist satisfies this requirement. Automated E2E tests (Playwright) will be added in Phase 2 (photo-pipeline) when CI infrastructure is established.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -20,7 +20,7 @@
 **Purpose**: Project initialization and basic structure
 
 - [ ] T001 Initialize Next.js 14 project with TypeScript, Tailwind, ESLint, App Router in repository root
-- [ ] T002 Install core dependencies: @supabase/supabase-js, @supabase/ssr, lucide-react
+- [ ] T002 Install core dependencies: @supabase/supabase-js, @supabase/ssr, lucide-react, @tanstack/react-query, zustand, react-hook-form, zod, @hookform/resolvers
 - [ ] T003 Install dev dependencies: supabase CLI
 - [ ] T004 Initialize shadcn/ui with default style, slate base color, CSS variables
 - [ ] T005 Install shadcn/ui components: button, card, input, label, form, avatar, dropdown-menu, separator
@@ -51,6 +51,13 @@
 - [ ] T016 [P] Create lib/supabase/middleware.ts with middleware client helper
 - [ ] T017 Create lib/utils.ts with cn() utility function for className merging
 
+### Service Layer & State
+
+- [ ] T017a [P] Create lib/services/auth.ts with login, signup, logout, getUser service functions
+- [ ] T017b [P] Create lib/services/profile.ts with getProfile, updateProfile service functions
+- [ ] T017c [P] Create lib/stores/ui.ts Zustand store for sidebar state, modals
+- [ ] T017d Create lib/query-client.ts with QueryClient configuration for TanStack Query
+
 ### Middleware & Design System
 
 - [ ] T018 Create middleware.ts at project root with route protection and session refresh
@@ -59,7 +66,7 @@
 
 ### Root Layout & Landing
 
-- [ ] T021 Create app/layout.tsx root layout with metadata, fonts, and global providers
+- [ ] T021 Create app/layout.tsx root layout with metadata, fonts (Inter sans, JetBrains Mono mono per Constitution VII), QueryClientProvider, and global providers
 - [ ] T022 Create app/page.tsx landing page that redirects to /dashboard or /login based on auth status
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
@@ -196,6 +203,7 @@
 
 **Phase 2 Foundational:**
 - T014, T015, T016 can run in parallel (different Supabase client files)
+- T017a, T017b, T017c can run in parallel (different service/store files)
 
 **Phase 3-7 User Stories:**
 - US1 and US2 can run in parallel (both P1, share auth layout created first)
@@ -247,7 +255,7 @@ Task: "Create cameras/page.tsx placeholder"
 | Phase | Tasks | Description |
 |-------|-------|-------------|
 | 1. Setup | T001-T007 (7) | Project initialization |
-| 2. Foundational | T008-T022 (15) | Database, Supabase utils, middleware, design |
+| 2. Foundational | T008-T022 + T017a-d (19) | Database, Supabase utils, services, stores, middleware, design |
 | 3. US1 Account Creation | T023-T026 (4) | Signup flow |
 | 4. US2 Authentication | T027-T029 (3) | Login/logout flow |
 | 5. US3 Password Recovery | T030-T032 (3) | Reset password flow |
@@ -255,9 +263,9 @@ Task: "Create cameras/page.tsx placeholder"
 | 7. US5 Profile Display | T041-T042 (2) | Avatar, settings profile |
 | 8. Polish | T043-T047 (5) | Migration, types, validation |
 
-**Total Tasks**: 47
-**MVP Scope**: Phases 1-4 (29 tasks) - Setup, Foundation, Account Creation, Authentication
-**Parallel Opportunities**: 15 tasks marked with [P]
+**Total Tasks**: 51
+**MVP Scope**: Phases 1-4 (33 tasks) - Setup, Foundation, Account Creation, Authentication
+**Parallel Opportunities**: 18 tasks marked with [P]
 
 ---
 

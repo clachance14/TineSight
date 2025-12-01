@@ -11,6 +11,8 @@ Implement the foundational SaaS infrastructure for TineSight including user auth
 
 **Language/Version**: TypeScript 5.x with Next.js 14 (App Router)
 **Primary Dependencies**: @supabase/supabase-js, @supabase/ssr, shadcn/ui, TailwindCSS, lucide-react
+**Data & State**: @tanstack/react-query (server state), zustand (client state)
+**Forms**: react-hook-form, zod, @hookform/resolvers
 **Storage**: PostgreSQL via Supabase (managed) with pgvector extension
 **Testing**: Manual integration testing via checklist (unit tests deferred per constitution)
 **Target Platform**: Web (Vercel deployment), responsive but desktop-primary
@@ -18,6 +20,7 @@ Implement the foundational SaaS infrastructure for TineSight including user auth
 **Performance Goals**: Login/signup < 10 seconds, page navigation < 200ms
 **Constraints**: Serverless-only (Vercel + Supabase), RLS required on all tables
 **Scale/Scope**: Single user testing, ~10 tables, 15 pages/components
+**Architecture Design**: See `docs/plans/2025-12-01-technical-architecture-design.md` for complete decisions
 
 ## Constitution Check
 
