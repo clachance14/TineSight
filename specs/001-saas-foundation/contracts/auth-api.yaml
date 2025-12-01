@@ -1,0 +1,263 @@
+# Auth API Contract: Minimal SaaS Foundation
+# Note: Most auth is handled by Supabase client SDK, not custom API routes
+# This documents the expected client-side interactions
+
+openapi: 3.0.3
+info:
+  title: TineSight Auth API Contract
+  description: |
+    Authentication flows for TineSight SaaS Foundation.
+    Most auth operations use Supabase SDK directly from client.
+    Only the callback route is a custom Next.js API route.
+  version: 1.0.0
+
+paths:
+  /auth/callback:
+    get:
+      summary: OAuth/Magic Link Callback Handler
+      description: |
+        Handles redirects from Supabase Auth after OAuth login or magic link click.
+        Exchanges authorization code for session and redirects to dashboard.
+      tags:
+        - Authentication
+      parameters:
+        - name: code
+          in: query
+          description: Authorization code from Supabase
+          required: true
+          schema:
+            type: string
+        - name: next
+          in: query
+          description: URL to redirect to after successful auth
+          required: false
+          schema:
+            type: string
+            default: /dashboard
+      responses:
+        '302':
+          description: Redirect to dashboard (success) or login (error)
+          headers:
+            Location:
+              schema:
+                type: string
+              description: Redirect URL
+            Set-Cookie:
+              schema:
+                type: string
+              description: Session cookies
+
+components:
+  schemas:
+    # Client-side SDK operations (not API routes)
+
+    SignUpRequest:
+      type: object
+      description: Client SDK - supabase.auth.signUp()
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          description: User's email address
+        password:
+          type: string
+          minLength: 8
+          description: Password (min 8 characters)
+        options:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                full_name:
+                  type: string
+                  description: User's display name
+      example:
+        email: "user@example.com"
+        password: "securepassword123"
+        options:
+          data:
+            full_name: "John Doe"
+
+    SignInRequest:
+      type: object
+      description: Client SDK - supabase.auth.signInWithPassword()
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      example:
+        email: "user@example.com"
+        password: "securepassword123"
+
+    ResetPasswordRequest:
+      type: object
+      description: Client SDK - supabase.auth.resetPasswordForEmail()
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+        options:
+          type: object
+          properties:
+            redirectTo:
+              type: string
+              format: uri
+              description: URL to redirect after password reset
+      example:
+        email: "user@example.com"
+        options:
+          redirectTo: "https://app.tinesight.com/reset-password"
+
+    UpdatePasswordRequest:
+      type: object
+      description: Client SDK - supabase.auth.updateUser()
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          minLength: 8
+      example:
+        password: "newSecurePassword456"
+
+    AuthResponse:
+      type: object
+      description: Response from Supabase auth operations
+      properties:
+        data:
+          type: object
+          properties:
+            user:
+              $ref: '#/components/schemas/User'
+            session:
+              $ref: '#/components/schemas/Session'
+        error:
+          $ref: '#/components/schemas/AuthError'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        email_confirmed_at:
+          type: string
+          format: date-time
+        user_metadata:
+          type: object
+          properties:
+            full_name:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Session:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_at:
+          type: integer
+          description: Unix timestamp
+        user:
+          $ref: '#/components/schemas/User'
+
+    AuthError:
+      type: object
+      properties:
+        message:
+          type: string
+        status:
+          type: integer
+
+    Profile:
+      type: object
+      description: User profile from profiles table
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+        avatar_url:
+          type: string
+          format: uri
+          nullable: true
+        subscription_tier:
+          type: string
+          enum: [free, pro, ranch]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+  securitySchemes:
+    supabaseAuth:
+      type: http
+      scheme: bearer
+      description: JWT token from Supabase Auth (in cookies for SSR)
+
+# Client SDK Usage Examples (TypeScript)
+x-code-samples:
+  signUp: |
+    const { data, error } = await supabase.auth.signUp({
+      email: 'user@example.com',
+      password: 'securepassword123',
+      options: {
+        data: { full_name: 'John Doe' }
+      }
+    })
+
+  signIn: |
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: 'user@example.com',
+      password: 'securepassword123'
+    })
+
+  signOut: |
+    await supabase.auth.signOut()
+    router.push('/login')
+
+  resetPassword: |
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      'user@example.com',
+      { redirectTo: `${window.location.origin}/reset-password` }
+    )
+
+  updatePassword: |
+    const { error } = await supabase.auth.updateUser({
+      password: 'newSecurePassword456'
+    })
+
+  getUser: |
+    // Server-side - ALWAYS use getUser() not getSession()
+    const { data: { user } } = await supabase.auth.getUser()
+
+  getProfile: |
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single()
