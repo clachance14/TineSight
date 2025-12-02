@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { updateBatchStatus, getBatch } from '@/lib/services/batches'
+import { tasks } from '@trigger.dev/sdk/v3'
 
 interface UploadCompleteRequest {
   batchId: string
@@ -91,21 +92,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // TODO: Trigger background processing job via Trigger.dev
-    // This will be implemented when Trigger.dev integration is added
-    // For now, we just mark the batch as processing
-    // Example:
-    // await triggerPhotoProcessing({
-    //   batchId: body.batchId,
-    //   imageIds: body.uploadedImageIds,
-    //   userId: user.id,
-    // })
+    // Trigger background processing job via Trigger.dev
+    try {
+      await tasks.trigger('batch-process', {
+        batchId: body.batchId,
+        imageIds: body.uploadedImageIds,
+      })
 
-    console.log('Batch marked for processing:', {
-      batchId: body.batchId,
-      imageCount: body.uploadedImageIds.length,
-      userId: user.id,
-    })
+      console.log('Batch processing triggered:', {
+        batchId: body.batchId,
+        imageCount: body.uploadedImageIds.length,
+        userId: user.id,
+      })
+    } catch (triggerError) {
+      console.error('Failed to trigger batch processing:', triggerError)
+      // Don't fail the request - batch is marked as processing
+      // and can be manually retried later
+    }
 
     // Return success response
     const response: UploadCompleteResponse = {

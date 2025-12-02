@@ -15,6 +15,7 @@ const ALLOWED_CONTENT_TYPES = [
 ]
 
 interface UploadFileRequest {
+  id: string
   filename: string
   contentType: string
   size: number
@@ -25,6 +26,7 @@ interface UploadInitiationRequest {
 }
 
 interface UploadResponse {
+  fileId: string
   filename: string
   uploadUrl: string
   imageId: string
@@ -145,6 +147,7 @@ export async function POST(request: NextRequest) {
         }
 
         uploads.push({
+          fileId: file.id,
           filename: file.filename,
           uploadUrl: uploadData.signedUrl,
           imageId: image.id,

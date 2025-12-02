@@ -136,28 +136,20 @@ export const detectAnimals = task({
         animalDetections: animalDetections.length,
       });
 
-      // Step 6: Convert normalized coordinates to pixel coordinates
+      // Step 6: Prepare detection records for database insert
       // MegaDetector returns bbox as [x, y, width, height] normalized to [0, 1]
-      // We need to convert to pixel coordinates using image dimensions
-      const imageDimensions = megaDetectorOutput.info.image_dimensions;
-      const [imageWidth, imageHeight] = imageDimensions;
-
-      logger.info("Image dimensions", {
-        imageId,
-        width: imageWidth,
-        height: imageHeight,
-      });
-
-      // Step 7: Prepare detection records for database insert
+      // We store normalized coordinates directly - the UI can convert when rendering
       const detectionRecords = animalDetections.map(
         (detection: MegaDetectorDetection) => {
           const [x, y, width, height] = detection.bbox;
 
-          // Convert normalized coordinates to pixel coordinates
-          const bboxX = Math.round(x * imageWidth);
-          const bboxY = Math.round(y * imageHeight);
-          const bboxWidth = Math.round(width * imageWidth);
-          const bboxHeight = Math.round(height * imageHeight);
+          // Store normalized coordinates (0-1 range) scaled to 10000 for integer storage
+          // This preserves precision while using integer columns
+          const scale = 10000;
+          const bboxX = Math.round(x * scale);
+          const bboxY = Math.round(y * scale);
+          const bboxWidth = Math.round(width * scale);
+          const bboxHeight = Math.round(height * scale);
 
           return {
             image_id: imageId,
@@ -171,6 +163,11 @@ export const detectAnimals = task({
           };
         }
       );
+
+      logger.info("Detection records prepared", {
+        imageId,
+        recordCount: detectionRecords.length,
+      });
 
       // Step 8: Insert detection records into database
       if (detectionRecords.length > 0) {

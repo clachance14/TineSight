@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useState, useMemo } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, Image as ImageIcon, X } from 'lucide-react'
+import { Upload, Image as ImageIcon, X, FileImage, Trash2, HardDrive } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import { useUploadStore } from '@/lib/stores/upload'
 import { cn } from '@/lib/utils'
 
@@ -22,8 +23,26 @@ interface PhotoUploaderProps {
 }
 
 export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) {
-  const { uploadQueue, addFiles, isUploading } = useUploadStore()
+  const { uploadQueue, addFiles, clearQueue, isUploading } = useUploadStore()
   const [rejectionWarning, setRejectionWarning] = useState<string | null>(null)
+
+  // Calculate summary stats for pending files
+  const pendingFiles = useMemo(
+    () => uploadQueue.filter((f) => f.status === 'pending'),
+    [uploadQueue]
+  )
+
+  const totalSize = useMemo(() => {
+    return pendingFiles.reduce((sum, f) => sum + f.file.size, 0)
+  }, [pendingFiles])
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+  }
 
   const generateThumbnail = useCallback(async (file: File): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -128,7 +147,6 @@ export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) 
     }
   }
 
-  const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
   const queueCount = pendingFiles.length
 
   return (
@@ -204,18 +222,64 @@ export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) 
         </div>
       )}
 
-      {/* Start upload button */}
+      {/* Upload Summary Card */}
       {queueCount > 0 && !isUploading && (
-        <div className="mt-4 flex justify-end">
-          <Button
-            onClick={handleStartUpload}
-            className="bg-copper hover:bg-copper-light text-slate-deep font-medium"
-            disabled={isUploading}
-          >
-            <Upload className="h-4 w-4" />
-            Start Upload ({queueCount})
-          </Button>
-        </div>
+        <Card className="mt-4 border-copper/30 bg-slate/50">
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              {/* Summary Info */}
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2">
+                  <div className="rounded-full bg-copper/20 p-2">
+                    <FileImage className="h-5 w-5 text-copper" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-cream">
+                      {queueCount} {queueCount === 1 ? 'photo' : 'photos'} ready
+                    </p>
+                    <p className="text-xs text-cream-dark">
+                      Selected for upload
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="rounded-full bg-slate p-2">
+                    <HardDrive className="h-5 w-5 text-cream-dark" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-cream">
+                      {formatFileSize(totalSize)}
+                    </p>
+                    <p className="text-xs text-cream-dark">
+                      Total size
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => clearQueue()}
+                  className="text-cream-dark hover:text-cream hover:bg-slate"
+                >
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Clear
+                </Button>
+                <Button
+                  onClick={handleStartUpload}
+                  className="bg-copper hover:bg-copper-light text-slate-deep font-medium"
+                >
+                  <Upload className="h-4 w-4 mr-1" />
+                  Start Upload
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   )

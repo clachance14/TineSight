@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { PhotoUploader } from '@/components/photos/photo-uploader'
 import { UploadProgressPanel } from '@/components/photos/upload-progress-panel'
 import { PhotoGrid } from '@/components/photos/photo-grid'
 import { PhotoFilters, type PhotoFilters as PhotoFiltersType } from '@/components/photos/photo-filters'
 import { PhotoViewer } from '@/components/photos/photo-viewer'
 import { usePhotos } from '@/lib/hooks/use-photos'
+import { useUploadStore } from '@/lib/stores/upload'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Camera, CheckCircle, Clock, XCircle } from 'lucide-react'
 import type { PhotoFilters as ServicePhotoFilters } from '@/lib/services/photos'
@@ -22,6 +24,106 @@ export default function PhotosPage() {
   // Photo viewer state
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null)
   const [photoIds, setPhotoIds] = useState<string[]>([])
+
+  // Query client for cache invalidation
+  const queryClient = useQueryClient()
+
+  // Upload store
+  const {
+    uploadQueue,
+    startUpload,
+    updateFileProgress,
+    markFileCompleted,
+    markFileFailed,
+  } = useUploadStore()
+
+  // Handle starting the upload
+  const handleStartUpload = useCallback(async () => {
+    const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
+    if (pendingFiles.length === 0) return
+
+    try {
+      // Step 1: Initialize batch and get signed URLs
+      const response = await fetch('/api/photos/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: pendingFiles.map((f) => ({
+            id: f.id,
+            filename: f.filename,
+            contentType: f.file.type,
+            size: f.file.size,
+          })),
+        }),
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to initialize upload')
+      }
+
+      const { batchId, uploads } = await response.json()
+
+      // Step 2: Update store with upload URLs and mark as uploading
+      startUpload(batchId, uploads)
+
+      // Step 3: Upload each file to its signed URL
+      const uploadPromises = pendingFiles.map(async (file) => {
+        const uploadInfo = uploads.find((u: { fileId: string }) => u.fileId === file.id)
+        if (!uploadInfo) {
+          markFileFailed(file.id, 'No upload URL received')
+          return
+        }
+
+        try {
+          const xhr = new XMLHttpRequest()
+
+          // Track progress
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const progress = Math.round((event.loaded / event.total) * 100)
+              updateFileProgress(file.id, progress)
+            }
+          }
+
+          await new Promise<void>((resolve, reject) => {
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve()
+              } else {
+                reject(new Error(`Upload failed: ${xhr.status}`))
+              }
+            }
+            xhr.onerror = () => reject(new Error('Network error'))
+
+            xhr.open('PUT', uploadInfo.uploadUrl)
+            xhr.setRequestHeader('Content-Type', file.file.type)
+            xhr.send(file.file)
+          })
+
+          markFileCompleted(file.id)
+        } catch (err) {
+          markFileFailed(file.id, err instanceof Error ? err.message : 'Upload failed')
+        }
+      })
+
+      await Promise.all(uploadPromises)
+
+      // Step 4: Mark batch as complete with uploaded image IDs
+      const uploadedImageIds = uploads.map((u: { imageId: string }) => u.imageId)
+      await fetch('/api/photos/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchId, uploadedImageIds }),
+      })
+
+      // Step 5: Refresh photo list to show newly uploaded photos
+      await queryClient.invalidateQueries({ queryKey: ['photos'] })
+
+    } catch (err) {
+      console.error('Upload failed:', err)
+    }
+  }, [uploadQueue, startUpload, updateFileProgress, markFileCompleted, markFileFailed, queryClient])
 
   // Convert component filters to service filters
   const serviceFilters: ServicePhotoFilters = {
@@ -132,7 +234,7 @@ export default function PhotosPage() {
       </div>
 
       {/* Upload Section */}
-      <PhotoUploader />
+      <PhotoUploader onStartUpload={handleStartUpload} />
       <UploadProgressPanel />
 
       {/* Filters */}

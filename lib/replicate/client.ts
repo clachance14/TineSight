@@ -23,15 +23,50 @@ function getReplicateClient(): Replicate {
 
 export { getReplicateClient as replicate };
 
+/**
+ * Sleep utility for retry delays
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Retry configuration for rate-limited requests
+ */
+const RETRY_CONFIG = {
+  maxRetries: 5,
+  baseDelayMs: 5000, // 5 seconds base delay
+  maxDelayMs: 30000, // 30 seconds max delay
+};
+
 // Model version configuration
 const MEGADETECTOR_VERSION = process.env['MEGADETECTOR_MODEL_VERSION'] ||
-  'latest'; // Will be updated with actual deployed model version
+  'bencevans/megadetector-v5a:cd30d71e39a456a2b43580b03c199bb305200e7c62b0054d8c9014c4e11e7259';
 
 const EMBEDDING_MODEL_VERSION = process.env['EMBEDDING_MODEL_VERSION'] ||
   'latest'; // Will be updated with MegaDescriptor or CLIP model version
 
 /**
- * Detection result from MegaDetector
+ * Raw detection result from MegaDetector API
+ */
+interface RawDetection {
+  /** Bounding box coordinates [x1, y1, x2, y2] normalized to [0, 1] */
+  bbox: number[];
+  /** Detection class: 1=animal, 2=person, 3=vehicle */
+  category: number;
+  /** Confidence score [0, 1] */
+  conf: number;
+}
+
+/** Category mapping for MegaDetector */
+const CATEGORY_MAP: Record<number, string> = {
+  1: 'animal',
+  2: 'person',
+  3: 'vehicle',
+};
+
+/**
+ * Detection result from MegaDetector (normalized)
  */
 export interface Detection {
   /** Bounding box coordinates [x, y, width, height] normalized to [0, 1] */
@@ -43,18 +78,11 @@ export interface Detection {
 }
 
 /**
- * MegaDetector output structure
+ * MegaDetector output structure (normalized)
  */
 export interface MegaDetectorOutput {
   /** Array of detected objects */
   detections: Detection[];
-  /** Processing metadata */
-  info: {
-    /** Model version used */
-    detector: string;
-    /** Image dimensions */
-    image_dimensions: [number, number];
-  };
 }
 
 /**
@@ -73,37 +101,77 @@ export interface EmbeddingOutput {
  * @throws Error if API call fails or returns invalid data
  */
 export async function runMegaDetector(imageUrl: string): Promise<MegaDetectorOutput> {
-  try {
-    const output = await getReplicateClient().run(
-      MEGADETECTOR_VERSION as `${string}/${string}:${string}`,
-      {
-        input: {
-          image: imageUrl,
-          // MegaDetector standard parameters
-          confidence_threshold: 0.1, // Low threshold, we filter server-side
-          render_boxes: false, // We render boxes client-side
-        },
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      const output = await getReplicateClient().run(
+        MEGADETECTOR_VERSION as `${string}/${string}:${string}`,
+        {
+          input: {
+            image: imageUrl,
+            conf: 0.1, // Low threshold, we filter server-side
+          },
+        }
+      );
+
+      // API returns array of detections directly
+      if (!Array.isArray(output)) {
+        throw new Error('Invalid MegaDetector output: expected array');
       }
-    );
 
-    // Validate output structure
-    if (!output || typeof output !== 'object') {
-      throw new Error('Invalid MegaDetector output: expected object');
+      const rawDetections = output as RawDetection[];
+
+      // Normalize detections: convert category integers to strings and bbox format
+      const detections: Detection[] = rawDetections.map((raw) => {
+        // Convert x1,y1,x2,y2 to x,y,width,height if needed
+        const bbox = raw.bbox;
+        const normalizedBbox: [number, number, number, number] = bbox.length === 4
+          ? [bbox[0] ?? 0, bbox[1] ?? 0, bbox[2] ?? 0, bbox[3] ?? 0]
+          : [0, 0, 0, 0];
+
+        return {
+          bbox: normalizedBbox,
+          category: CATEGORY_MAP[raw.category] ?? `unknown-${raw.category}`,
+          conf: raw.conf,
+        };
+      });
+
+      return { detections };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('unknown error');
+
+      // Check if it's a rate limit error (429)
+      const errorMessage = lastError.message;
+      const isRateLimited = errorMessage.includes('429') ||
+                           errorMessage.includes('Too Many Requests') ||
+                           errorMessage.includes('rate limit');
+
+      if (isRateLimited && attempt < RETRY_CONFIG.maxRetries - 1) {
+        // Extract retry_after from error message if available
+        const retryAfterMatch = errorMessage.match(/retry_after["\s:]+(\d+)/);
+        const retryAfter = retryAfterMatch ? parseInt(retryAfterMatch[1], 10) * 1000 : null;
+
+        // Calculate delay with exponential backoff
+        const exponentialDelay = Math.min(
+          RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt),
+          RETRY_CONFIG.maxDelayMs
+        );
+
+        // Use the larger of retry_after or exponential backoff
+        const delay = retryAfter ? Math.max(retryAfter, exponentialDelay) : exponentialDelay;
+
+        console.log(`Rate limited. Retry ${attempt + 1}/${RETRY_CONFIG.maxRetries} after ${delay}ms`);
+        await sleep(delay);
+        continue;
+      }
+
+      // Non-rate-limit error or max retries exceeded
+      break;
     }
-
-    const result = output as MegaDetectorOutput;
-
-    if (!Array.isArray(result.detections)) {
-      throw new Error('Invalid MegaDetector output: missing detections array');
-    }
-
-    return result;
-  } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(`MegaDetector failed: ${error.message}`);
-    }
-    throw new Error('MegaDetector failed: unknown error');
   }
+
+  throw new Error(`MegaDetector failed: ${lastError?.message || 'unknown error'}`);
 }
 
 /**

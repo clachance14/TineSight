@@ -1,6 +1,7 @@
 // @ts-nocheck - Supabase Database generic types not properly resolved in build context
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { detectAnimals } from "./detect-animals";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
@@ -57,17 +58,14 @@ export const batchProcess = task({
       logger.info("Batch status updated to processing", { batchId });
 
       // Fan-out: Trigger detect-animals job for each image
-      // NOTE: The detect-animals job will be created in a future task.
-      // For now, we log what would be triggered.
       logger.info("Fan-out: triggering detect-animals jobs", {
         batchId,
         imageCount: imageIds.length,
       });
 
       for (const imageId of imageIds) {
-        // TODO: Replace this with actual job trigger once detect-animals job exists
-        // Example: await detectAnimals.trigger({ imageId, batchId });
-        logger.info("Would trigger detect-animals job", {
+        await detectAnimals.trigger({ imageId, batchId });
+        logger.info("Triggered detect-animals job", {
           imageId,
           batchId,
         });

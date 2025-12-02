@@ -28,8 +28,13 @@ export function UploadProgressPanel() {
     return undefined
   }, [isUploading, uploadQueue.length, overallProgress, reset])
 
-  // Don't render if no files in queue
-  if (uploadQueue.length === 0) {
+  // Only show when uploading has started or recently completed
+  // Don't show for pending files - that's handled by PhotoUploader summary
+  const hasActiveUploads = uploadQueue.some(
+    (f) => f.status === 'uploading' || f.status === 'completed' || f.status === 'failed'
+  )
+
+  if (uploadQueue.length === 0 || !hasActiveUploads) {
     return null
   }
 
