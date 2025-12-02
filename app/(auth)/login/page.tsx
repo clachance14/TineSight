@@ -1,7 +1,24 @@
 import { LoginForm } from '@/components/auth/login-form'
-import { Suspense } from 'react'
 
-function LoginContent({ searchParams }: { searchParams: { error?: string } }) {
+function ErrorMessage({ error }: { error: string | undefined }) {
+  if (!error) return null
+
+  return (
+    <div className="rounded-md bg-destructive/10 p-3 text-center text-sm text-destructive">
+      {error === 'access_denied' && 'Access denied. Please try again.'}
+      {error === 'server_error' && 'Server error. Please try again later.'}
+      {error !== 'access_denied' && error !== 'server_error' && 'Authentication error. Please try again.'}
+    </div>
+  )
+}
+
+export default async function LoginPage({
+  searchParams
+}: {
+  searchParams: Promise<{ error?: string }>
+}) {
+  const params = await searchParams
+
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-md space-y-8">
@@ -12,28 +29,10 @@ function LoginContent({ searchParams }: { searchParams: { error?: string } }) {
           </p>
         </div>
 
-        {searchParams.error && (
-          <div className="rounded-md bg-destructive/10 p-3 text-center text-sm text-destructive">
-            {searchParams.error === 'access_denied' && 'Access denied. Please try again.'}
-            {searchParams.error === 'server_error' && 'Server error. Please try again later.'}
-            {searchParams.error !== 'access_denied' && searchParams.error !== 'server_error' && 'Authentication error. Please try again.'}
-          </div>
-        )}
+        <ErrorMessage error={params.error} />
 
         <LoginForm />
       </div>
     </div>
-  )
-}
-
-export default function LoginPage({ searchParams }: { searchParams: { error?: string } }) {
-  return (
-    <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
-      </div>
-    }>
-      <LoginContent searchParams={searchParams} />
-    </Suspense>
   )
 }

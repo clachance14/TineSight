@@ -116,6 +116,10 @@ export interface Database {
           confidence: number | null
           is_archived: boolean
           created_at: string
+          batch_id: string | null
+          retry_count: number
+          error_message: string | null
+          thumbnail_path: string | null
         }
         Insert: {
           id?: string
@@ -130,6 +134,10 @@ export interface Database {
           confidence?: number | null
           is_archived?: boolean
           created_at?: string
+          batch_id?: string | null
+          retry_count?: number
+          error_message?: string | null
+          thumbnail_path?: string | null
         }
         Update: {
           id?: string
@@ -144,6 +152,10 @@ export interface Database {
           confidence?: number | null
           is_archived?: boolean
           created_at?: string
+          batch_id?: string | null
+          retry_count?: number
+          error_message?: string | null
+          thumbnail_path?: string | null
         }
       }
       deer: {
@@ -231,23 +243,93 @@ export interface Database {
       deer_embeddings: {
         Row: {
           id: string
-          deer_id: string
+          deer_id: string | null
           detection_id: string
           embedding: number[]
           created_at: string
         }
         Insert: {
           id?: string
-          deer_id: string
+          deer_id?: string | null
           detection_id: string
           embedding: number[]
           created_at?: string
         }
         Update: {
           id?: string
-          deer_id?: string
+          deer_id?: string | null
           detection_id?: string
           embedding?: number[]
+          created_at?: string
+        }
+      }
+      processing_batches: {
+        Row: {
+          id: string
+          user_id: string
+          status: string
+          total_images: number
+          uploaded_images: number
+          processed_images: number
+          successful_images: number
+          failed_images: number
+          error_message: string | null
+          created_at: string
+          completed_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          status?: string
+          total_images?: number
+          uploaded_images?: number
+          processed_images?: number
+          successful_images?: number
+          failed_images?: number
+          error_message?: string | null
+          created_at?: string
+          completed_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          status?: string
+          total_images?: number
+          uploaded_images?: number
+          processed_images?: number
+          successful_images?: number
+          failed_images?: number
+          error_message?: string | null
+          created_at?: string
+          completed_at?: string | null
+        }
+      }
+      match_candidates: {
+        Row: {
+          id: string
+          detection_id: string
+          candidate_deer_id: string
+          similarity_score: number
+          status: string
+          reviewed_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          detection_id: string
+          candidate_deer_id: string
+          similarity_score: number
+          status?: string
+          reviewed_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          detection_id?: string
+          candidate_deer_id?: string
+          similarity_score?: number
+          status?: string
+          reviewed_at?: string | null
           created_at?: string
         }
       }
@@ -261,6 +343,31 @@ export interface Database {
           account_owner_id: string
         }
         Returns: boolean
+      }
+      find_similar_deer: {
+        Args: {
+          query_embedding: number[]
+          query_user_id: string
+          match_count?: number
+          similarity_threshold?: number
+        }
+        Returns: {
+          deer_id: string
+          deer_name: string | null
+          similarity: number
+          detection_id: string
+          image_id: string
+          image_path: string
+        }[]
+      }
+      increment_batch_counters: {
+        Args: {
+          batch_id: string
+          increment_processed?: number
+          increment_successful?: number
+          increment_failed?: number
+        }
+        Returns: undefined
       }
     }
     Enums: {
@@ -301,8 +408,18 @@ export type DeerEmbedding = Database['public']['Tables']['deer_embeddings']['Row
 export type DeerEmbeddingInsert = Database['public']['Tables']['deer_embeddings']['Insert']
 export type DeerEmbeddingUpdate = Database['public']['Tables']['deer_embeddings']['Update']
 
+export type ProcessingBatch = Database['public']['Tables']['processing_batches']['Row']
+export type ProcessingBatchInsert = Database['public']['Tables']['processing_batches']['Insert']
+export type ProcessingBatchUpdate = Database['public']['Tables']['processing_batches']['Update']
+
+export type MatchCandidate = Database['public']['Tables']['match_candidates']['Row']
+export type MatchCandidateInsert = Database['public']['Tables']['match_candidates']['Insert']
+export type MatchCandidateUpdate = Database['public']['Tables']['match_candidates']['Update']
+
 // Enum types for constrained fields
 export type SubscriptionTier = 'free' | 'pro' | 'ranch'
 export type TeamMemberRole = 'owner' | 'viewer'
 export type DetectionStatus = 'pending' | 'processing' | 'completed' | 'failed'
 export type DeerStatus = 'watching' | 'target' | 'harvested'
+export type BatchStatus = 'pending' | 'uploading' | 'processing' | 'completed' | 'partial_error' | 'failed'
+export type MatchCandidateStatus = 'pending' | 'confirmed' | 'rejected'
