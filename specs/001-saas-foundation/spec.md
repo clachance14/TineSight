@@ -3,6 +3,23 @@
 **Feature Branch**: `001-saas-foundation`
 **Created**: 2025-12-01
 **Status**: Draft
+**MVP Phase**: 0-1 (Infrastructure + Auth)
+
+## Product Context
+
+This feature implements **Phases 0-1** of the TineSight MVP as defined in the [Product Vision](../../.specify/memory/product-vision.md).
+
+| Aspect | Summary |
+|--------|---------|
+| **Problem** | Hunting lease operators waste hours sorting game camera photos and can't track individual bucks |
+| **Target User** | Hunting lease operator running commercial hunting operation |
+| **North Star** | First Buck Re-Identified (AI matches buck across photos, user confirms) |
+| **This Feature** | Foundation infrastructure enabling future photo upload and AI identification |
+
+This feature establishes the authentication, database schema, and navigation shell. It does not deliver the core value proposition directly but is a prerequisite for all subsequent features.
+
+---
+
 **Input**: User description: "Minimal SaaS Foundation with Auth, Database, and Dashboard - Auth + DB + layout only (defer Stripe payments)"
 
 ## User Scenarios & Testing *(mandatory)*

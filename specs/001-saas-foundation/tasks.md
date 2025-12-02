@@ -19,13 +19,13 @@
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Initialize Next.js 14 project with TypeScript, Tailwind, ESLint, App Router in repository root
-- [ ] T002 Install core dependencies: @supabase/supabase-js, @supabase/ssr, lucide-react, @tanstack/react-query, zustand, react-hook-form, zod, @hookform/resolvers
-- [ ] T003 Install dev dependencies: supabase CLI
-- [ ] T004 Initialize shadcn/ui with default style, slate base color, CSS variables
-- [ ] T005 Install shadcn/ui components: button, card, input, label, form, avatar, dropdown-menu, separator
-- [ ] T006 [P] Create .env.local with Supabase environment variables template
-- [ ] T007 [P] Create .env.example documenting required environment variables
+- [x] T001 Initialize Next.js 14 project with TypeScript, Tailwind, ESLint, App Router in repository root
+- [x] T002 Install core dependencies: @supabase/supabase-js, @supabase/ssr, lucide-react, @tanstack/react-query, zustand, react-hook-form, zod, @hookform/resolvers
+- [x] T003 Install dev dependencies: supabase CLI
+- [x] T004 Initialize shadcn/ui with default style, slate base color, CSS variables
+- [x] T005 Install shadcn/ui components: button, card, input, label, form, avatar, dropdown-menu, separator
+- [x] T006 [P] Create .env.local with Supabase environment variables template
+- [x] T007 [P] Create .env.example documenting required environment variables
 
 ---
 
@@ -37,37 +37,37 @@
 
 ### Database & Types
 
-- [ ] T008 Create database migration supabase/migrations/001_initial_schema.sql with all tables (profiles, team_members, cameras, images, deer, detections, deer_embeddings)
-- [ ] T009 Add RLS policies to 001_initial_schema.sql for all tables using auth.uid() checks
-- [ ] T010 Add has_account_access() helper function to 001_initial_schema.sql
-- [ ] T011 Add handle_new_user() trigger function and trigger to 001_initial_schema.sql
-- [ ] T012 Create types/database.ts placeholder for Supabase generated types
-- [ ] T013 Create types/index.ts to export type definitions
+- [x] T008 Create database migration supabase/migrations/001_initial_schema.sql with all tables (profiles, team_members, cameras, images, deer, detections, deer_embeddings)
+- [x] T009 Add RLS policies to 001_initial_schema.sql for all tables using auth.uid() checks
+- [x] T010 Add has_account_access() helper function to 001_initial_schema.sql
+- [x] T011 Add handle_new_user() trigger function and trigger to 001_initial_schema.sql
+- [x] T012 Create types/database.ts placeholder for Supabase generated types
+- [x] T013 Create types/index.ts to export type definitions
 
 ### Supabase Client Utilities
 
-- [ ] T014 [P] Create lib/supabase/client.ts with browser client using createBrowserClient
-- [ ] T015 [P] Create lib/supabase/server.ts with server component client using createServerClient
-- [ ] T016 [P] Create lib/supabase/middleware.ts with middleware client helper
-- [ ] T017 Create lib/utils.ts with cn() utility function for className merging
+- [x] T014 [P] Create lib/supabase/client.ts with browser client using createBrowserClient
+- [x] T015 [P] Create lib/supabase/server.ts with server component client using createServerClient
+- [x] T016 [P] Create lib/supabase/middleware.ts with middleware client helper
+- [x] T017 Create lib/utils.ts with cn() utility function for className merging
 
 ### Service Layer & State
 
-- [ ] T017a [P] Create lib/services/auth.ts with login, signup, logout, getUser service functions
-- [ ] T017b [P] Create lib/services/profile.ts with getProfile, updateProfile service functions
-- [ ] T017c [P] Create lib/stores/ui.ts Zustand store for sidebar state, modals
-- [ ] T017d Create lib/query-client.ts with QueryClient configuration for TanStack Query
+- [x] T017a [P] Create lib/services/auth.ts with login, signup, logout, getUser service functions
+- [x] T017b [P] Create lib/services/profile.ts with getProfile, updateProfile service functions
+- [x] T017c [P] Create lib/stores/ui.ts Zustand store for sidebar state, modals
+- [x] T017d Create lib/query-client.ts with QueryClient configuration for TanStack Query
 
 ### Middleware & Design System
 
-- [ ] T018 Create middleware.ts at project root with route protection and session refresh
-- [ ] T019 Update tailwind.config.ts with TineSight color palette (slate-deep, slate, slate-light, copper, copper-light, cream, cream-dark)
-- [ ] T020 Update app/globals.css with TineSight design system CSS variables
+- [x] T018 Create middleware.ts at project root with route protection and session refresh
+- [x] T019 Update tailwind.config.ts with TineSight color palette (slate-deep, slate, slate-light, copper, copper-light, cream, cream-dark)
+- [x] T020 Update app/globals.css with TineSight design system CSS variables
 
 ### Root Layout & Landing
 
-- [ ] T021 Create app/layout.tsx root layout with metadata, fonts (Inter sans, JetBrains Mono mono per Constitution VII), QueryClientProvider, and global providers
-- [ ] T022 Create app/page.tsx landing page that redirects to /dashboard or /login based on auth status
+- [x] T021 Create app/layout.tsx root layout with metadata, fonts (Inter sans, JetBrains Mono mono per Constitution VII), QueryClientProvider, and global providers
+- [x] T022 Create app/page.tsx landing page that redirects to /dashboard or /login based on auth status
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -81,10 +81,10 @@
 
 ### Implementation for User Story 1
 
-- [ ] T023 Create app/(auth)/layout.tsx with centered auth layout styling
-- [ ] T024 [P] [US1] Create components/auth/signup-form.tsx with email, password, full_name fields and validation
-- [ ] T025 [US1] Create app/(auth)/signup/page.tsx with SignupForm component and link to login
-- [ ] T026 [US1] Create app/auth/callback/route.ts to handle OAuth/magic link callback and exchange code for session
+- [x] T023 Create app/(auth)/layout.tsx with centered auth layout styling
+- [x] T024 [P] [US1] Create components/auth/signup-form.tsx with email, password, full_name fields and validation
+- [x] T025 [US1] Create app/(auth)/signup/page.tsx with SignupForm component and link to login
+- [x] T026 [US1] Create app/auth/callback/route.ts to handle OAuth/magic link callback and exchange code for session
 
 **Checkpoint**: User Story 1 complete - signup flow functional, email confirmation works
 
@@ -98,9 +98,9 @@
 
 ### Implementation for User Story 2
 
-- [ ] T027 [P] [US2] Create components/auth/login-form.tsx with email, password fields and validation
-- [ ] T028 [US2] Create app/(auth)/login/page.tsx with LoginForm component and links to signup/forgot-password
-- [ ] T029 [US2] Add signOut action to header user menu (component created in US4, action added here)
+- [x] T027 [P] [US2] Create components/auth/login-form.tsx with email, password fields and validation
+- [x] T028 [US2] Create app/(auth)/login/page.tsx with LoginForm component and links to signup/forgot-password
+- [x] T029 [US2] Add signOut action to header user menu (component created in US4, action added here)
 
 **Checkpoint**: User Stories 1 AND 2 complete - full signup/login/logout flow works
 
@@ -114,9 +114,9 @@
 
 ### Implementation for User Story 3
 
-- [ ] T030 [P] [US3] Create components/auth/forgot-password-form.tsx with email field and reset request
-- [ ] T031 [US3] Create app/(auth)/forgot-password/page.tsx with ForgotPasswordForm component
-- [ ] T032 [US3] Create app/(auth)/reset-password/page.tsx to handle password update after reset link click
+- [x] T030 [P] [US3] Create components/auth/forgot-password-form.tsx with email field and reset request
+- [x] T031 [US3] Create app/(auth)/forgot-password/page.tsx with ForgotPasswordForm component
+- [x] T032 [US3] Create app/(auth)/reset-password/page.tsx to handle password update after reset link click
 
 **Checkpoint**: User Story 3 complete - password reset flow works end-to-end
 
@@ -130,14 +130,14 @@
 
 ### Implementation for User Story 4
 
-- [ ] T033 Create app/(dashboard)/layout.tsx with sidebar and header layout structure
-- [ ] T034 [P] [US4] Create components/dashboard/sidebar.tsx with navigation items (Dashboard, Photos, Deer, Cameras, Settings)
-- [ ] T035 [P] [US4] Create components/dashboard/header.tsx with user dropdown menu (Settings, Sign Out)
-- [ ] T036 [US4] Create app/(dashboard)/dashboard/page.tsx main dashboard placeholder
-- [ ] T037 [P] [US4] Create app/(dashboard)/photos/page.tsx placeholder page
-- [ ] T038 [P] [US4] Create app/(dashboard)/deer/page.tsx placeholder page
-- [ ] T039 [P] [US4] Create app/(dashboard)/cameras/page.tsx placeholder page
-- [ ] T040 [US4] Create app/(dashboard)/settings/page.tsx settings page shell
+- [x] T033 Create app/(dashboard)/layout.tsx with sidebar and header layout structure
+- [x] T034 [P] [US4] Create components/dashboard/sidebar.tsx with navigation items (Dashboard, Photos, Deer, Cameras, Settings)
+- [x] T035 [P] [US4] Create components/dashboard/header.tsx with user dropdown menu (Settings, Sign Out)
+- [x] T036 [US4] Create app/(dashboard)/dashboard/page.tsx main dashboard placeholder
+- [x] T037 [P] [US4] Create app/(dashboard)/photos/page.tsx placeholder page
+- [x] T038 [P] [US4] Create app/(dashboard)/deer/page.tsx placeholder page
+- [x] T039 [P] [US4] Create app/(dashboard)/cameras/page.tsx placeholder page
+- [x] T040 [US4] Create app/(dashboard)/settings/page.tsx settings page shell
 
 **Checkpoint**: User Story 4 complete - navigation between all sections works
 
@@ -151,8 +151,8 @@
 
 ### Implementation for User Story 5
 
-- [ ] T041 [US5] Update components/dashboard/header.tsx to fetch and display user initials in avatar
-- [ ] T042 [US5] Update app/(dashboard)/settings/page.tsx to display profile section with email, name, subscription tier
+- [x] T041 [US5] Update components/dashboard/header.tsx to fetch and display user initials in avatar
+- [x] T042 [US5] Update app/(dashboard)/settings/page.tsx to display profile section with email, name, subscription tier
 
 **Checkpoint**: All user stories complete - full SaaS foundation functional
 
@@ -162,8 +162,8 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T043 Apply database migration: run `npx supabase db push` (if linked) OR paste supabase/migrations/001_initial_schema.sql into Supabase Dashboard SQL Editor
-- [ ] T044 Generate TypeScript types: npx supabase gen types typescript --local > types/database.ts (requires local Supabase) OR use Supabase Dashboard > API Docs > TypeScript types
+- [x] T043 Apply database migration: run `npx supabase db push` (if linked) OR paste supabase/migrations/001_initial_schema.sql into Supabase Dashboard SQL Editor
+- [x] T044 Generate TypeScript types: npx supabase gen types typescript --local > types/database.ts (requires local Supabase) OR use Supabase Dashboard > API Docs > TypeScript types
 - [ ] T045 Run quickstart.md validation checklist manually
 - [ ] T046 Verify all RLS policies working correctly
 - [ ] T047 Test complete user flow: signup → confirm → login → navigate → settings → logout

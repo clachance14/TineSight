@@ -131,9 +131,15 @@ Links users to accounts for collaboration. UI deferred.
 | last_seen | DATE | nullable | Most recent sighting |
 | notes | TEXT | nullable | User notes |
 | tags | TEXT[] | nullable | Tags array |
+| status | TEXT | DEFAULT 'watching' | watching, target, harvested |
+| harvested_at | TIMESTAMPTZ | nullable | Date when harvested |
 | representative_image_id | UUID | nullable | Primary photo |
 | created_at | TIMESTAMPTZ | DEFAULT NOW() | |
 | updated_at | TIMESTAMPTZ | DEFAULT NOW() | |
+
+**Validation Rules**:
+- status: CHECK (status IN ('watching', 'target', 'harvested'))
+- harvested_at: Should be set when status = 'harvested', NULL otherwise
 
 ---
 
@@ -188,6 +194,14 @@ ranch → free (via cancellation/expiry)
 (any) → (deleted) → row removed
 ```
 *Note: Team invitation UI deferred - schema only*
+
+### Deer Status
+```
+watching → target (user marks as target buck)
+target → harvested (user marks as harvested, sets harvested_at)
+watching → harvested (user marks as harvested directly)
+harvested → watching (user corrects mistake, clears harvested_at)
+```
 
 ---
 

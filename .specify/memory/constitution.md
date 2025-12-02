@@ -18,6 +18,12 @@ Follow-up TODOs: None
 
 # TineSight Constitution
 
+## Product Context
+
+This constitution governs technical implementation of the TineSight product vision. For problem definition, target users, success metrics, and competitive positioning, see the [Product Vision](./product-vision.md).
+
+**Summary**: TineSight helps hunting lease operators build a catalog of trophy bucks using AI-powered re-identification, enabling them to attract and close lease deals. The North Star metric is **First Buck Re-Identified**.
+
 ## Core Principles
 
 ### I. Serverless-First Architecture
