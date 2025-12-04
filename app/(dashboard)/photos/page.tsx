@@ -19,6 +19,7 @@ export default function PhotosPage() {
     status: 'all',
     hasDeer: null,
     batchId: undefined,
+    qualityStatus: 'all',
   })
 
   // Photo viewer state
@@ -31,6 +32,7 @@ export default function PhotosPage() {
   // Upload store
   const {
     uploadQueue,
+    setIsPreparing,
     startUpload,
     updateFileProgress,
     markFileCompleted,
@@ -41,6 +43,9 @@ export default function PhotosPage() {
   const handleStartUpload = useCallback(async () => {
     const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
     if (pendingFiles.length === 0) return
+
+    // Show preparing state immediately
+    setIsPreparing(true)
 
     try {
       // Step 1: Initialize batch and get signed URLs
@@ -109,27 +114,39 @@ export default function PhotosPage() {
 
       await Promise.all(uploadPromises)
 
-      // Step 4: Mark batch as complete with uploaded image IDs
-      const uploadedImageIds = uploads.map((u: { imageId: string }) => u.imageId)
-      await fetch('/api/photos/upload/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batchId, uploadedImageIds }),
+      // Step 4: Mark batch as complete with ONLY successfully uploaded image IDs
+      // Get the current state of the upload queue to check which files succeeded
+      const currentQueue = useUploadStore.getState().uploadQueue
+      const successfulUploads = uploads.filter((u: { fileId: string; imageId: string }) => {
+        const file = currentQueue.find(f => f.id === u.fileId)
+        return file?.status === 'completed'
       })
+      const uploadedImageIds = successfulUploads.map((u: { imageId: string }) => u.imageId)
+
+      // Only trigger batch processing if at least one file was uploaded
+      if (uploadedImageIds.length > 0) {
+        await fetch('/api/photos/upload/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batchId, uploadedImageIds }),
+        })
+      }
 
       // Step 5: Refresh photo list to show newly uploaded photos
       await queryClient.invalidateQueries({ queryKey: ['photos'] })
 
     } catch (err) {
       console.error('Upload failed:', err)
+      setIsPreparing(false)
     }
-  }, [uploadQueue, startUpload, updateFileProgress, markFileCompleted, markFileFailed, queryClient])
+  }, [uploadQueue, setIsPreparing, startUpload, updateFileProgress, markFileCompleted, markFileFailed, queryClient])
 
   // Convert component filters to service filters
   const serviceFilters: ServicePhotoFilters = {
     ...(filters.status !== 'all' && filters.status !== undefined ? { status: filters.status } : {}),
     ...(filters.hasDeer !== null && filters.hasDeer !== undefined ? { hasDeer: filters.hasDeer } : {}),
     ...(filters.batchId !== undefined ? { batchId: filters.batchId } : {}),
+    ...(filters.qualityStatus !== 'all' && filters.qualityStatus !== undefined ? { qualityStatus: filters.qualityStatus } : {}),
     limit: 50,
   }
 

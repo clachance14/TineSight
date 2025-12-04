@@ -39,6 +39,11 @@ interface DetectAnimalsPayload {
 
 export const detectAnimals = task({
   id: "detect-animals",
+  // Limit concurrent Replicate API calls to avoid rate limiting
+  // Replicate allows 600 req/min but burst behavior can cause 429s
+  queue: {
+    concurrencyLimit: 5,
+  },
   retry: {
     maxAttempts: 3,
     factor: 2,

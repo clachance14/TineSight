@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 export function UploadProgressPanel() {
   const {
     uploadQueue,
+    isPreparing,
     isUploading,
     overallProgress,
     completedCount,
@@ -28,17 +29,17 @@ export function UploadProgressPanel() {
     return undefined
   }, [isUploading, uploadQueue.length, overallProgress, reset])
 
-  // Only show when uploading has started or recently completed
+  // Only show when preparing, uploading, or recently completed
   // Don't show for pending files - that's handled by PhotoUploader summary
   const hasActiveUploads = uploadQueue.some(
     (f) => f.status === 'uploading' || f.status === 'completed' || f.status === 'failed'
   )
 
-  if (uploadQueue.length === 0 || !hasActiveUploads) {
+  if (!isPreparing && (uploadQueue.length === 0 || !hasActiveUploads)) {
     return null
   }
 
-  const allComplete = !isUploading && overallProgress === 100
+  const allComplete = !isUploading && !isPreparing && overallProgress === 100
 
   return (
     <div className="fixed bottom-6 right-6 z-50 w-96 animate-in slide-in-from-bottom-4">
@@ -46,7 +47,7 @@ export function UploadProgressPanel() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold">
-              {allComplete ? 'Upload Complete' : 'Uploading Photos'}
+              {allComplete ? 'Upload Complete' : isPreparing ? 'Preparing Upload...' : 'Uploading Photos'}
             </CardTitle>
             <button
               onClick={() => reset()}
@@ -58,37 +59,49 @@ export function UploadProgressPanel() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Overall Progress */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                {completedCount} of {totalCount} complete
-                {failedCount > 0 && (
-                  <span className="text-destructive ml-2">
-                    ({failedCount} failed)
+          {isPreparing && !isUploading ? (
+            /* Preparing State */
+            <div className="flex items-center gap-3 py-2">
+              <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />
+              <span className="text-sm text-muted-foreground">
+                Initializing upload for {uploadQueue.filter(f => f.status === 'pending').length} photos...
+              </span>
+            </div>
+          ) : (
+            <>
+              {/* Overall Progress */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    {completedCount} of {totalCount} complete
+                    {failedCount > 0 && (
+                      <span className="text-destructive ml-2">
+                        ({failedCount} failed)
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-              <span className="font-medium text-foreground">
-                {overallProgress}%
-              </span>
-            </div>
-            <ProgressBar progress={overallProgress} />
-          </div>
+                  <span className="font-medium text-foreground">
+                    {overallProgress}%
+                  </span>
+                </div>
+                <ProgressBar progress={overallProgress} />
+              </div>
 
-          {/* Individual File Progress */}
-          <div className="space-y-2 max-h-60 overflow-y-auto">
-            {uploadQueue.map((file) => (
-              <FileProgressItem key={file.id} file={file} />
-            ))}
-          </div>
+              {/* Individual File Progress */}
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {uploadQueue.map((file) => (
+                  <FileProgressItem key={file.id} file={file} />
+                ))}
+              </div>
 
-          {/* Success Message */}
-          {allComplete && (
-            <div className="flex items-center gap-2 text-sm text-primary">
-              <CheckCircle2 className="h-4 w-4" />
-              <span>All photos uploaded successfully</span>
-            </div>
+              {/* Success Message */}
+              {allComplete && (
+                <div className="flex items-center gap-2 text-sm text-primary">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>All photos uploaded successfully</span>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

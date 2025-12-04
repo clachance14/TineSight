@@ -117,11 +117,11 @@ export function usePhotos(filters?: PhotoFilters) {
       return res.json()
     },
     refetchInterval: (query) => {
-      // Auto-refetch every 2 seconds if any photos are in 'processing' status
-      const hasProcessing = query.state.data?.photos?.some(
-        (p) => p.detection_status === 'processing'
+      // Auto-refetch every 3 seconds if any photos are pending or processing
+      const hasActivePhotos = query.state.data?.photos?.some(
+        (p) => p.detection_status === 'pending' || p.detection_status === 'processing'
       )
-      return hasProcessing ? 2000 : false
+      return hasActivePhotos ? 3000 : false
     },
   })
 }

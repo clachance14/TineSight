@@ -1,12 +1,20 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { X } from "lucide-react"
 
 export interface PhotoFilters {
   status?: 'all' | 'processing' | 'completed' | 'failed' | undefined
   hasDeer?: boolean | null | undefined
   batchId?: string | undefined
+  qualityStatus?: 'all' | 'high_quality' | 'low_quality' | 'manual_review' | 'pending' | undefined
 }
 
 interface PhotoFiltersProps {
@@ -18,7 +26,8 @@ export function PhotoFilters({ filters, onFiltersChange }: PhotoFiltersProps) {
   const hasActiveFilters =
     (filters.status && filters.status !== 'all') ||
     filters.hasDeer !== null ||
-    filters.batchId
+    filters.batchId ||
+    (filters.qualityStatus && filters.qualityStatus !== 'all')
 
   const handleStatusChange = (status: PhotoFilters['status']) => {
     onFiltersChange({ ...filters, status })
@@ -28,11 +37,17 @@ export function PhotoFilters({ filters, onFiltersChange }: PhotoFiltersProps) {
     onFiltersChange({ ...filters, hasDeer })
   }
 
+  const handleQualityStatusChange = (value: string) => {
+    const qualityStatus = value as PhotoFilters['qualityStatus']
+    onFiltersChange({ ...filters, qualityStatus })
+  }
+
   const clearFilters = () => {
     onFiltersChange({
       status: 'all',
       hasDeer: null,
       batchId: undefined,
+      qualityStatus: 'all',
     })
   }
 
@@ -41,6 +56,7 @@ export function PhotoFilters({ filters, onFiltersChange }: PhotoFiltersProps) {
     if (filters.status && filters.status !== 'all') count++
     if (filters.hasDeer !== null) count++
     if (filters.batchId) count++
+    if (filters.qualityStatus && filters.qualityStatus !== 'all') count++
     return count
   }
 
@@ -122,6 +138,28 @@ export function PhotoFilters({ filters, onFiltersChange }: PhotoFiltersProps) {
         </div>
       </div>
 
+      {/* Quality Status Filter */}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-muted-foreground">
+          Quality Status
+        </label>
+        <Select
+          value={filters.qualityStatus || 'all'}
+          onValueChange={handleQualityStatusChange}
+        >
+          <SelectTrigger className="h-8 w-[180px] text-xs">
+            <SelectValue placeholder="All Quality" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Quality</SelectItem>
+            <SelectItem value="high_quality">High Quality</SelectItem>
+            <SelectItem value="low_quality">Low Quality</SelectItem>
+            <SelectItem value="manual_review">Manual Review</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* Active Filters Summary */}
       {hasActiveFilters && (
         <div className="space-y-2 border-t border-border pt-4">
@@ -166,6 +204,23 @@ export function PhotoFilters({ filters, onFiltersChange }: PhotoFiltersProps) {
                   onClick={() => onFiltersChange({ ...filters, batchId: undefined })}
                   className="ml-1 hover:text-foreground"
                   aria-label="Remove batch filter"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            )}
+            {filters.qualityStatus && filters.qualityStatus !== 'all' && (
+              <div className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs">
+                <span className="text-foreground">
+                  Quality:{' '}
+                  <span className="font-medium capitalize">
+                    {filters.qualityStatus.replace('_', ' ')}
+                  </span>
+                </span>
+                <button
+                  onClick={() => handleQualityStatusChange('all')}
+                  className="ml-1 hover:text-foreground"
+                  aria-label="Remove quality status filter"
                 >
                   <X className="size-3" />
                 </button>

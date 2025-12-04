@@ -8,6 +8,7 @@ export interface PhotoFilters {
   batchId?: string
   cameraId?: string
   isArchived?: boolean
+  qualityStatus?: string
   limit?: number
   offset?: number
 }
@@ -48,7 +49,68 @@ export async function getPhotos(
 }> {
   const supabase = await createClient()
 
-  // Build query with filters
+  // If filtering by quality status, we need to join with detections
+  if (filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all') {
+    // Use a subquery approach: get image IDs that have detections with the specified quality status
+    const { data: detections, error: detectionsError } = await supabase
+      .from('detections')
+      .select('image_id')
+      .eq('quality_status', filters.qualityStatus)
+
+    if (detectionsError !== null) {
+      return { data: null, error: detectionsError, count: null }
+    }
+
+    const imageIds = [...new Set((detections ?? []).map((d: { image_id: string }) => d.image_id))]
+
+    if (imageIds.length === 0) {
+      return { data: [], error: null, count: 0 }
+    }
+
+    // Build query with image ID filter
+    let query = supabase
+      .from('images')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId)
+      .in('id', imageIds)
+      .order('created_at', { ascending: false })
+
+    // Apply other filters
+    if (filters?.status !== undefined) {
+      query = query.eq('detection_status', filters.status)
+    }
+
+    if (filters?.hasDeer !== undefined) {
+      if (filters.hasDeer) {
+        query = query.not('classification', 'is', null)
+      } else {
+        query = query.is('classification', null)
+      }
+    }
+
+    if (filters?.cameraId !== undefined) {
+      query = query.eq('camera_id', filters.cameraId)
+    }
+
+    if (filters?.isArchived !== undefined) {
+      query = query.eq('is_archived', filters.isArchived)
+    }
+
+    // Apply pagination
+    const limit = filters?.limit ?? 50
+    const offset = filters?.offset ?? 0
+    query = query.range(offset, offset + limit - 1)
+
+    const { data, error, count } = await query
+
+    if (error !== null) {
+      return { data: null, error, count: null }
+    }
+
+    return { data, error: null, count }
+  }
+
+  // Standard query without quality status filter
   let query = supabase
     .from('images')
     .select('*', { count: 'exact' })

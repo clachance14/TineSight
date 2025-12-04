@@ -37,6 +37,21 @@ npx supabase link --project-ref <ref>                # Link to project
 npx supabase gen types typescript --linked > types/database.ts  # Generate types
 ```
 
+Trigger.dev (v3/v4):
+```bash
+npx trigger.dev@latest dev         # Start local Trigger.dev worker
+# Config: trigger.config.ts | Jobs: ./trigger/
+# Note: `npx trigger dev` and `npx @trigger.dev/cli dev` are WRONG commands
+```
+
+Utility scripts (in `scripts/`):
+```bash
+node scripts/cleanup-orphans.mjs   # Delete failed images
+node scripts/check-replicate.mjs   # Verify Replicate API status
+node scripts/retry-failed.mjs      # Reset failed images and retry
+node scripts/trigger-batch.mjs     # Trigger batch processing
+```
+
 ## Architecture
 
 ### Stack
@@ -82,6 +97,13 @@ lib/
 trigger/
 └── jobs/             # Background jobs (process-photo, generate-embedding)
 
+scripts/
+├── env.mjs           # Dotenv loader for .env.local
+├── cleanup-orphans.mjs
+├── check-replicate.mjs
+├── retry-failed.mjs
+└── trigger-batch.mjs
+
 tests/
 ├── e2e/              # Playwright (run in CI)
 └── integration/      # Service tests
@@ -100,6 +122,12 @@ middleware.ts         # Route protection
 **Route Protection**: `middleware.ts` at project root handles auth redirects. Protected routes in `(dashboard)/` group.
 
 **Row-Level Security**: REQUIRED on all tables. Use `auth.uid()` for ownership checks. Use `has_account_access()` helper for team member access.
+
+**Utility Scripts**: Scripts in `scripts/` use dotenv for env loading. Pattern:
+```javascript
+import './env.mjs'  // Loads .env.local via dotenv
+// Then use process.env.VAR_NAME
+```
 
 ## Constitution Principles
 
@@ -154,3 +182,10 @@ Copy `.env.example` to `.env.local` and configure:
 - `NEXT_PUBLIC_SUPABASE_URL` - Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Public anon key
 - `SUPABASE_SERVICE_ROLE_KEY` - Server-only service role key
+
+## Active Technologies
+- TypeScript 5.x (strict mode) + Next.js 14 (App Router), React 18, TanStack Query, Trigger.dev, Sharp (image processing) (003-roi-quality-filter)
+- PostgreSQL via Supabase with pgvector extension, Supabase Storage for images (003-roi-quality-filter)
+
+## Recent Changes
+- 003-roi-quality-filter: Added TypeScript 5.x (strict mode) + Next.js 14 (App Router), React 18, TanStack Query, Trigger.dev, Sharp (image processing)

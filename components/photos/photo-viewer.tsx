@@ -5,6 +5,7 @@ import { X, ChevronLeft, ChevronRight, Calendar, Camera, FileImage } from 'lucid
 import { usePhotoDetail } from '@/lib/hooks/use-photos'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { DetectionOverlay } from './detection-overlay'
 
 interface PhotoViewerProps {
   photoId: string | null
@@ -127,17 +128,34 @@ export function PhotoViewer({ photoId, onClose, onNavigate }: PhotoViewerProps) 
 
           {/* Photo Display */}
           {photo && !isLoading && !error && (
-            <div className="relative max-w-full max-h-full flex items-center justify-center">
-              <img
-                src={`/api/photos/${photo.id}/view`}
-                alt="Full size photo"
-                className="max-w-full max-h-[calc(100vh-4rem)] object-contain rounded-lg shadow-2xl"
-              />
+            <div className="relative flex items-center justify-center max-w-full max-h-full">
+              {/* Image wrapper - shrinks to fit the image exactly */}
+              <div className="relative">
+                <img
+                  src={`/api/photos/${photo.id}/view`}
+                  alt="Full size photo"
+                  className="max-w-full max-h-[calc(100vh-4rem)] rounded-lg shadow-2xl block"
+                />
 
-              {/* TODO: Add DetectionOverlay when available */}
-              {/* {photo.detections && photo.detections.length > 0 && (
-                <DetectionOverlay detections={photo.detections} />
-              )} */}
+                {/* Detection Overlay - uses percentage positioning */}
+                {photo.detections && photo.detections.length > 0 && (
+                  <DetectionOverlay
+                    detections={photo.detections.map(d => ({
+                      id: d.id,
+                      bboxX: d.bbox_x ?? 0,
+                      bboxY: d.bbox_y ?? 0,
+                      bboxWidth: d.bbox_width ?? 0,
+                      bboxHeight: d.bbox_height ?? 0,
+                      confidence: d.confidence ?? 0,
+                      class: d.class_name ?? null,
+                      deerId: null,
+                    }))}
+                    imageWidth={10000}
+                    imageHeight={10000}
+                    visible={true}
+                  />
+                )}
+              </div>
             </div>
           )}
         </div>

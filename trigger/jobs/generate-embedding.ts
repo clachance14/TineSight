@@ -1,7 +1,7 @@
 // @ts-nocheck - Supabase Database generic types not properly resolved in build context
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { generateEmbedding } from "@/lib/replicate/client";
+import { generateEmbedding, isEmbeddingModelConfigured } from "@/lib/replicate/client";
 import { findMatchesTask } from "./find-matches";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
@@ -39,6 +39,10 @@ interface GenerateEmbeddingPayload {
 
 export const generateEmbeddingTask = task({
   id: "generate-embedding",
+  // Limit concurrent Replicate API calls to avoid rate limiting
+  queue: {
+    concurrencyLimit: 5,
+  },
   retry: {
     maxAttempts: 3,
     factor: 2,
@@ -49,6 +53,22 @@ export const generateEmbeddingTask = task({
     const { detectionId, imageId } = payload;
 
     logger.info("Starting embedding generation", { detectionId, imageId });
+
+    // Check if embedding model is configured
+    if (!isEmbeddingModelConfigured()) {
+      logger.info("Embedding model not configured - skipping embedding generation", {
+        detectionId,
+        imageId,
+        hint: "Set EMBEDDING_MODEL_VERSION environment variable to enable embedding generation",
+      });
+      return {
+        success: false,
+        skipped: true,
+        detectionId,
+        imageId,
+        reason: "Embedding model not configured",
+      };
+    }
 
     // Cast to typed client - TypeScript has issues with Database generic in Trigger.dev context
     const supabase = createAdminClient() as SupabaseClient<Database>;

@@ -43,14 +43,23 @@ const RETRY_CONFIG = {
 const MEGADETECTOR_VERSION = process.env['MEGADETECTOR_MODEL_VERSION'] ||
   'bencevans/megadetector-v5a:cd30d71e39a456a2b43580b03c199bb305200e7c62b0054d8c9014c4e11e7259';
 
-const EMBEDDING_MODEL_VERSION = process.env['EMBEDDING_MODEL_VERSION'] ||
-  'latest'; // Will be updated with MegaDescriptor or CLIP model version
+// MegaDescriptor-L-384: 1536-dimensional embedding model for animal re-identification
+// Deploy to Replicate using replicate/megadescriptor/cog.yaml, then set EMBEDDING_MODEL_VERSION
+// NOTE: Embedding generation is disabled until a model is deployed - use null as sentinel
+const EMBEDDING_MODEL_VERSION = process.env['EMBEDDING_MODEL_VERSION'] || null;
+
+/**
+ * Check if embedding model is configured and ready to use
+ */
+export function isEmbeddingModelConfigured(): boolean {
+  return EMBEDDING_MODEL_VERSION !== null;
+}
 
 /**
  * Raw detection result from MegaDetector API
  */
 interface RawDetection {
-  /** Bounding box coordinates [x1, y1, x2, y2] normalized to [0, 1] */
+  /** Bounding box coordinates [x, y, width, height] normalized to [0, 1] */
   bbox: number[];
   /** Detection class: 1=animal, 2=person, 3=vehicle */
   category: number;
@@ -86,11 +95,13 @@ export interface MegaDetectorOutput {
 }
 
 /**
- * Embedding model output structure
+ * Embedding model output structure (MegaDescriptor-L-384)
  */
 export interface EmbeddingOutput {
-  /** 512-dimensional feature vector */
+  /** 1536-dimensional feature vector from MegaDescriptor */
   embedding: number[];
+  /** Embedding dimension (should be 1536) */
+  dimension?: number;
 }
 
 /**
@@ -122,13 +133,17 @@ export async function runMegaDetector(imageUrl: string): Promise<MegaDetectorOut
 
       const rawDetections = output as RawDetection[];
 
-      // Normalize detections: convert category integers to strings and bbox format
+      // Normalize detections: convert category integers to strings
       const detections: Detection[] = rawDetections.map((raw) => {
-        // Convert x1,y1,x2,y2 to x,y,width,height if needed
+        // MegaDetector (bencevans/megadetector-v5a) returns bbox as [x, y, width, height]
+        // already normalized to [0, 1] range
         const bbox = raw.bbox;
-        const normalizedBbox: [number, number, number, number] = bbox.length === 4
-          ? [bbox[0] ?? 0, bbox[1] ?? 0, bbox[2] ?? 0, bbox[3] ?? 0]
-          : [0, 0, 0, 0];
+        const x = bbox[0] ?? 0;
+        const y = bbox[1] ?? 0;
+        const width = bbox[2] ?? 0;
+        const height = bbox[3] ?? 0;
+
+        const normalizedBbox: [number, number, number, number] = [x, y, width, height];
 
         return {
           bbox: normalizedBbox,
@@ -150,7 +165,7 @@ export async function runMegaDetector(imageUrl: string): Promise<MegaDetectorOut
       if (isRateLimited && attempt < RETRY_CONFIG.maxRetries - 1) {
         // Extract retry_after from error message if available
         const retryAfterMatch = errorMessage.match(/retry_after["\s:]+(\d+)/);
-        const retryAfter = retryAfterMatch ? parseInt(retryAfterMatch[1], 10) * 1000 : null;
+        const retryAfter = retryAfterMatch?.[1] ? parseInt(retryAfterMatch[1], 10) * 1000 : null;
 
         // Calculate delay with exponential backoff
         const exponentialDelay = Math.min(
@@ -175,13 +190,21 @@ export async function runMegaDetector(imageUrl: string): Promise<MegaDetectorOut
 }
 
 /**
- * Generate embedding vector for deer re-identification
+ * Generate embedding vector for deer re-identification using MegaDescriptor-L-384
  *
- * @param imageUrl - Public URL to the cropped deer image (from bounding box)
- * @returns 512-dimensional embedding vector
- * @throws Error if API call fails or returns invalid data
+ * @param imageUrl - Public URL to the image (ideally cropped to ROI head/antler region)
+ * @returns 1536-dimensional embedding vector
+ * @throws Error if API call fails, no model configured, or returns invalid data
  */
 export async function generateEmbedding(imageUrl: string): Promise<number[]> {
+  // Check if embedding model is configured
+  if (!EMBEDDING_MODEL_VERSION) {
+    throw new Error(
+      'Embedding model not configured. Set EMBEDDING_MODEL_VERSION environment variable ' +
+      'to your deployed model (format: owner/model:version)'
+    );
+  }
+
   try {
     const output = await getReplicateClient().run(
       EMBEDDING_MODEL_VERSION as `${string}/${string}:${string}`,
@@ -204,9 +227,9 @@ export async function generateEmbedding(imageUrl: string): Promise<number[]> {
       throw new Error('Invalid embedding output: missing embedding array');
     }
 
-    if (result.embedding.length !== 512) {
+    if (result.embedding.length !== 1536) {
       throw new Error(
-        `Invalid embedding dimension: expected 512, got ${result.embedding.length}`
+        `Invalid embedding dimension: expected 1536, got ${result.embedding.length}`
       );
     }
 
@@ -227,7 +250,7 @@ export async function generateEmbedding(imageUrl: string): Promise<number[]> {
 /**
  * Format embedding array for PostgreSQL vector type
  *
- * @param embedding - 512-dimensional number array
+ * @param embedding - 1536-dimensional number array from MegaDescriptor
  * @returns Formatted string for pgvector (e.g., "[0.1, 0.2, ...]")
  */
 export function formatEmbeddingForPostgres(embedding: number[]): string {

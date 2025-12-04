@@ -1,0 +1,412 @@
+openapi: 3.0.3
+info:
+  title: ROI Selection & Quality Filtering API
+  description: API endpoints for user-defined ROI selection and quality filtering
+  version: 1.0.0
+
+servers:
+  - url: /api
+    description: API routes
+
+paths:
+  /detections/{id}/roi:
+    get:
+      summary: Get ROI for a detection
+      description: Retrieves the user-defined ROI for a specific detection
+      operationId: getDetectionROI
+      tags:
+        - ROI
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Detection UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: ROI found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionROI'
+        '204':
+          description: No ROI exists for this detection
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      summary: Save or update ROI for a detection
+      description: Creates or updates the user-defined ROI for a detection
+      operationId: saveDetectionROI
+      tags:
+        - ROI
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Detection UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ROIInput'
+      responses:
+        '200':
+          description: ROI saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionROI'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Delete ROI for a detection
+      description: Removes the user-defined ROI from a detection
+      operationId: deleteDetectionROI
+      tags:
+        - ROI
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Detection UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: ROI deleted successfully
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /detections/{id}/roi/reference:
+    post:
+      summary: Toggle ROI reference status
+      description: Marks or unmarks an ROI as a reference for quality comparison
+      operationId: toggleROIReference
+      tags:
+        - ROI
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Detection UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - isReference
+              properties:
+                isReference:
+                  type: boolean
+                  description: Whether to mark as reference
+      responses:
+        '200':
+          description: Reference status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionROI'
+        '400':
+          description: No ROI exists for this detection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /detections/{id}/regenerate-embedding:
+    post:
+      summary: Regenerate embedding from ROI
+      description: Triggers background job to regenerate the detection's embedding using the ROI-cropped image
+      operationId: regenerateEmbedding
+      tags:
+        - Embedding
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Detection UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '202':
+          description: Embedding regeneration triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Embedding regeneration started
+                  detectionId:
+                    type: string
+                    format: uuid
+        '400':
+          description: No ROI exists for this detection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /detections/{id}/feedback:
+    post:
+      summary: Submit quality feedback
+      description: Records user feedback about why a detection/match was rejected
+      operationId: submitFeedback
+      tags:
+        - Feedback
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Detection UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackInput'
+      responses:
+        '201':
+          description: Feedback recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ROIFeedback'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /user/reference-count:
+    get:
+      summary: Get reference ROI count
+      description: Returns the number of reference ROIs the user has created
+      operationId: getReferenceCount
+      tags:
+        - ROI
+      responses:
+        '200':
+          description: Reference count retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    minimum: 0
+                    example: 5
+                  minimumRequired:
+                    type: integer
+                    example: 3
+                  autoFilteringEnabled:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  schemas:
+    DetectionROI:
+      type: object
+      required:
+        - id
+        - detection_id
+        - roi_x
+        - roi_y
+        - roi_width
+        - roi_height
+        - is_reference
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        detection_id:
+          type: string
+          format: uuid
+        roi_x:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: X coordinate (normalized 0-10000)
+        roi_y:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: Y coordinate (normalized 0-10000)
+        roi_width:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Width (normalized 0-10000)
+        roi_height:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Height (normalized 0-10000)
+        is_reference:
+          type: boolean
+          description: Whether marked as reference for quality comparison
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+
+    ROIInput:
+      type: object
+      required:
+        - roi_x
+        - roi_y
+        - roi_width
+        - roi_height
+      properties:
+        roi_x:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        roi_y:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        roi_width:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        roi_height:
+          type: integer
+          minimum: 1
+          maximum: 10000
+
+    ROIFeedback:
+      type: object
+      required:
+        - id
+        - detection_id
+        - feedback_type
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        detection_id:
+          type: string
+          format: uuid
+        feedback_type:
+          $ref: '#/components/schemas/FeedbackType'
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+
+    FeedbackInput:
+      type: object
+      required:
+        - feedbackType
+      properties:
+        feedbackType:
+          $ref: '#/components/schemas/FeedbackType'
+        notes:
+          type: string
+          maxLength: 500
+          description: Optional notes (required if feedbackType is 'other')
+
+    FeedbackType:
+      type: string
+      enum:
+        - distant
+        - partial_view
+        - no_antlers
+        - obstructed
+        - wrong_angle
+        - blurry
+        - other
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  securitySchemes:
+    supabaseAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - supabaseAuth: []

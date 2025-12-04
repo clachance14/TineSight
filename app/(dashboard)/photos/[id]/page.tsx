@@ -1,13 +1,14 @@
 import { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
-import Image from 'next/image'
 import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getPhoto, getSignedViewUrl } from '@/lib/services/photos'
+import { countReferenceROIs } from '@/lib/services/roi'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { DetectionOverlay } from '@/components/photos/detection-overlay'
+import { PhotoDetailClient } from '@/components/photos/photo-detail-client'
+import { DetectionCardWithFeedback } from '@/components/photos/detection-card-with-feedback'
 import type { Detection } from '@/types/database'
 
 interface PhotoDetailPageProps {
@@ -32,8 +33,14 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
     redirect('/login')
   }
 
-  // Fetch photo with detections
-  const { data: photo, error } = await getPhoto(user.id, id)
+  // Fetch photo with detections and reference count in parallel
+  const [photoResult, referenceCountResult] = await Promise.all([
+    getPhoto(user.id, id),
+    countReferenceROIs(),
+  ])
+
+  const { data: photo, error } = photoResult
+  const { data: referenceCount } = referenceCountResult
 
   if (error || !photo) {
     notFound()
@@ -46,8 +53,9 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
     notFound()
   }
 
-  // Transform detections for DetectionOverlay component
-  const detections = photo.detections.map((d: Detection) => ({
+  // Transform detections for PhotoDetailClient component
+  // Include quality status and score from the detection if available
+  const detections = photo.detections.map((d: Detection & { quality_status?: string | null; quality_score?: number | null }) => ({
     id: d.id,
     bboxX: d.bbox_x ?? 0,
     bboxY: d.bbox_y ?? 0,
@@ -56,12 +64,14 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
     confidence: d.confidence ?? 0,
     class: d.class,
     deerId: d.deer_id,
+    qualityStatus: d.quality_status ?? null,
+    qualityScore: d.quality_score ?? null,
   }))
 
-  // Calculate image dimensions (assuming standard camera trap dimensions)
-  // In production, these would be stored in the database
-  const imageWidth = 1920
-  const imageHeight = 1080
+  // Detection bounding boxes use 0-10000 normalized coordinates
+  // This matches the MegaDetector output format
+  const imageWidth = 10000
+  const imageHeight = 10000
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Unknown'
@@ -127,27 +137,16 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Main photo view */}
+        {/* Main photo view with ROI selection */}
         <div className="lg:col-span-2 space-y-4">
-          <Card>
-            <CardContent className="p-0">
-              <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-slate-deep">
-                <Image
-                  src={imageUrl}
-                  alt="Game camera photo"
-                  fill
-                  className="object-contain"
-                  priority
-                />
-                <DetectionOverlay
-                  detections={detections}
-                  imageWidth={imageWidth}
-                  imageHeight={imageHeight}
-                  visible={photo.detection_status === 'completed'}
-                />
-              </div>
-            </CardContent>
-          </Card>
+          <PhotoDetailClient
+            imageUrl={imageUrl}
+            detections={detections}
+            imageWidth={imageWidth}
+            imageHeight={imageHeight}
+            showDetections={photo.detection_status === 'completed'}
+            referenceCount={referenceCount}
+          />
 
           {/* Photo metadata */}
           <Card>
@@ -221,7 +220,7 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
             <CardHeader>
               <CardTitle>Detections ({detections.length})</CardTitle>
               <CardDescription>
-                Animals detected in this photo
+                Animals detected in this photo - click to select for ROI
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -232,41 +231,11 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
               ) : (
                 <div className="space-y-3">
                   {detections.map((detection, index) => (
-                    <div
+                    <DetectionCardWithFeedback
                       key={detection.id}
-                      className="rounded-lg border border-slate-700 bg-slate-deep p-3 space-y-2"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-cream">
-                          Detection {index + 1}
-                        </span>
-                        <span className="text-xs text-cream-dark">
-                          {Math.round(detection.confidence * 100)}% confidence
-                        </span>
-                      </div>
-
-                      {detection.class && (
-                        <div>
-                          <p className="text-xs text-cream-dark">Class</p>
-                          <p className="text-sm text-cream capitalize">{detection.class}</p>
-                        </div>
-                      )}
-
-                      <div className="text-xs text-cream-dark">
-                        Bounding Box: {Math.round(detection.bboxX)}, {Math.round(detection.bboxY)}, {Math.round(detection.bboxWidth)}x{Math.round(detection.bboxHeight)}
-                      </div>
-
-                      {detection.deerId && (
-                        <div className="pt-2 border-t border-slate-700">
-                          <Link
-                            href={`/deer/${detection.deerId}`}
-                            className="text-sm text-copper hover:text-copper-light transition-colors"
-                          >
-                            View Deer Profile
-                          </Link>
-                        </div>
-                      )}
-                    </div>
+                      detection={detection}
+                      index={index}
+                    />
                   ))}
                 </div>
               )}

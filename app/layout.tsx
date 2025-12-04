@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
+import { Toaster } from 'sonner'
 import { Providers } from '@/components/providers'
 import './globals.css'
 
@@ -30,6 +31,12 @@ export default function RootLayout({
       >
         <Providers>
           {children}
+          <Toaster
+            position="bottom-right"
+            toastOptions={{
+              className: 'bg-slate-deep border-cream/20 text-cream',
+            }}
+          />
         </Providers>
       </body>
     </html>

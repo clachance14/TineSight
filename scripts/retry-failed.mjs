@@ -1,17 +1,10 @@
+import './env.mjs'
 import { createClient } from '@supabase/supabase-js'
-import { readFileSync } from 'fs'
 
-// Parse .env.local
-const envFile = readFileSync('.env.local', 'utf-8')
-const env = {}
-envFile.split('\n').forEach(line => {
-  const [key, ...value] = line.split('=')
-  if (key && value.length) {
-    env[key.trim()] = value.join('=').trim().replace(/\r/g, '').replace(/^["']|["']$/g, '')
-  }
-})
-
-const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY)
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+)
 
 async function retryFailedImages() {
   // Get failed images
@@ -83,7 +76,7 @@ async function retryFailedImages() {
   }
 
   // Trigger batch-process via Trigger.dev
-  const triggerToken = env.TRIGGER_SECRET_KEY
+  const triggerToken = process.env.TRIGGER_SECRET_KEY
 
   console.log(`Triggering batch-process for ${imageIds.length} images...`)
 

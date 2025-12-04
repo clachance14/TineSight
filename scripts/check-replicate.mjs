@@ -1,16 +1,6 @@
-import { readFileSync } from 'fs'
+import './env.mjs'
 
-// Parse .env.local
-const envFile = readFileSync('.env.local', 'utf-8')
-const env = {}
-envFile.split('\n').forEach(line => {
-  const [key, ...value] = line.split('=')
-  if (key && value.length) {
-    env[key.trim()] = value.join('=').trim().replace(/\r/g, '').replace(/^["']|["']$/g, '')
-  }
-})
-
-const token = env.REPLICATE_API_TOKEN
+const token = process.env.REPLICATE_API_TOKEN
 
 // Check account
 const response = await fetch('https://api.replicate.com/v1/account', {

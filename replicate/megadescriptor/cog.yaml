@@ -1,0 +1,15 @@
+# Cog configuration for MegaDescriptor-L-384
+# Deer/wildlife re-identification model
+# https://huggingface.co/BVRA/MegaDescriptor-L-384
+
+build:
+  gpu: true
+  cuda: "12.1"
+  python_version: "3.11"
+  python_packages:
+    - "torch>=2.0"
+    - "timm>=0.9"
+    - "pillow"
+    - "huggingface_hub"
+
+predict: "predict.py:Predictor"

@@ -21,6 +21,7 @@ interface UploadState {
   // State
   uploadQueue: UploadFile[]
   currentBatchId: string | null
+  isPreparing: boolean
   isUploading: boolean
   overallProgress: number
   completedCount: number
@@ -31,6 +32,7 @@ interface UploadState {
   addFiles: (files: File[]) => void
   removeFile: (id: string) => void
   clearQueue: () => void
+  setIsPreparing: (isPreparing: boolean) => void
   startUpload: (batchId: string, uploadData: UploadInitData[]) => void
   updateFileProgress: (id: string, progress: number) => void
   markFileCompleted: (id: string) => void
@@ -41,6 +43,7 @@ interface UploadState {
 const initialState = {
   uploadQueue: [],
   currentBatchId: null,
+  isPreparing: false,
   isUploading: false,
   overallProgress: 0,
   completedCount: 0,
@@ -98,6 +101,8 @@ export const useUploadStore = create<UploadState>((set) => ({
       failedCount: 0,
     })),
 
+  setIsPreparing: (isPreparing) => set({ isPreparing }),
+
   startUpload: (batchId, uploadData) =>
     set((state) => {
       // Match upload data to files in queue and update their state
@@ -117,6 +122,7 @@ export const useUploadStore = create<UploadState>((set) => ({
       return {
         uploadQueue: updatedQueue,
         currentBatchId: batchId,
+        isPreparing: false,
         isUploading: true,
       }
     }),
