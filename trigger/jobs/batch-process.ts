@@ -1,7 +1,9 @@
 // @ts-nocheck - Supabase Database generic types not properly resolved in build context
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { detectAnimals } from "./detect-animals";
+import { analyzePhoto } from "./analyze-photo";
+import { analyzePhotoSam2 } from "./analyze-photo-sam2";
+import { isSam2PipelineEnabled } from "@/lib/config/feature-flags";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
@@ -10,11 +12,11 @@ import type { Database } from "@/types/database";
  *
  * Orchestrates the processing of a batch of images by:
  * 1. Updating batch status to 'processing'
- * 2. Triggering individual detect-animals jobs for each image (fan-out pattern)
+ * 2. Triggering individual analyze-photo jobs for each image (fan-out pattern)
  * 3. Updating batch status to 'completed' or 'failed'
  *
  * This job uses the fan-out pattern to enable parallel processing of images.
- * Each image is processed independently by the detect-animals job.
+ * Each image is processed independently by the analyze-photo job.
  *
  * @module trigger/jobs/batch-process
  */
@@ -57,19 +59,33 @@ export const batchProcess = task({
 
       logger.info("Batch status updated to processing", { batchId });
 
-      // Fan-out: Trigger detect-animals job for each image
-      logger.info("Fan-out: triggering detect-animals jobs", {
+      // Fan-out: Trigger analyze-photo job for each image
+      // Check feature flag to determine which pipeline to use
+      const useSam2Pipeline = isSam2PipelineEnabled();
+
+      logger.info("Fan-out: triggering analyze-photo jobs", {
         batchId,
         imageCount: imageIds.length,
+        pipeline: useSam2Pipeline ? "sam2" : "gemini",
       });
 
-      for (const imageId of imageIds) {
-        await detectAnimals.trigger({ imageId, batchId });
-        logger.info("Triggered detect-animals job", {
-          imageId,
-          batchId,
-        });
+      if (useSam2Pipeline) {
+        // Use SAM2 pipeline for deer and antler detection
+        await analyzePhotoSam2.batchTriggerAndWait(
+          imageIds.map(imageId => ({ payload: { imageId, batchId } }))
+        );
+      } else {
+        // Use Gemini pipeline (existing)
+        await analyzePhoto.batchTriggerAndWait(
+          imageIds.map(imageId => ({ payload: { imageId, batchId } }))
+        );
       }
+
+      logger.info("All analyze-photo jobs completed", {
+        batchId,
+        imageCount: imageIds.length,
+        pipeline: useSam2Pipeline ? "sam2" : "gemini",
+      });
 
       // Update batch status to 'completed'
       logger.info("All image jobs triggered, updating batch to completed", {

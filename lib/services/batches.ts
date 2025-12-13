@@ -3,11 +3,13 @@ import type {
   ProcessingBatch,
   ProcessingBatchInsert,
   ProcessingBatchUpdate,
-  BatchStatus,
 } from '@/types/database'
 
+// Define BatchStatus type locally (not an enum in the database)
+export type BatchStatus = 'pending' | 'processing' | 'completed' | 'failed'
+
 // Re-export types for consumers
-export type { ProcessingBatch, ProcessingBatchInsert, ProcessingBatchUpdate, BatchStatus }
+export type { ProcessingBatch, ProcessingBatchInsert, ProcessingBatchUpdate }
 
 /**
  * Batches Service

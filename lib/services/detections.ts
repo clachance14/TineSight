@@ -15,6 +15,25 @@ export interface CreateDetectionData {
 }
 
 /**
+ * Fields that can be updated via the edit panel
+ */
+export interface DetectionEditableFields {
+  sex?: 'buck' | 'doe' | 'fawn' | 'unknown' | null
+  antler_points?: number | null
+  age_class?: 'young' | 'mature' | 'old' | 'unknown' | null
+  species?: 'whitetail' | 'mule_deer' | 'elk' | 'unknown' | null
+  distinguishing_features?: string | null
+}
+
+/**
+ * Result of soft-deleting a detection
+ */
+export interface SoftDeleteResult {
+  success: boolean
+  deletedAt: string
+}
+
+/**
  * Detection with associated deer information
  */
 export interface DetectionWithDeer extends Detection {
@@ -79,18 +98,29 @@ export async function createDetections(
  * Get all detections for a specific image
  *
  * @param imageId - UUID of the image
+ * @param options - Optional configuration
+ * @param options.filterSam2ByConfidence - If true, filter SAM2 detections by sam2_deer_score >= 0.3
  * @returns Array of detections for the image
  */
 export async function getDetectionsForImage(
-  imageId: string
+  imageId: string,
+  options?: { filterSam2ByConfidence?: boolean }
 ): Promise<{ data: Detection[] | null; error: Error | null }> {
   const supabase = await createClient()
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('detections')
     .select('*')
     .eq('image_id', imageId)
-    .order('confidence', { ascending: false, nullsFirst: false })
+    .is('deleted_at', null)
+
+  // Apply SAM2 confidence filter if requested
+  // Filter out SAM2 detections with low confidence scores (< 0.3)
+  if (options?.filterSam2ByConfidence) {
+    query = query.or('analysis_source.neq.sam2,sam2_deer_score.gte.0.3')
+  }
+
+  const { data, error } = await query.order('confidence', { ascending: false, nullsFirst: false })
 
   return { data: data as Detection[] | null, error }
 }
@@ -117,6 +147,7 @@ export async function getDetection(
       )
     `)
     .eq('id', detectionId)
+    .is('deleted_at', null)
     .single()
 
   return { data: data as DetectionWithDeer | null, error }
@@ -286,7 +317,7 @@ export async function getOrphanedEmbeddings(
       id: embedding['id'] as string,
       deer_id: embedding['deer_id'] as string,
       detection_id: embedding['detection_id'] as string,
-      embedding: embedding['embedding'] as number[],
+      embedding: embedding['embedding'] as string,
       created_at: embedding['created_at'] as string,
       detection: {
         id: detectionData['id'] as string,
@@ -303,4 +334,186 @@ export async function getOrphanedEmbeddings(
   })
 
   return { data: flattenedData, error: null }
+}
+
+/**
+ * Data structure for creating a SAM2-analyzed detection
+ */
+export interface CreateSam2DetectionData {
+  bbox_x: number         // Center X (0-10000 normalized)
+  bbox_y: number         // Center Y (0-10000 normalized)
+  bbox_width: number     // Width (0-10000 normalized)
+  bbox_height: number    // Height (0-10000 normalized)
+  sam2_deer_score: number  // Confidence 0-1
+  antler_bbox?: {
+    x: number
+    y: number
+    width: number
+    height: number
+  } | null
+  sam2_antler_score?: number | null
+}
+
+/**
+ * Create detections from SAM2 analysis results
+ * Note: Expects coordinates already normalized to 0-10000 scale
+ *
+ * @param imageId - UUID of the image
+ * @param detections - Array of SAM2 detection data (coordinates must be pre-normalized to 0-10000 scale)
+ * @returns Array of created detection records
+ */
+export async function createSam2Detections(
+  imageId: string,
+  detections: CreateSam2DetectionData[]
+): Promise<{ data: Detection[] | null; error: Error | null }> {
+  const supabase = await createClient()
+
+  const insertData = detections.map((detection) => ({
+    image_id: imageId,
+    bbox_x: detection.bbox_x,
+    bbox_y: detection.bbox_y,
+    bbox_width: detection.bbox_width,
+    bbox_height: detection.bbox_height,
+    sam2_deer_score: detection.sam2_deer_score,
+    antler_bbox: detection.antler_bbox ?? null,
+    sam2_antler_score: detection.sam2_antler_score ?? null,
+    analysis_source: 'sam2',
+    class: 'deer', // Always 'deer' for SAM2 detections
+    confidence: detection.sam2_deer_score, // Map sam2_deer_score to legacy confidence field
+    deer_id: null, // Not linked to deer profile yet
+    is_reference: false,
+  }))
+
+  const { data, error } = await supabase
+    .from('detections')
+    .insert(insertData as never[])
+    .select()
+
+  return { data: data as Detection[] | null, error }
+}
+
+/**
+ * Data structure for creating a Gemini-analyzed detection
+ */
+export interface CreateGeminiDetectionData {
+  bbox_x: number  // 0-10000 normalized
+  bbox_y: number
+  bbox_width: number
+  bbox_height: number
+  head_bbox?: { x: number; y: number; width: number; height: number } | null
+  species: string  // 'whitetail' | 'mule_deer' | 'elk' | 'unknown'
+  sex: string      // 'buck' | 'doe' | 'fawn' | 'unknown'
+  antler_points?: number | null
+  age_class?: string | null  // 'young' | 'mature' | 'old' | 'unknown'
+  distinguishing_features?: string | null
+  gemini_confidence: number  // 0-100
+}
+
+/**
+ * Create detections from Gemini analysis results
+ *
+ * @param imageId - UUID of the image
+ * @param detections - Array of Gemini detection data
+ * @returns Array of created detection records
+ */
+export async function createGeminiDetections(
+  imageId: string,
+  detections: CreateGeminiDetectionData[]
+): Promise<{ data: Detection[] | null; error: Error | null }> {
+  const supabase = await createClient()
+
+  const insertData = detections.map((detection) => ({
+    image_id: imageId,
+    bbox_x: detection.bbox_x,
+    bbox_y: detection.bbox_y,
+    bbox_width: detection.bbox_width,
+    bbox_height: detection.bbox_height,
+    head_bbox: detection.head_bbox ?? null,
+    species: detection.species,
+    sex: detection.sex,
+    antler_points: detection.antler_points ?? null,
+    age_class: detection.age_class ?? null,
+    distinguishing_features: detection.distinguishing_features ?? null,
+    gemini_confidence: detection.gemini_confidence,
+    class: 'deer', // Always 'deer' for Gemini detections
+    confidence: detection.gemini_confidence / 100, // Convert to 0-1 for legacy field
+    deer_id: null, // Not linked to deer profile yet
+    is_reference: false,
+  }))
+
+  const { data, error } = await supabase
+    .from('detections')
+    .insert(insertData as never[])
+    .select()
+
+  return { data: data as Detection[] | null, error }
+}
+
+/**
+ * Set a detection as the reference detection for a deer profile
+ */
+export async function setReferenceDetection(
+  detectionId: string,
+  isReference: boolean = true
+): Promise<{ data: Detection | null; error: Error | null }> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('detections')
+    .update({ is_reference: isReference } as never)
+    .eq('id', detectionId)
+    .select()
+    .single()
+
+  return { data: data as Detection | null, error }
+}
+
+/**
+ * Update editable fields on a detection (for user corrections)
+ *
+ * @param detectionId - UUID of the detection
+ * @param data - Fields to update
+ * @returns Updated detection record
+ */
+export async function updateDetection(
+  detectionId: string,
+  data: DetectionEditableFields
+): Promise<{ data: Detection | null; error: Error | null }> {
+  const supabase = await createClient()
+
+  const { data: result, error } = await supabase
+    .from('detections')
+    .update(data as never)
+    .eq('id', detectionId)
+    .is('deleted_at', null)
+    .select()
+    .single()
+
+  return { data: result as Detection | null, error }
+}
+
+/**
+ * Soft-delete a detection (marks as deleted without removing from database)
+ *
+ * @param detectionId - UUID of the detection
+ * @returns Result with success status and deletion timestamp
+ */
+export async function softDeleteDetection(
+  detectionId: string
+): Promise<{ data: SoftDeleteResult | null; error: Error | null }> {
+  const supabase = await createClient()
+
+  const deletedAt = new Date().toISOString()
+
+  const { error } = await supabase
+    .from('detections')
+    .update({ deleted_at: deletedAt } as never)
+    .eq('id', detectionId)
+    .is('deleted_at', null)
+
+  if (error) {
+    return { data: null, error }
+  }
+
+  return { data: { success: true, deletedAt }, error: null }
 }
