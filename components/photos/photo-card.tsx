@@ -10,6 +10,7 @@ interface PhotoCardProps {
     detectionStatus: string
     classification: string | null
     detectionCount?: number
+    qualityStatus?: string | null
   }
   onClick?: () => void
   isSelected?: boolean
@@ -17,7 +18,7 @@ interface PhotoCardProps {
 }
 
 export function PhotoCard({ photo, onClick, isSelected, isLoading }: PhotoCardProps) {
-  const { thumbnailUrl, detectionStatus, classification, detectionCount } = photo
+  const { thumbnailUrl, detectionStatus, classification, detectionCount, qualityStatus } = photo
 
   // Status badge configuration
   const statusConfig = {
@@ -49,6 +50,7 @@ export function PhotoCard({ photo, onClick, isSelected, isLoading }: PhotoCardPr
 
   return (
     <div
+      data-testid="photo-card"
       onClick={onClick}
       className={cn(
         'group relative overflow-hidden rounded-lg cursor-pointer transition-all duration-200',
@@ -114,6 +116,23 @@ export function PhotoCard({ photo, onClick, isSelected, isLoading }: PhotoCardPr
               )}
             >
               {hasDeer ? 'Has Deer' : 'Empty'}
+            </div>
+          </div>
+        )}
+
+        {/* Quality status badge - bottom right */}
+        {qualityStatus && qualityStatus !== 'pending' && (
+          <div className="absolute bottom-2 right-2">
+            <div
+              className={cn(
+                'px-2 py-1 rounded-md border backdrop-blur-sm text-xs font-medium',
+                qualityStatus === 'high_quality' && 'bg-green-500/20 text-green-400 border-green-500/30',
+                qualityStatus === 'low_quality' && 'bg-red-500/20 text-red-400 border-red-500/30',
+                qualityStatus === 'manual_review' && 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+              )}
+            >
+              {qualityStatus === 'high_quality' ? 'High' :
+               qualityStatus === 'low_quality' ? 'Low' : 'Review'}
             </div>
           </div>
         )}

@@ -1,9 +1,9 @@
 import { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { getPhoto, getSignedViewUrl } from '@/lib/services/photos'
+import { getPhoto, getSignedViewUrl, getAdjacentPhotos } from '@/lib/services/photos'
 import { countReferenceROIs } from '@/lib/services/roi'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -33,14 +33,16 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
     redirect('/login')
   }
 
-  // Fetch photo with detections and reference count in parallel
-  const [photoResult, referenceCountResult] = await Promise.all([
+  // Fetch photo with detections, reference count, and adjacent photos in parallel
+  const [photoResult, referenceCountResult, adjacentPhotos] = await Promise.all([
     getPhoto(user.id, id),
     countReferenceROIs(),
+    getAdjacentPhotos(user.id, id),
   ])
 
   const { data: photo, error } = photoResult
   const { data: referenceCount } = referenceCountResult
+  const { prevId, nextId } = adjacentPhotos
 
   if (error || !photo) {
     notFound()
@@ -54,8 +56,17 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
   }
 
   // Transform detections for PhotoDetailClient component
-  // Include quality status and score from the detection if available
-  const detections = photo.detections.map((d: Detection & { quality_status?: string | null; quality_score?: number | null }) => ({
+  // Include Gemini analysis data (species, sex, antler points, age class) and quality info
+  // Sort by confidence (highest first)
+  const detections = photo.detections.map((d: Detection & {
+    quality_status?: string | null;
+    quality_score?: number | null;
+    species?: string | null;
+    sex?: string | null;
+    antler_points?: number | null;
+    age_class?: string | null;
+    deer?: { id: string; name: string | null } | null;
+  }) => ({
     id: d.id,
     bboxX: d.bbox_x ?? 0,
     bboxY: d.bbox_y ?? 0,
@@ -64,9 +75,14 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
     confidence: d.confidence ?? 0,
     class: d.class,
     deerId: d.deer_id,
+    deerName: d.deer?.name ?? null,
     qualityStatus: d.quality_status ?? null,
     qualityScore: d.quality_score ?? null,
-  }))
+    species: d.species ?? null,
+    sex: d.sex ?? null,
+    antlerPoints: d.antler_points ?? null,
+    ageClass: d.age_class ?? null,
+  })).sort((a, b) => b.confidence - a.confidence)
 
   // Detection bounding boxes use 0-10000 normalized coordinates
   // This matches the MegaDetector output format
@@ -119,20 +135,48 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
 
   return (
     <div className="space-y-6">
-      {/* Header with back button */}
-      <div className="flex items-center gap-4">
-        <Button variant="outline" size="icon" asChild>
-          <Link href="/photos">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-cream">
-            Photo Details
-          </h1>
-          <p className="mt-1 text-sm text-cream-dark">
-            ID: {id}
-          </p>
+      {/* Header with back button and navigation */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" asChild>
+            <Link href="/photos">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-cream">
+              Photo Details
+            </h1>
+            <p className="mt-1 text-sm text-cream-dark">
+              ID: {id}
+            </p>
+          </div>
+        </div>
+
+        {/* Prev/Next navigation */}
+        <div className="flex items-center gap-2">
+          {prevId ? (
+            <Button variant="outline" size="icon" asChild>
+              <Link href={`/photos/${prevId}`}>
+                <ChevronLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+          ) : (
+            <Button variant="outline" size="icon" disabled>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+          )}
+          {nextId ? (
+            <Button variant="outline" size="icon" asChild>
+              <Link href={`/photos/${nextId}`}>
+                <ChevronRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          ) : (
+            <Button variant="outline" size="icon" disabled>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -192,29 +236,6 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
 
         {/* Detections panel */}
         <div className="space-y-4">
-          {/* Manual correction buttons */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Manual Correction</CardTitle>
-              <CardDescription>
-                Override AI classification if incorrect
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Button variant="outline" className="w-full justify-start" disabled>
-                <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
-                Mark as Deer
-              </Button>
-              <Button variant="outline" className="w-full justify-start" disabled>
-                <XCircle className="mr-2 h-4 w-4 text-red-500" />
-                Mark as Empty
-              </Button>
-              <p className="text-xs text-cream-dark mt-2">
-                Manual correction coming in a future update
-              </p>
-            </CardContent>
-          </Card>
-
           {/* Detections list */}
           <Card>
             <CardHeader>

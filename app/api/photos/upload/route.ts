@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createBatch } from '@/lib/services/batches'
 import { createPhoto, getSignedUploadUrl } from '@/lib/services/photos'
+import { findOrCreateCamera, type CameraMetadata } from '@/lib/services/cameras'
+import type { Json } from '@/types/database'
 
 // File validation constants
 const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
@@ -19,6 +21,13 @@ interface UploadFileRequest {
   filename: string
   contentType: string
   size: number
+  // EXIF metadata fields
+  capturedAt?: string // ISO date string
+  make?: string
+  model?: string
+  deviceIdentifier?: string
+  exifSignature?: string
+  exifData?: Json
 }
 
 interface UploadInitiationRequest {
@@ -133,11 +142,37 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Create image record in database
+        // Find or create camera from EXIF metadata
+        let cameraId: string | null = null
+        if (file.make || file.model || file.deviceIdentifier || file.exifSignature) {
+          const cameraMetadata: CameraMetadata = {
+            make: file.make ?? null,
+            model: file.model ?? null,
+            deviceIdentifier: file.deviceIdentifier ?? null,
+            exifSignature: file.exifSignature ?? null,
+          }
+
+          const { data: camera, error: cameraError } = await findOrCreateCamera(
+            user.id,
+            cameraMetadata
+          )
+
+          if (cameraError !== null) {
+            console.error(`Failed to find/create camera for ${file.filename}:`, cameraError)
+            // Don't fail the upload - just log the error and continue without camera_id
+          } else if (camera !== null) {
+            cameraId = camera.id
+          }
+        }
+
+        // Create image record in database with EXIF metadata and camera_id
         const { data: image, error: imageError } = await createPhoto(user.id, {
           file_path: uploadData.path,
+          camera_id: cameraId,
           file_size_bytes: file.size,
           detection_status: 'pending',
+          captured_at: file.capturedAt ?? null,
+          exif_data: file.exifData ?? null,
         })
 
         if (imageError !== null || image === null) {

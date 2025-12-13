@@ -8,6 +8,7 @@ import type { Image } from '@/types/database'
 interface PhotoResponse extends Image {
   thumbnailUrl: string | null
   imageUrl: string | null
+  bestQualityStatus: string | null
 }
 
 interface GetPhotosResponse {
@@ -40,6 +41,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const batchId = searchParams.get('batchId')
     const cursor = searchParams.get('cursor')
     const limitParam = searchParams.get('limit')
+    const minConfidenceParam = searchParams.get('minConfidence')
+    const sexParam = searchParams.get('sex')
+    const minPointsParam = searchParams.get('min_points')
+    const maxPointsParam = searchParams.get('max_points')
 
     // Validate and parse limit (default 50, max 100)
     let limit = 50
@@ -69,6 +74,44 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       }
     }
 
+    // Parse minConfidence filter
+    let minConfidence: number | undefined
+    if (minConfidenceParam !== null) {
+      const parsed = parseInt(minConfidenceParam, 10)
+      if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) {
+        minConfidence = parsed
+      } else {
+        return NextResponse.json(
+          { error: 'Invalid minConfidence: must be an integer between 0 and 100' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Parse sex filter
+    let sex: string | undefined
+    if (sexParam !== null && ['buck', 'doe', 'fawn', 'unknown'].includes(sexParam)) {
+      sex = sexParam
+    }
+
+    // Parse min_points filter
+    let minPoints: number | undefined
+    if (minPointsParam !== null) {
+      const parsed = parseInt(minPointsParam, 10)
+      if (!isNaN(parsed) && parsed >= 0) {
+        minPoints = parsed
+      }
+    }
+
+    // Parse max_points filter
+    let maxPoints: number | undefined
+    if (maxPointsParam !== null) {
+      const parsed = parseInt(maxPointsParam, 10)
+      if (!isNaN(parsed) && parsed >= 0) {
+        maxPoints = parsed
+      }
+    }
+
     // Build query to get photos
     // First, get one extra photo to determine if there's a next page
     const fetchLimit = limit + 1
@@ -78,6 +121,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       status?: string
       hasDeer?: boolean
       batchId?: string
+      minConfidence?: number
+      sex?: string
+      minPoints?: number
+      maxPoints?: number
+      cursor?: string
       limit: number
       offset: number
     } = {
@@ -93,6 +141,22 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       filters.hasDeer = hasDeer
     }
 
+    if (minConfidence !== undefined) {
+      filters.minConfidence = minConfidence
+    }
+
+    if (sex !== undefined) {
+      filters.sex = sex
+    }
+
+    if (minPoints !== undefined) {
+      filters.minPoints = minPoints
+    }
+
+    if (maxPoints !== undefined) {
+      filters.maxPoints = maxPoints
+    }
+
     if (batchId !== null) {
       // Note: batchId is not in the PhotoFilters interface in the service
       // We'll handle this by adding it if the service supports it
@@ -100,16 +164,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       // TODO: Add batchId filter support to photos service
     }
 
-    // If cursor is provided, we need to implement cursor-based pagination
-    // For simplicity, we'll use offset-based pagination for now
-    // In a production system, cursor-based pagination is more efficient
+    // Apply cursor for pagination
     if (cursor !== null) {
-      // Cursor-based pagination would require additional implementation
-      // For now, we'll return an error
-      return NextResponse.json(
-        { error: 'Cursor-based pagination not yet implemented' },
-        { status: 400 }
-      )
+      filters.cursor = cursor
     }
 
     // Get photos
@@ -134,36 +191,69 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const hasNextPage = photos.length > limit
     const photosToReturn = hasNextPage ? photos.slice(0, limit) : photos
     const lastPhoto = photosToReturn[photosToReturn.length - 1]
-    const nextCursor = hasNextPage && lastPhoto !== undefined ? lastPhoto.id : null
+    // Cursor format: created_at::id (avoids extra DB lookup on pagination)
+    const nextCursor = hasNextPage && lastPhoto !== undefined
+      ? `${lastPhoto.created_at}::${lastPhoto.id}`
+      : null
 
-    // Generate signed URLs for each photo
-    const photosWithUrls: PhotoResponse[] = []
-    for (const photo of photosToReturn) {
-      let thumbnailUrl: string | null = null
-      let imageUrl: string | null = null
+    // Fetch quality status and generate signed URLs in parallel for performance
+    const photoIds = photosToReturn.map((p) => p.id)
 
-      // Get thumbnail URL if thumbnail exists
-      if (photo.thumbnail_path !== null) {
-        const { data: thumbUrl, error: thumbError } = await getSignedViewUrl(
-          photo.thumbnail_path
-        )
-        if (thumbError === null && thumbUrl !== null) {
-          thumbnailUrl = thumbUrl
+    // Build URL generation promises (thumbnail + full image for each photo)
+    const urlPromises = photosToReturn.flatMap((photo) => [
+      photo.thumbnail_path
+        ? getSignedViewUrl(photo.thumbnail_path)
+        : Promise.resolve({ data: null, error: null }),
+      getSignedViewUrl(photo.file_path),
+    ])
+
+    // Build quality status query promise
+    const qualityPromise = photoIds.length > 0
+      ? supabase
+          .from('detections')
+          .select('image_id, quality_status')
+          .in('image_id', photoIds)
+          .not('quality_status', 'is', null)
+      : Promise.resolve({ data: null })
+
+    // Execute all in parallel - this is the key performance optimization
+    const [urlResults, qualityResult] = await Promise.all([
+      Promise.all(urlPromises),
+      qualityPromise,
+    ])
+
+    // Process quality status results into a map
+    const qualityMap = new Map<string, string | null>()
+    const qualityPriority: Record<string, number> = {
+      high_quality: 1,
+      manual_review: 2,
+      low_quality: 3,
+    }
+
+    if (qualityResult.data) {
+      for (const detection of qualityResult.data as { image_id: string; quality_status: string }[]) {
+        const current = qualityMap.get(detection.image_id)
+        const currentPriority = current ? qualityPriority[current] ?? 99 : 99
+        const newPriority = qualityPriority[detection.quality_status] ?? 99
+
+        if (newPriority < currentPriority) {
+          qualityMap.set(detection.image_id, detection.quality_status)
         }
       }
-
-      // Get full image URL
-      const { data: fullUrl, error: fullError } = await getSignedViewUrl(photo.file_path)
-      if (fullError === null && fullUrl !== null) {
-        imageUrl = fullUrl
-      }
-
-      photosWithUrls.push({
-        ...photo,
-        thumbnailUrl,
-        imageUrl,
-      })
     }
+
+    // Map URL results back to photos (2 URLs per photo: thumbnail, full)
+    const photosWithUrls: PhotoResponse[] = photosToReturn.map((photo, index) => {
+      const thumbnailResult = urlResults[index * 2]
+      const imageResult = urlResults[index * 2 + 1]
+
+      return {
+        ...photo,
+        thumbnailUrl: thumbnailResult?.data ?? null,
+        imageUrl: imageResult?.data ?? null,
+        bestQualityStatus: qualityMap.get(photo.id) ?? null,
+      }
+    })
 
     // Build response
     const response: GetPhotosResponse = {

@@ -1,91 +1,186 @@
-'use client'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
-import { useQuery } from '@tanstack/react-query'
-
-// Response types for match endpoints
-interface MatchCandidate {
-  deer_id: string
-  similarity_score: number
-  match_status: 'pending' | 'confirmed' | 'rejected'
-  created_at: string
-  deer: {
-    id: string
-    name: string | null
-    notes: string | null
-    first_seen_at: string | null
-    last_seen_at: string | null
-    is_archived: boolean
-    created_at: string
-    detection_count?: number
-    thumbnail_url?: string | null
-  }
-}
-
-interface MatchCandidatesResponse {
-  candidates: MatchCandidate[]
-}
-
-interface PendingMatch {
+interface MatchReview {
   id: string
-  file_path: string
-  captured_at: string | null
-  created_at: string
-  thumbnailUrl: string | null
-  imageUrl: string | null
-  detections: Array<{
+  detection: {
     id: string
-    bbox_x: number
-    bbox_y: number
-    bbox_width: number
-    bbox_height: number
+    image_url?: string
+    thumbnail_url?: string
+    head_crop_url?: string
+    species: string
+    sex: string
+    antler_points: number | null
+    age_class: string | null
+    captured_at?: string
+  }
+  suggested_deer: {
+    id: string
+    name: string
+    reference_image_url?: string
+  } | null
+  gemini_confidence: number
+  gemini_reasoning: string | null
+  other_possibilities: Array<{
+    deer_id: string
+    deer_name: string
     confidence: number
-    pending_match_count: number
+  }>
+  is_likely_new_deer: boolean
+  catalog_deer: Array<{
+    id: string
+    name: string
+    reference_image_url?: string
   }>
 }
 
-interface PendingMatchesResponse {
-  photos: PendingMatch[]
-  total: number
-}
-
 /**
- * Hook to fetch match candidates for a specific detection
- * Returns the list of potential deer matches with similarity scores
+ * Hook to fetch pending matches
  */
-export function useMatchCandidates(detectionId: string) {
-  return useQuery({
-    queryKey: ['match-candidates', detectionId],
-    queryFn: async (): Promise<MatchCandidatesResponse> => {
-      const res = await fetch(`/api/detections/${detectionId}/matches`)
-
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: 'Failed to fetch match candidates' }))
-        throw new Error(error.error || 'Failed to fetch match candidates')
-      }
-
+export function usePendingMatches(detectionId?: string) {
+  return useQuery<{ matches: MatchReview[]; total_pending: number }>({
+    queryKey: ['pending-matches', detectionId],
+    queryFn: async () => {
+      const url = detectionId
+        ? `/api/deer/matches?detection_id=${detectionId}`
+        : '/api/deer/matches'
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('Failed to fetch matches')
       return res.json()
     },
-    enabled: !!detectionId, // Only run query if detectionId is provided
   })
 }
 
 /**
- * Hook to fetch all photos with unreviewed match candidates
- * Auto-refetches every 5 seconds to catch new matches from background processing
+ * Hook to confirm a match
  */
-export function usePendingMatches() {
-  return useQuery({
-    queryKey: ['pending-matches'],
-    queryFn: async (): Promise<PendingMatchesResponse> => {
-      const res = await fetch('/api/photos/pending-matches')
+export function useConfirmMatch() {
+  const queryClient = useQueryClient()
 
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: 'Failed to fetch pending matches' }))
-        throw new Error(error.error || 'Failed to fetch pending matches')
-      }
-
+  return useMutation({
+    mutationFn: async (matchId: string) => {
+      const res = await fetch(`/api/deer/matches/${matchId}/confirm`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error('Failed to confirm match')
       return res.json()
     },
-    refetchInterval: 5000, // Auto-refetch every 5 seconds
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-matches'] })
+      queryClient.invalidateQueries({ queryKey: ['deer-catalog'] })
+    },
+  })
+}
+
+/**
+ * Hook to correct a match (assign to different deer)
+ */
+export function useCorrectMatch() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ matchId, deerId }: { matchId: string; deerId: string }) => {
+      const res = await fetch(`/api/deer/matches/${matchId}/correct`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deer_id: deerId }),
+      })
+      if (!res.ok) throw new Error('Failed to correct match')
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-matches'] })
+      queryClient.invalidateQueries({ queryKey: ['deer-catalog'] })
+    },
+  })
+}
+
+/**
+ * Hook to reject a match
+ */
+export function useRejectMatch() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (matchId: string) => {
+      const res = await fetch(`/api/deer/matches/${matchId}/reject`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error('Failed to reject match')
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-matches'] })
+    },
+  })
+}
+
+/**
+ * Hook to skip a match (leave for later)
+ */
+export function useSkipMatch() {
+  return useMutation({
+    mutationFn: async (matchId: string) => {
+      const res = await fetch(`/api/deer/matches/${matchId}/skip`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error('Failed to skip match')
+      return res.json()
+    },
+  })
+}
+
+/**
+ * Hook to create new deer from a match
+ */
+export function useCreateNewFromMatch() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      matchId,
+      name,
+      notes,
+    }: {
+      matchId: string
+      name: string
+      notes?: string | null
+    }) => {
+      const res = await fetch(`/api/deer/matches/${matchId}/create-new`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, notes }),
+      })
+      if (!res.ok) throw new Error('Failed to create new deer')
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-matches'] })
+      queryClient.invalidateQueries({ queryKey: ['deer-catalog'] })
+    },
+  })
+}
+
+/**
+ * Hook to trigger matching job
+ */
+export function useTriggerMatching() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (detectionIds?: string[]) => {
+      const res = await fetch('/api/deer/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(detectionIds ? { detection_ids: detectionIds } : {}),
+      })
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.error || 'Failed to trigger matching')
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-matches'] })
+    },
   })
 }

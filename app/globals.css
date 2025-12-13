@@ -6,8 +6,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -42,14 +43,27 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  /* TineSight Custom Colors */
-  --color-slate-deep: #2D3638;
-  --color-slate: #3D4A4D;
-  --color-slate-light: #4D5A5D;
-  --color-copper: #C4895A;
-  --color-copper-light: #D49A6A;
-  --color-cream: #F5F0E8;
-  --color-cream-dark: #E8E3DB;
+  /* TineSight Premium Outdoors Palette */
+  --color-deep-forest: #1C2321;
+  --color-forest: #2A3330;
+  --color-forest-light: #3A4340;
+  --color-brass: #C8A55C;
+  --color-brass-light: #D4B76D;
+  --color-brass-dark: #B8954C;
+  --color-saddle: #8B4D3B;
+  --color-saddle-light: #9B5D4B;
+  --color-parchment: #F2EDE4;
+  --color-parchment-dark: #E5E0D7;
+  --color-weathered: #A8A092;
+
+  /* Legacy aliases for compatibility */
+  --color-slate-deep: var(--color-deep-forest);
+  --color-slate: var(--color-forest);
+  --color-slate-light: var(--color-forest-light);
+  --color-copper: var(--color-brass);
+  --color-copper-light: var(--color-brass-light);
+  --color-cream: var(--color-parchment);
+  --color-cream-dark: var(--color-parchment-dark);
 }
 
 :root {
@@ -88,38 +102,38 @@
 }
 
 .dark {
-  /* TineSight Dark Mode Theme */
-  --background: oklch(0.235 0.007 210); /* slate-deep #2D3638 */
-  --foreground: oklch(0.945 0.008 75); /* cream #F5F0E8 */
-  --card: oklch(0.305 0.007 210); /* slate #3D4A4D */
-  --card-foreground: oklch(0.945 0.008 75); /* cream */
-  --popover: oklch(0.305 0.007 210); /* slate */
-  --popover-foreground: oklch(0.945 0.008 75); /* cream */
-  --primary: oklch(0.665 0.095 55); /* copper #C4895A */
-  --primary-foreground: oklch(0.945 0.008 75); /* cream */
-  --secondary: oklch(0.375 0.007 210); /* slate-light #4D5A5D */
-  --secondary-foreground: oklch(0.945 0.008 75); /* cream */
-  --muted: oklch(0.305 0.007 210); /* slate */
-  --muted-foreground: oklch(0.915 0.008 75); /* cream-dark #E8E3DB */
-  --accent: oklch(0.665 0.095 55); /* copper */
-  --accent-foreground: oklch(0.945 0.008 75); /* cream */
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(0.375 0.007 210 / 30%); /* slate-light with opacity */
-  --input: oklch(0.375 0.007 210 / 40%); /* slate-light with opacity */
-  --ring: oklch(0.665 0.095 55); /* copper */
-  --chart-1: oklch(0.665 0.095 55); /* copper */
-  --chart-2: oklch(0.715 0.095 55); /* copper-light #D49A6A */
-  --chart-3: oklch(0.305 0.007 210); /* slate */
-  --chart-4: oklch(0.375 0.007 210); /* slate-light */
-  --chart-5: oklch(0.945 0.008 75); /* cream */
-  --sidebar: oklch(0.305 0.007 210); /* slate */
-  --sidebar-foreground: oklch(0.945 0.008 75); /* cream */
-  --sidebar-primary: oklch(0.665 0.095 55); /* copper */
-  --sidebar-primary-foreground: oklch(0.945 0.008 75); /* cream */
-  --sidebar-accent: oklch(0.375 0.007 210); /* slate-light */
-  --sidebar-accent-foreground: oklch(0.945 0.008 75); /* cream */
-  --sidebar-border: oklch(0.375 0.007 210 / 30%); /* slate-light with opacity */
-  --sidebar-ring: oklch(0.665 0.095 55); /* copper */
+  /* TineSight Premium Outdoors Theme */
+  --background: oklch(0.175 0.012 160); /* deep-forest #1C2321 */
+  --foreground: oklch(0.94 0.01 75); /* parchment #F2EDE4 */
+  --card: oklch(0.23 0.012 160); /* forest #2A3330 */
+  --card-foreground: oklch(0.94 0.01 75); /* parchment */
+  --popover: oklch(0.23 0.012 160); /* forest */
+  --popover-foreground: oklch(0.94 0.01 75); /* parchment */
+  --primary: oklch(0.72 0.09 75); /* brass #C8A55C */
+  --primary-foreground: oklch(0.175 0.012 160); /* deep-forest */
+  --secondary: oklch(0.52 0.08 35); /* saddle #8B4D3B */
+  --secondary-foreground: oklch(0.94 0.01 75); /* parchment */
+  --muted: oklch(0.28 0.012 160); /* forest-light #3A4340 */
+  --muted-foreground: oklch(0.68 0.02 75); /* weathered #A8A092 */
+  --accent: oklch(0.72 0.09 75); /* brass */
+  --accent-foreground: oklch(0.175 0.012 160); /* deep-forest */
+  --destructive: oklch(0.65 0.2 25);
+  --border: oklch(0.35 0.012 160 / 40%); /* forest-light with opacity */
+  --input: oklch(0.28 0.012 160); /* forest-light solid */
+  --ring: oklch(0.72 0.09 75); /* brass */
+  --chart-1: oklch(0.72 0.09 75); /* brass */
+  --chart-2: oklch(0.52 0.08 35); /* saddle */
+  --chart-3: oklch(0.78 0.09 75); /* brass-light */
+  --chart-4: oklch(0.28 0.012 160); /* forest-light */
+  --chart-5: oklch(0.94 0.01 75); /* parchment */
+  --sidebar: oklch(0.16 0.012 160); /* darker than deep-forest */
+  --sidebar-foreground: oklch(0.94 0.01 75); /* parchment */
+  --sidebar-primary: oklch(0.72 0.09 75); /* brass */
+  --sidebar-primary-foreground: oklch(0.175 0.012 160); /* deep-forest */
+  --sidebar-accent: oklch(0.23 0.012 160); /* forest */
+  --sidebar-accent-foreground: oklch(0.94 0.01 75); /* parchment */
+  --sidebar-border: oklch(0.35 0.012 160 / 30%); /* forest-light with opacity */
+  --sidebar-ring: oklch(0.72 0.09 75); /* brass */
 }
 
 @layer base {
@@ -127,6 +141,193 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
   }
+}
+
+/* =============================================================================
+   TineSight Premium Texture Utilities
+   ============================================================================= */
+
+/* SVG Noise Filter Definition */
+.texture-noise-filter {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Noise Overlay - adds analog warmth */
+.texture-noise {
+  position: relative;
+}
+
+.texture-noise::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  opacity: 0.025;
+  pointer-events: none;
+  z-index: 1;
+  mix-blend-mode: overlay;
+}
+
+/* Vignette - creates focus, like quality optics */
+.texture-vignette {
+  position: relative;
+}
+
+.texture-vignette::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 0%,
+    transparent 50%,
+    rgba(0, 0, 0, 0.15) 100%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Stronger vignette for full-page use */
+.texture-vignette-strong::after {
+  background: radial-gradient(
+    ellipse at center,
+    transparent 0%,
+    transparent 40%,
+    rgba(0, 0, 0, 0.3) 100%
+  );
+}
+
+/* Paper Grain - for cards and surfaces */
+.texture-paper {
+  background-image:
+    linear-gradient(
+      45deg,
+      transparent 25%,
+      rgba(255, 255, 255, 0.02) 25%,
+      rgba(255, 255, 255, 0.02) 50%,
+      transparent 50%,
+      transparent 75%,
+      rgba(255, 255, 255, 0.02) 75%
+    );
+  background-size: 4px 4px;
+}
+
+/* Parchment texture - warmer paper feel */
+.texture-parchment {
+  background-color: var(--color-parchment);
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.01) 0%,
+      transparent 50%,
+      rgba(0, 0, 0, 0.01) 100%
+    ),
+    linear-gradient(
+      45deg,
+      transparent 25%,
+      rgba(139, 77, 59, 0.03) 25%,
+      rgba(139, 77, 59, 0.03) 50%,
+      transparent 50%,
+      transparent 75%,
+      rgba(139, 77, 59, 0.03) 75%
+    );
+  background-size: 100% 100%, 6px 6px;
+}
+
+/* Inset shadow for physical depth (replaces sharp borders) */
+.shadow-inset-subtle {
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.15),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+/* Lifted card effect for hover */
+.shadow-lifted {
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.25),
+    0 4px 8px rgba(0, 0, 0, 0.15),
+    0 0 0 1px rgba(200, 165, 92, 0.1);
+}
+
+/* Brass glow for active states */
+.glow-brass {
+  box-shadow:
+    0 0 0 1px rgba(200, 165, 92, 0.3),
+    0 0 12px rgba(200, 165, 92, 0.15);
+}
+
+/* =============================================================================
+   Typography Utilities
+   ============================================================================= */
+
+/* Display heading - Fraunces */
+.font-display {
+  font-family: var(--font-display), Georgia, serif;
+}
+
+/* Heading styles using display font */
+.heading-display {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Premium label style */
+.label-premium {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* =============================================================================
+   Brass Accent Utilities
+   ============================================================================= */
+
+/* Brass border accent (top edge) */
+.border-brass-top {
+  border-top: 2px solid var(--color-brass);
+}
+
+/* Brass corner mounts (for images) */
+.brass-corners {
+  position: relative;
+}
+
+.brass-corners::before,
+.brass-corners::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-brass);
+  pointer-events: none;
+}
+
+.brass-corners::before {
+  top: 8px;
+  left: 8px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.brass-corners::after {
+  bottom: 8px;
+  right: 8px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Brass frame (full border) */
+.brass-frame {
+  border: 1px solid var(--color-brass);
+  box-shadow:
+    inset 0 0 0 1px rgba(200, 165, 92, 0.2),
+    0 0 0 1px rgba(0, 0, 0, 0.1);
 }

@@ -1,0 +1,189 @@
+# Photo Filter API Contract
+# Feature: 004-photo-confidence-filter
+
+openapi: 3.0.3
+info:
+  title: TineSight Photo Filter API
+  description: Query parameters for filtering photos by confidence threshold
+  version: 1.0.0
+
+paths:
+  /api/photos:
+    get:
+      summary: List photos with optional filters
+      description: |
+        Returns paginated list of photos. Supports filtering by detection status,
+        deer classification, quality status, and confidence threshold.
+
+        **Confidence Filter Logic**:
+        Uses "any detection" logic - a photo is included if ANY of its detections
+        has confidence >= minConfidence threshold.
+      parameters:
+        # Existing parameters
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, processing, completed, failed]
+          description: Filter by detection processing status
+
+        - name: hasDeer
+          in: query
+          schema:
+            type: boolean
+          description: Filter by deer classification (true = has deer, false = empty)
+
+        - name: qualityStatus
+          in: query
+          schema:
+            type: string
+            enum: [all, high_quality, low_quality, manual_review, pending]
+          description: Filter by detection quality status
+
+        - name: batchId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by upload batch ID
+
+        # New parameter
+        - name: minConfidence
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 100
+          description: |
+            Minimum confidence threshold (0-100).
+            Photos are included if ANY detection has confidence >= threshold.
+            Omit parameter to disable confidence filtering.
+          example: 50
+
+        # Pagination
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Pagination cursor for next page
+
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: Number of photos per page
+
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoListResponse'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    PhotoListResponse:
+      type: object
+      required:
+        - photos
+        - total
+      properties:
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/PhotoResponse'
+        total:
+          type: integer
+          description: Total count of photos matching filters
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor for next page, null if no more pages
+
+    PhotoResponse:
+      type: object
+      required:
+        - id
+        - file_path
+        - detection_status
+      properties:
+        id:
+          type: string
+          format: uuid
+        file_path:
+          type: string
+        thumbnail_path:
+          type: string
+          nullable: true
+        thumbnailUrl:
+          type: string
+          format: uri
+          description: Signed URL for thumbnail
+        imageUrl:
+          type: string
+          format: uri
+          description: Signed URL for full image
+        detection_status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        classification:
+          type: string
+          enum: [has_deer, empty]
+          nullable: true
+        confidence:
+          type: number
+          format: float
+          nullable: true
+          description: Image-level confidence score (0-1)
+        bestQualityStatus:
+          type: string
+          enum: [high_quality, low_quality, manual_review, pending]
+          nullable: true
+          description: Best quality status among all detections
+        detectionCount:
+          type: integer
+          description: Number of detections for this image
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+
+  # Validation examples
+  examples:
+    FilteredRequest:
+      summary: Filter for high-confidence deer photos
+      value:
+        hasDeer: true
+        minConfidence: 75
+        status: completed
+        limit: 50
+
+    DefaultFilters:
+      summary: Default filter state (ON by default)
+      value:
+        hasDeer: true
+        minConfidence: 50

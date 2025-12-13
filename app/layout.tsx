@@ -1,16 +1,23 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import { DM_Sans, Fraunces, JetBrains_Mono } from 'next/font/google'
 import { Toaster } from 'sonner'
 import { Providers } from '@/components/providers'
 import './globals.css'
 
-const inter = Inter({
-  variable: '--font-geist-sans',
+const dmSans = DM_Sans({
+  variable: '--font-sans',
   subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+})
+
+const fraunces = Fraunces({
+  variable: '--font-display',
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
 })
 
 const jetbrainsMono = JetBrains_Mono({
-  variable: '--font-geist-mono',
+  variable: '--font-mono',
   subsets: ['latin'],
 })
 
@@ -27,14 +34,14 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} antialiased`}
+        className={`${dmSans.variable} ${fraunces.variable} ${jetbrainsMono.variable} antialiased`}
       >
         <Providers>
           {children}
           <Toaster
             position="bottom-right"
             toastOptions={{
-              className: 'bg-slate-deep border-cream/20 text-cream',
+              className: 'bg-forest border-brass/20 text-parchment',
             }}
           />
         </Providers>

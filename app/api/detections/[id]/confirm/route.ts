@@ -1,7 +1,6 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { confirmMatch } from '@/lib/services/matching'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -76,21 +75,34 @@ export async function POST(
       )
     }
 
-    // Confirm the match
-    const { data: detection, error: matchError } = await confirmMatch(
-      id,
-      body.deerId
-    )
+    // Link detection directly to deer (bypass match_candidates for direct confirmation)
+    const { error: updateError } = await supabase
+      .from('detections')
+      .update({ deer_id: body.deerId } as never)
+      .eq('id', id)
 
-    if (matchError !== null) {
-      console.error('Failed to confirm match:', matchError)
+    if (updateError !== null) {
+      console.error('Failed to confirm match:', updateError)
       return NextResponse.json(
         { error: 'Failed to confirm match' },
         { status: 500 }
       )
     }
 
-    if (detection === null) {
+    // Reject any pending match candidates for this detection
+    await supabase
+      .from('match_candidates')
+      .update({ status: 'rejected', reviewed_at: new Date().toISOString() } as never)
+      .eq('detection_id', id)
+
+    // Fetch the updated detection
+    const { data: detection, error: fetchError } = await supabase
+      .from('detections')
+      .select('id, image_id, deer_id, bbox_x, bbox_y, bbox_width, bbox_height, confidence, class, created_at')
+      .eq('id', id)
+      .single()
+
+    if (fetchError !== null || detection === null) {
       return NextResponse.json(
         { error: 'Detection not found' },
         { status: 404 }

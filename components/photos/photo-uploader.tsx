@@ -2,10 +2,12 @@
 
 import { useCallback, useState, useMemo } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, Image as ImageIcon, X, FileImage, Trash2, HardDrive } from 'lucide-react'
+import { Upload, Image as ImageIcon, X, FileImage, Trash2, HardDrive, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Progress } from '@/components/ui/progress'
 import { useUploadStore } from '@/lib/stores/upload'
+import { extractMetadata } from '@/lib/image/exif'
 import { cn } from '@/lib/utils'
 
 const ACCEPTED_IMAGE_TYPES = {
@@ -25,6 +27,8 @@ interface PhotoUploaderProps {
 export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) {
   const { uploadQueue, addFiles, clearQueue, isUploading } = useUploadStore()
   const [rejectionWarning, setRejectionWarning] = useState<string | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 })
 
   // Calculate summary stats for pending files
   const pendingFiles = useMemo(
@@ -118,17 +122,64 @@ export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) 
 
       // Process accepted files
       if (acceptedFiles.length > 0) {
-        // Generate thumbnails for all files
-        await Promise.all(
-          acceptedFiles.map((file) =>
-            generateThumbnail(file).catch((error) => {
-              console.error(`Failed to generate thumbnail for ${file.name}:`, error)
+        setIsProcessing(true)
+        setProcessingProgress({ current: 0, total: acceptedFiles.length })
+
+        const processedFiles: Array<{
+          file: File
+          capturedAt: Date | null
+          make: string | null
+          model: string | null
+          deviceIdentifier: string | null
+          exifSignature: string | null
+          exifData: Record<string, unknown>
+        }> = []
+
+        // Process files in batches of 10 for better performance while showing progress
+        const BATCH_SIZE = 10
+        for (let i = 0; i < acceptedFiles.length; i += BATCH_SIZE) {
+          const batch = acceptedFiles.slice(i, i + BATCH_SIZE)
+
+          const batchResults = await Promise.all(
+            batch.map(async (file) => {
+              // Extract EXIF metadata
+              const metadata = await extractMetadata(file).catch((error) => {
+                console.error(`Failed to extract EXIF from ${file.name}:`, error)
+                return {
+                  capturedAt: null,
+                  make: null,
+                  model: null,
+                  deviceIdentifier: null,
+                  exifSignature: null,
+                  rawExif: {},
+                }
+              })
+
+              // Generate thumbnail (don't block on failure)
+              await generateThumbnail(file).catch((error) => {
+                console.error(`Failed to generate thumbnail for ${file.name}:`, error)
+              })
+
+              return {
+                file,
+                capturedAt: metadata.capturedAt,
+                make: metadata.make,
+                model: metadata.model,
+                deviceIdentifier: metadata.deviceIdentifier,
+                exifSignature: metadata.exifSignature,
+                exifData: metadata.rawExif,
+              }
             })
           )
-        )
 
-        // Add files to upload queue
-        addFiles(acceptedFiles)
+          processedFiles.push(...batchResults)
+          setProcessingProgress({ current: Math.min(i + BATCH_SIZE, acceptedFiles.length), total: acceptedFiles.length })
+        }
+
+        // Add files with metadata to upload queue
+        addFiles(processedFiles)
+        setIsProcessing(false)
+        setProcessingProgress({ current: 0, total: 0 })
       }
     },
     [addFiles, generateThumbnail]
@@ -137,7 +188,7 @@ export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: ACCEPTED_IMAGE_TYPES,
-    disabled: isUploading,
+    disabled: isUploading || isProcessing,
     multiple: true,
   })
 
@@ -161,7 +212,7 @@ export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) 
           isDragActive
             ? 'border-copper bg-copper/5 scale-[1.02]'
             : 'border-slate hover:border-copper/50 bg-slate-deep/50',
-          isUploading && 'opacity-50 cursor-not-allowed pointer-events-none'
+          (isUploading || isProcessing) && 'cursor-not-allowed pointer-events-none'
         )}
       >
         <input {...getInputProps()} />
@@ -203,8 +254,27 @@ export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) 
           </div>
         )}
 
+        {/* Processing state - shown while extracting EXIF and generating thumbnails */}
+        {isProcessing && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-deep/90 rounded-lg">
+            <div className="text-center w-64">
+              <Loader2 className="mb-3 h-8 w-8 animate-spin text-copper mx-auto" />
+              <p className="text-sm font-medium text-cream mb-2">
+                Processing photos...
+              </p>
+              <p className="text-xs text-cream-dark mb-3">
+                {processingProgress.current} of {processingProgress.total} files
+              </p>
+              <Progress
+                value={(processingProgress.current / processingProgress.total) * 100}
+                className="h-2"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Uploading state */}
-        {isUploading && (
+        {isUploading && !isProcessing && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-deep/80 rounded-lg">
             <div className="text-center">
               <div className="mb-3 inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-copper" />

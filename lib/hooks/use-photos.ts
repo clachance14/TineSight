@@ -1,6 +1,6 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import type { PhotoFilters } from '@/lib/services/photos'
 
 // Response types for API endpoints
@@ -21,6 +21,7 @@ interface PhotosResponse {
     thumbnailUrl: string | null
     imageUrl: string | null
     thumbnail_path?: string | null
+    bestQualityStatus: string | null
   }>
   total: number
   nextCursor: string | null
@@ -97,6 +98,9 @@ export function usePhotos(filters?: PhotoFilters) {
       if (filters?.isArchived !== undefined) {
         params.append('isArchived', String(filters.isArchived))
       }
+      if (filters?.minConfidence !== undefined) {
+        params.append('minConfidence', String(filters.minConfidence))
+      }
       if (filters?.limit !== undefined) {
         params.append('limit', String(filters.limit))
       }
@@ -120,6 +124,72 @@ export function usePhotos(filters?: PhotoFilters) {
       // Auto-refetch every 3 seconds if any photos are pending or processing
       const hasActivePhotos = query.state.data?.photos?.some(
         (p) => p.detection_status === 'pending' || p.detection_status === 'processing'
+      )
+      return hasActivePhotos ? 3000 : false
+    },
+  })
+}
+
+/**
+ * Hook to fetch photos with infinite scroll pagination
+ * Uses cursor-based pagination for efficient loading
+ */
+export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
+  return useInfiniteQuery({
+    queryKey: ['photos', 'infinite', filters],
+    queryFn: async ({ pageParam }): Promise<PhotosResponse> => {
+      const params = new URLSearchParams()
+
+      // Build query params from filters
+      if (filters?.status !== undefined) {
+        params.append('status', filters.status)
+      }
+      if (filters?.hasDeer !== undefined) {
+        params.append('hasDeer', String(filters.hasDeer))
+      }
+      if (filters?.batchId !== undefined) {
+        params.append('batchId', filters.batchId)
+      }
+      if (filters?.cameraId !== undefined) {
+        params.append('cameraId', filters.cameraId)
+      }
+      if (filters?.isArchived !== undefined) {
+        params.append('isArchived', String(filters.isArchived))
+      }
+      if (filters?.minConfidence !== undefined) {
+        params.append('minConfidence', String(filters.minConfidence))
+      }
+      if (filters?.limit !== undefined) {
+        params.append('limit', String(filters.limit))
+      } else {
+        params.append('limit', '50')
+      }
+
+      // Add cursor for pagination
+      if (pageParam) {
+        params.append('cursor', pageParam)
+      }
+
+      const queryString = params.toString()
+      const url = `/api/photos${queryString ? `?${queryString}` : ''}`
+
+      const res = await fetch(url)
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: 'Failed to fetch photos' }))
+        throw new Error(error.error || 'Failed to fetch photos')
+      }
+
+      return res.json()
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    refetchInterval: (query) => {
+      // Auto-refetch every 3 seconds if any photos are pending or processing
+      const hasActivePhotos = query.state.data?.pages?.some((page) =>
+        page.photos.some(
+          (p) => p.detection_status === 'pending' || p.detection_status === 'processing'
+        )
       )
       return hasActivePhotos ? 3000 : false
     },

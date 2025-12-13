@@ -1,145 +1,34 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { PhotoUploader } from '@/components/photos/photo-uploader'
-import { UploadProgressPanel } from '@/components/photos/upload-progress-panel'
+import { Suspense, useState } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { PhotoGrid } from '@/components/photos/photo-grid'
 import { PhotoFilters, type PhotoFilters as PhotoFiltersType } from '@/components/photos/photo-filters'
-import { PhotoViewer } from '@/components/photos/photo-viewer'
 import { usePhotos } from '@/lib/hooks/use-photos'
-import { useUploadStore } from '@/lib/stores/upload'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Camera, CheckCircle, Clock, XCircle } from 'lucide-react'
 import type { PhotoFilters as ServicePhotoFilters } from '@/lib/services/photos'
 
-export default function PhotosPage() {
-  // Filter state
-  const [filters, setFilters] = useState<PhotoFiltersType>({
-    status: 'all',
-    hasDeer: null,
-    batchId: undefined,
-    qualityStatus: 'all',
-  })
+function PhotosContent() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
 
-  // Photo viewer state
-  const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null)
-  const [photoIds, setPhotoIds] = useState<string[]>([])
+  // Initialize filters from URL params
+  const getInitialFilters = (): PhotoFiltersType => {
+    const status = searchParams.get('status') as PhotoFiltersType['status'] | null
+    const hasDeerParam = searchParams.get('hasDeer')
+    const qualityStatus = searchParams.get('qualityStatus') as PhotoFiltersType['qualityStatus'] | null
+    const minConfidenceParam = searchParams.get('minConfidence')
 
-  // Query client for cache invalidation
-  const queryClient = useQueryClient()
-
-  // Upload store
-  const {
-    uploadQueue,
-    setIsPreparing,
-    startUpload,
-    updateFileProgress,
-    markFileCompleted,
-    markFileFailed,
-  } = useUploadStore()
-
-  // Handle starting the upload
-  const handleStartUpload = useCallback(async () => {
-    const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
-    if (pendingFiles.length === 0) return
-
-    // Show preparing state immediately
-    setIsPreparing(true)
-
-    try {
-      // Step 1: Initialize batch and get signed URLs
-      const response = await fetch('/api/photos/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          files: pendingFiles.map((f) => ({
-            id: f.id,
-            filename: f.filename,
-            contentType: f.file.type,
-            size: f.file.size,
-          })),
-        }),
-      })
-
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || 'Failed to initialize upload')
-      }
-
-      const { batchId, uploads } = await response.json()
-
-      // Step 2: Update store with upload URLs and mark as uploading
-      startUpload(batchId, uploads)
-
-      // Step 3: Upload each file to its signed URL
-      const uploadPromises = pendingFiles.map(async (file) => {
-        const uploadInfo = uploads.find((u: { fileId: string }) => u.fileId === file.id)
-        if (!uploadInfo) {
-          markFileFailed(file.id, 'No upload URL received')
-          return
-        }
-
-        try {
-          const xhr = new XMLHttpRequest()
-
-          // Track progress
-          xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-              const progress = Math.round((event.loaded / event.total) * 100)
-              updateFileProgress(file.id, progress)
-            }
-          }
-
-          await new Promise<void>((resolve, reject) => {
-            xhr.onload = () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve()
-              } else {
-                reject(new Error(`Upload failed: ${xhr.status}`))
-              }
-            }
-            xhr.onerror = () => reject(new Error('Network error'))
-
-            xhr.open('PUT', uploadInfo.uploadUrl)
-            xhr.setRequestHeader('Content-Type', file.file.type)
-            xhr.send(file.file)
-          })
-
-          markFileCompleted(file.id)
-        } catch (err) {
-          markFileFailed(file.id, err instanceof Error ? err.message : 'Upload failed')
-        }
-      })
-
-      await Promise.all(uploadPromises)
-
-      // Step 4: Mark batch as complete with ONLY successfully uploaded image IDs
-      // Get the current state of the upload queue to check which files succeeded
-      const currentQueue = useUploadStore.getState().uploadQueue
-      const successfulUploads = uploads.filter((u: { fileId: string; imageId: string }) => {
-        const file = currentQueue.find(f => f.id === u.fileId)
-        return file?.status === 'completed'
-      })
-      const uploadedImageIds = successfulUploads.map((u: { imageId: string }) => u.imageId)
-
-      // Only trigger batch processing if at least one file was uploaded
-      if (uploadedImageIds.length > 0) {
-        await fetch('/api/photos/upload/complete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batchId, uploadedImageIds }),
-        })
-      }
-
-      // Step 5: Refresh photo list to show newly uploaded photos
-      await queryClient.invalidateQueries({ queryKey: ['photos'] })
-
-    } catch (err) {
-      console.error('Upload failed:', err)
-      setIsPreparing(false)
+    return {
+      status: status || 'all',
+      hasDeer: hasDeerParam === null ? null : hasDeerParam === 'true',
+      batchId: undefined,
+      qualityStatus: qualityStatus || 'all',
+      minConfidence: minConfidenceParam ? parseInt(minConfidenceParam, 10) : undefined,
     }
-  }, [uploadQueue, setIsPreparing, startUpload, updateFileProgress, markFileCompleted, markFileFailed, queryClient])
+  }
+
+  // Filter state
+  const [filters, setFilters] = useState<PhotoFiltersType>(getInitialFilters)
 
   // Convert component filters to service filters
   const serviceFilters: ServicePhotoFilters = {
@@ -147,6 +36,7 @@ export default function PhotosPage() {
     ...(filters.hasDeer !== null && filters.hasDeer !== undefined ? { hasDeer: filters.hasDeer } : {}),
     ...(filters.batchId !== undefined ? { batchId: filters.batchId } : {}),
     ...(filters.qualityStatus !== 'all' && filters.qualityStatus !== undefined ? { qualityStatus: filters.qualityStatus } : {}),
+    ...(filters.minConfidence !== undefined ? { minConfidence: filters.minConfidence } : {}),
     limit: 50,
   }
 
@@ -155,32 +45,6 @@ export default function PhotosPage() {
 
   // Track photo IDs for navigation
   const photos = data?.photos ?? []
-
-  useEffect(() => {
-    if (photos.length > 0) {
-      setPhotoIds(photos.map(p => p.id))
-    }
-  }, [photos])
-
-  // Photo viewer navigation
-  const handleNavigate = (direction: 'prev' | 'next') => {
-    if (!selectedPhotoId || photoIds.length === 0) return
-
-    const currentIndex = photoIds.indexOf(selectedPhotoId)
-    if (currentIndex === -1) return
-
-    let newIndex: number
-    if (direction === 'prev') {
-      newIndex = currentIndex > 0 ? currentIndex - 1 : photoIds.length - 1
-    } else {
-      newIndex = currentIndex < photoIds.length - 1 ? currentIndex + 1 : 0
-    }
-
-    const newPhotoId = photoIds[newIndex]
-    if (newPhotoId !== undefined) {
-      setSelectedPhotoId(newPhotoId)
-    }
-  }
 
   // Calculate stats
   const stats = {
@@ -191,88 +55,53 @@ export default function PhotosPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-cream">
-          Photos
-        </h1>
-        <p className="mt-2 text-cream-dark">
-          Upload and manage your game camera photos
-        </p>
+    <div className="space-y-4">
+      {/* Header with Stats */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-cream">
+            Photos
+          </h1>
+          {/* Compact Stats Bar */}
+          <div className="mt-1 flex items-center gap-4 text-sm">
+            <span className="text-cream-dark">
+              <span className="font-semibold tabular-nums text-cream">{stats.total}</span> total
+            </span>
+            {stats.processing > 0 && (
+              <span className="text-blue-400">
+                <span className="font-semibold tabular-nums">{stats.processing}</span> processing
+              </span>
+            )}
+            {stats.completed > 0 && (
+              <span className="text-green-400">
+                <span className="font-semibold tabular-nums">{stats.completed}</span> completed
+              </span>
+            )}
+            {stats.failed > 0 && (
+              <span className="text-red-400">
+                <span className="font-semibold tabular-nums">{stats.failed}</span> failed
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-cream-dark">
-              Total Photos
-            </CardTitle>
-            <Camera className="h-4 w-4 text-cream-dark" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-cream">{stats.total}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-cream-dark">
-              Processing
-            </CardTitle>
-            <Clock className="h-4 w-4 text-blue-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-400">{stats.processing}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-cream-dark">
-              Completed
-            </CardTitle>
-            <CheckCircle className="h-4 w-4 text-green-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-400">{stats.completed}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-cream-dark">
-              Failed
-            </CardTitle>
-            <XCircle className="h-4 w-4 text-red-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-400">{stats.failed}</div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Filters Toolbar */}
+      <PhotoFilters filters={filters} onFiltersChange={setFilters} />
 
-      {/* Upload Section */}
-      <PhotoUploader onStartUpload={handleStartUpload} />
-      <UploadProgressPanel />
-
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <PhotoFilters filters={filters} onFiltersChange={setFilters} />
-        </CardContent>
-      </Card>
-
-      {/* Photo Grid - Uses its own data fetching */}
+      {/* Photo Grid */}
       <PhotoGrid
         filters={serviceFilters}
-        onPhotoClick={(id) => setSelectedPhotoId(id)}
-      />
-
-      {/* Photo Viewer Modal */}
-      <PhotoViewer
-        photoId={selectedPhotoId}
-        onClose={() => setSelectedPhotoId(null)}
-        onNavigate={handleNavigate}
+        onPhotoClick={(id) => router.push(`/photos/${id}`)}
       />
     </div>
+  )
+}
+
+export default function PhotosPage() {
+  return (
+    <Suspense fallback={<div className="text-cream-dark">Loading photos...</div>}>
+      <PhotosContent />
+    </Suspense>
   )
 }

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import type { Image, ImageInsert, ImageUpdate, Detection } from '@/types/database'
+import type { Image, ImageInsert, ImageUpdate, Detection, Json } from '@/types/database'
 
 // Filter types for querying photos
 export interface PhotoFilters {
@@ -9,8 +9,13 @@ export interface PhotoFilters {
   cameraId?: string
   isArchived?: boolean
   qualityStatus?: string
+  minConfidence?: number  // 0-100 integer
+  sex?: string  // 'buck' | 'doe' | 'fawn' | 'unknown'
+  minPoints?: number
+  maxPoints?: number
   limit?: number
   offset?: number
+  cursor?: string  // Photo ID to start after (for cursor-based pagination)
 }
 
 // Data types for creating and updating photos
@@ -20,6 +25,7 @@ export interface CreatePhotoData {
   file_size_bytes?: number | null
   captured_at?: string | null
   detection_status?: string
+  exif_data?: Json | null
 }
 
 export interface UpdatePhotoData {
@@ -49,18 +55,33 @@ export async function getPhotos(
 }> {
   const supabase = await createClient()
 
-  // If filtering by quality status, we need to join with detections
-  if (filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all') {
-    // Use a subquery approach: get image IDs that have detections with the specified quality status
-    const { data: detections, error: detectionsError } = await supabase
-      .from('detections')
-      .select('image_id')
-      .eq('quality_status', filters.qualityStatus)
+  // Determine if we need to filter by detections (qualityStatus or minConfidence)
+  const needsQualityFilter = filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all'
+  const needsConfidenceFilter = filters?.minConfidence !== undefined
+
+  // If filtering by quality status or confidence, we need to join with detections
+  if (needsQualityFilter || needsConfidenceFilter) {
+    // Build detection query based on filters
+    let detectionQuery = supabase.from('detections').select('image_id')
+
+    // Apply quality status filter
+    if (needsQualityFilter) {
+      detectionQuery = detectionQuery.eq('quality_status', filters!.qualityStatus!)
+    }
+
+    // Apply confidence filter (convert 0-100 to 0-1 scale)
+    if (needsConfidenceFilter) {
+      const threshold = filters!.minConfidence! / 100
+      detectionQuery = detectionQuery.gte('confidence', threshold)
+    }
+
+    const { data: detections, error: detectionsError } = await detectionQuery
 
     if (detectionsError !== null) {
       return { data: null, error: detectionsError, count: null }
     }
 
+    // Get unique image IDs that match the detection criteria
     const imageIds = [...new Set((detections ?? []).map((d: { image_id: string }) => d.image_id))]
 
     if (imageIds.length === 0) {
@@ -74,6 +95,7 @@ export async function getPhotos(
       .eq('user_id', userId)
       .in('id', imageIds)
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
 
     // Apply other filters
     if (filters?.status !== undefined) {
@@ -96,6 +118,18 @@ export async function getPhotos(
       query = query.eq('is_archived', filters.isArchived)
     }
 
+    // Apply cursor-based pagination
+    // Cursor format: created_at::id (no DB lookup needed)
+    if (filters?.cursor !== undefined) {
+      const [cursorCreatedAt, cursorId] = filters.cursor.split('::')
+      if (cursorCreatedAt && cursorId) {
+        // Filter for photos that come after the cursor
+        query = query.or(
+          `created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`
+        )
+      }
+    }
+
     // Apply pagination
     const limit = filters?.limit ?? 50
     const offset = filters?.offset ?? 0
@@ -110,12 +144,13 @@ export async function getPhotos(
     return { data, error: null, count }
   }
 
-  // Standard query without quality status filter
+  // Standard query without detection-based filters
   let query = supabase
     .from('images')
     .select('*', { count: 'exact' })
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
 
   // Apply filters
   if (filters?.status !== undefined) {
@@ -136,6 +171,18 @@ export async function getPhotos(
 
   if (filters?.isArchived !== undefined) {
     query = query.eq('is_archived', filters.isArchived)
+  }
+
+  // Apply cursor-based pagination
+  // Cursor format: created_at::id (no DB lookup needed)
+  if (filters?.cursor !== undefined) {
+    const [cursorCreatedAt, cursorId] = filters.cursor.split('::')
+    if (cursorCreatedAt && cursorId) {
+      // Filter for photos that come after the cursor
+      query = query.or(
+        `created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`
+      )
+    }
   }
 
   // Apply pagination
@@ -176,10 +223,10 @@ export async function getPhoto(
     return { data: null, error: photoError }
   }
 
-  // Get detections for this photo
+  // Get detections for this photo (with deer name if linked)
   const { data: detections, error: detectionsError } = await supabase
     .from('detections')
-    .select('*')
+    .select('*, deer:deer_id(id, name)')
     .eq('image_id', photoId)
 
   if (detectionsError !== null) {
@@ -192,6 +239,45 @@ export async function getPhoto(
   }
 
   return { data: photoWithDetections, error: null }
+}
+
+/**
+ * Get adjacent photo IDs (prev/next) for navigation
+ * Returns prev (newer) and next (older) photos based on imported_at order
+ */
+export async function getAdjacentPhotos(
+  userId: string,
+  currentPhotoId: string
+): Promise<{
+  prevId: string | null
+  nextId: string | null
+}> {
+  const supabase = await createClient()
+
+  // Get all photo IDs ordered by imported_at desc (newest first)
+  const { data: photos } = await supabase
+    .from('images')
+    .select('id')
+    .eq('user_id', userId)
+    .order('imported_at', { ascending: false })
+    .order('id', { ascending: false })
+
+  if (!photos || photos.length === 0) {
+    return { prevId: null, nextId: null }
+  }
+
+  // Find current photo index
+  const currentIndex = photos.findIndex(p => p.id === currentPhotoId)
+
+  if (currentIndex === -1) {
+    return { prevId: null, nextId: null }
+  }
+
+  // prev = newer photo (lower index), next = older photo (higher index)
+  const prevId = currentIndex > 0 ? photos[currentIndex - 1]?.id ?? null : null
+  const nextId = currentIndex < photos.length - 1 ? photos[currentIndex + 1]?.id ?? null : null
+
+  return { prevId, nextId }
 }
 
 /**
@@ -212,6 +298,7 @@ export async function createPhoto(
     ...(data.camera_id !== undefined && { camera_id: data.camera_id }),
     ...(data.file_size_bytes !== undefined && { file_size_bytes: data.file_size_bytes }),
     ...(data.captured_at !== undefined && { captured_at: data.captured_at }),
+    ...(data.exif_data !== undefined && { exif_data: data.exif_data }),
     detection_status: data.detection_status ?? 'pending',
   }
 
@@ -500,4 +587,39 @@ export async function retryAllFailed(
   }
 
   return { data: { count: count ?? 0 }, error: null }
+}
+
+/**
+ * Update image with Gemini analysis results
+ */
+export async function updateImageAnalysis(
+  imageId: string,
+  analysisData: {
+    has_deer: boolean;
+    deer_count: number;
+    analysis_notes: string | null;
+    analyzed_at: string; // ISO timestamp
+    detection_status: string;
+  }
+): Promise<{
+  data: Image | null
+  error: Error | null
+}> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('images')
+    .update({
+      has_deer: analysisData.has_deer,
+      deer_count: analysisData.deer_count,
+      analysis_notes: analysisData.analysis_notes,
+      analyzed_at: analysisData.analyzed_at,
+      detection_status: analysisData.detection_status,
+      error_message: null, // Clear any previous error
+    } as never)
+    .eq('id', imageId)
+    .select()
+    .single()
+
+  return { data, error }
 }

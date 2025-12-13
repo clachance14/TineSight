@@ -9,12 +9,29 @@ export interface UploadFile {
   imageId?: string
   uploadUrl?: string
   error?: string
+  // EXIF metadata
+  capturedAt?: Date | null
+  make?: string | null
+  model?: string | null
+  deviceIdentifier?: string | null
+  exifSignature?: string | null
+  exifData?: Record<string, unknown>
 }
 
 export interface UploadInitData {
   fileId: string
   imageId: string
   uploadUrl: string
+}
+
+export interface FileWithMetadata {
+  file: File
+  capturedAt?: Date | null
+  make?: string | null
+  model?: string | null
+  deviceIdentifier?: string | null
+  exifSignature?: string | null
+  exifData?: Record<string, unknown>
 }
 
 interface UploadState {
@@ -29,7 +46,7 @@ interface UploadState {
   totalCount: number
 
   // Actions
-  addFiles: (files: File[]) => void
+  addFiles: (files: FileWithMetadata[]) => void
   removeFile: (id: string) => void
   clearQueue: () => void
   setIsPreparing: (isPreparing: boolean) => void
@@ -54,15 +71,23 @@ const initialState = {
 export const useUploadStore = create<UploadState>((set) => ({
   ...initialState,
 
-  addFiles: (files) =>
+  addFiles: (filesWithMetadata) =>
     set((state) => {
-      const newFiles: UploadFile[] = files.map((file) => ({
-        id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-        file,
-        filename: file.name,
-        status: 'pending',
-        progress: 0,
-      }))
+      const newFiles: UploadFile[] = filesWithMetadata.map(
+        ({ file, capturedAt, make, model, deviceIdentifier, exifSignature, exifData }) => ({
+          id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          file,
+          filename: file.name,
+          status: 'pending',
+          progress: 0,
+          capturedAt: capturedAt ?? null,
+          make: make ?? null,
+          model: model ?? null,
+          deviceIdentifier: deviceIdentifier ?? null,
+          exifSignature: exifSignature ?? null,
+          exifData: exifData ?? {},
+        })
+      )
 
       return {
         uploadQueue: [...state.uploadQueue, ...newFiles],

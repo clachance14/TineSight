@@ -2,6 +2,8 @@
 
 import Link from 'next/link'
 import { useFeedback } from '@/lib/hooks/use-roi'
+import { useDetectionHover } from '@/lib/stores/detection-hover'
+import { useDetectionEdit } from '@/lib/stores/detection-edit'
 import type { FeedbackType } from '@/components/photos/quality-feedback-dialog'
 
 // Feedback type labels mapping
@@ -27,8 +29,14 @@ interface DetectionCardProps {
     bboxWidth: number
     bboxHeight: number
     deerId?: string | null
+    species?: string | null
+    sex?: string | null
+    antlerPoints?: number | null
+    ageClass?: string | null
   }
   index: number
+  isHovered?: boolean
+  onHover?: (id: string | null) => void
 }
 
 export function DetectionCardWithFeedback({ detection, index }: DetectionCardProps) {
@@ -36,8 +44,46 @@ export function DetectionCardWithFeedback({ detection, index }: DetectionCardPro
   const { data: feedbackData } = useFeedback(detection.id)
   const feedback = feedbackData?.feedback || []
 
+  // Shared hover state with detection overlay
+  const { hoveredDetectionId, setHoveredDetectionId } = useDetectionHover()
+  const isHovered = hoveredDetectionId === detection.id
+
+  // Detection edit panel state
+  const { selectedDetectionId, openPanel } = useDetectionEdit()
+  const isSelected = selectedDetectionId === detection.id
+
+  // Format deer info from Gemini analysis
+  const formatDeerInfo = () => {
+    const parts: string[] = []
+    if (detection.species) {
+      parts.push(detection.species.replace('_', ' '))
+    }
+    if (detection.sex && detection.sex !== 'unknown') {
+      parts.push(detection.sex)
+    }
+    if (detection.antlerPoints) {
+      parts.push(`${detection.antlerPoints}-point`)
+    }
+    if (detection.ageClass && detection.ageClass !== 'unknown') {
+      // Capitalize first letter (young -> Young, mature -> Mature)
+      parts.push(detection.ageClass.charAt(0).toUpperCase() + detection.ageClass.slice(1))
+    }
+    return parts.length > 0 ? parts.join(' • ') : detection.class || 'Unknown'
+  }
+
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-deep p-3 space-y-2">
+    <div
+      className={`rounded-lg border p-3 space-y-2 transition-all duration-200 cursor-pointer ${
+        isSelected
+          ? 'border-copper bg-copper/20 ring-2 ring-copper'
+          : isHovered
+          ? 'border-copper bg-copper/10 ring-1 ring-copper/50'
+          : 'border-slate-700 bg-slate-deep'
+      }`}
+      onClick={() => openPanel(detection.id)}
+      onMouseEnter={() => setHoveredDetectionId(detection.id)}
+      onMouseLeave={() => setHoveredDetectionId(null)}
+    >
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-cream">
           Detection {index + 1}
@@ -47,12 +93,10 @@ export function DetectionCardWithFeedback({ detection, index }: DetectionCardPro
         </span>
       </div>
 
-      {detection.class && (
-        <div>
-          <p className="text-xs text-cream-dark">Class</p>
-          <p className="text-sm text-cream capitalize">{detection.class}</p>
-        </div>
-      )}
+      {/* Deer info from Gemini */}
+      <div>
+        <p className="text-sm text-cream capitalize font-medium">{formatDeerInfo()}</p>
+      </div>
 
       {/* Quality status */}
       {detection.qualityStatus && detection.qualityStatus !== 'pending' && (
@@ -109,10 +153,6 @@ export function DetectionCardWithFeedback({ detection, index }: DetectionCardPro
           </div>
         </div>
       )}
-
-      <div className="text-xs text-cream-dark">
-        Bounding Box: {Math.round(detection.bboxX)}, {Math.round(detection.bboxY)}, {Math.round(detection.bboxWidth)}x{Math.round(detection.bboxHeight)}
-      </div>
 
       {detection.deerId && (
         <div className="pt-2 border-t border-slate-700">
