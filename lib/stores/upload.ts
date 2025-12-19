@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 export interface UploadFile {
   id: string
-  file: File
+  file?: File // Optional - released after upload starts to free memory
   filename: string
   status: 'pending' | 'uploading' | 'completed' | 'failed'
   progress: number
@@ -49,6 +49,7 @@ interface UploadState {
   addFiles: (files: FileWithMetadata[]) => void
   removeFile: (id: string) => void
   clearQueue: () => void
+  clearCompletedFiles: () => void
   setIsPreparing: (isPreparing: boolean) => void
   startUpload: (batchId: string, uploadData: UploadInitData[]) => void
   updateFileProgress: (id: string, progress: number) => void
@@ -126,11 +127,18 @@ export const useUploadStore = create<UploadState>((set) => ({
       failedCount: 0,
     })),
 
+  clearCompletedFiles: () =>
+    set((state) => ({
+      uploadQueue: state.uploadQueue.filter((f) => f.status !== 'completed'),
+    })),
+
   setIsPreparing: (isPreparing) => set({ isPreparing }),
 
   startUpload: (batchId, uploadData) =>
     set((state) => {
       // Match upload data to files in queue and update their state
+      // Note: We DON'T clear file here - it's still needed for the XHR upload
+      // The file will be garbage collected after the upload completes
       const updatedQueue = state.uploadQueue.map((file) => {
         const matchingData = uploadData.find((data) => data.fileId === file.id)
         if (matchingData) {
@@ -172,11 +180,14 @@ export const useUploadStore = create<UploadState>((set) => ({
 
   markFileCompleted: (id) =>
     set((state) => {
-      const updatedQueue = state.uploadQueue.map((file) =>
-        file.id === id
-          ? { ...file, status: 'completed' as const, progress: 100 }
-          : file
-      )
+      const updatedQueue = state.uploadQueue.map((file) => {
+        if (file.id === id) {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { file: _fileData, ...rest } = file // Destructure to release file from memory
+          return { ...rest, status: 'completed' as const, progress: 100 }
+        }
+        return file
+      })
 
       const newCompletedCount = state.completedCount + 1
       const totalProgress = updatedQueue.reduce((sum, f) => sum + f.progress, 0)
@@ -199,11 +210,14 @@ export const useUploadStore = create<UploadState>((set) => ({
 
   markFileFailed: (id, error) =>
     set((state) => {
-      const updatedQueue = state.uploadQueue.map((file) =>
-        file.id === id
-          ? { ...file, status: 'failed' as const, error }
-          : file
-      )
+      const updatedQueue = state.uploadQueue.map((file) => {
+        if (file.id === id) {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { file: _fileData, ...rest } = file // Destructure to release file from memory
+          return { ...rest, status: 'failed' as const, error }
+        }
+        return file
+      })
 
       const newFailedCount = state.failedCount + 1
       const totalProgress = updatedQueue.reduce((sum, f) => sum + f.progress, 0)
@@ -226,3 +240,40 @@ export const useUploadStore = create<UploadState>((set) => ({
 
   reset: () => set(initialState),
 }))
+
+// Batched progress updater - collects updates and flushes every 250ms
+// This dramatically reduces re-renders during bulk uploads
+let progressBatch: Map<string, number> = new Map()
+let flushTimeout: ReturnType<typeof setTimeout> | null = null
+
+const flushProgressUpdates = () => {
+  if (progressBatch.size === 0) return
+
+  const updates = new Map(progressBatch)
+  progressBatch.clear()
+
+  useUploadStore.setState((state) => {
+    const updatedQueue = state.uploadQueue.map((file) => {
+      const newProgress = updates.get(file.id)
+      return newProgress !== undefined ? { ...file, progress: newProgress } : file
+    })
+
+    const totalProgress = updatedQueue.reduce((sum, f) => sum + f.progress, 0)
+    const overallProgress = updatedQueue.length > 0
+      ? Math.round(totalProgress / updatedQueue.length)
+      : 0
+
+    return { uploadQueue: updatedQueue, overallProgress }
+  })
+}
+
+export const batchedUpdateProgress = (id: string, progress: number) => {
+  progressBatch.set(id, progress)
+
+  if (!flushTimeout) {
+    flushTimeout = setTimeout(() => {
+      flushTimeout = null
+      flushProgressUpdates()
+    }, 250) // Flush every 250ms - max 4 state updates per second
+  }
+}

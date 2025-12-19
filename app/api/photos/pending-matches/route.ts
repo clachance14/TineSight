@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getSignedViewUrl } from '@/lib/services/photos'
+import { getCachedSignedUrls } from '@/lib/cache/signed-url-cache'
 
 interface DetectionSummary {
   id: string
@@ -122,47 +122,46 @@ export async function GET(
       entry.detectionCounts.set(detectionId, currentCount + 1)
     }
 
-    // Build response with signed URLs
-    const photos: PendingMatchPhoto[] = []
+    // Build response with signed URLs - CACHED batch operation
+    const imageEntries = Array.from(imageMap.entries())
 
-    for (const [_imageId, entry] of imageMap) {
-      const { image, detectionCounts } = entry
+    // Collect all file paths (thumbnail + full for each image)
+    const allPaths: string[] = []
+    const pathIndexMap: { thumbnailIdx: number; imageIdx: number }[] = []
 
-      // Get thumbnail URL if available
-      let thumbnailUrl: string | null = null
-      if (image.thumbnail_path !== null) {
-        const { data: thumbUrl, error: thumbError } = await getSignedViewUrl(
-          image.thumbnail_path
-        )
-        if (thumbError === null && thumbUrl !== null) {
-          thumbnailUrl = thumbUrl
-        }
+    for (const [, entry] of imageEntries) {
+      const thumbnailIdx = entry.image.thumbnail_path ? allPaths.length : -1
+      if (entry.image.thumbnail_path) {
+        allPaths.push(entry.image.thumbnail_path)
       }
+      const imageIdx = allPaths.length
+      allPaths.push(entry.image.file_path)
+      pathIndexMap.push({ thumbnailIdx, imageIdx })
+    }
 
-      // Get full image URL
-      let imageUrl: string | null = null
-      const { data: fullUrl, error: fullError } = await getSignedViewUrl(image.file_path)
-      if (fullError === null && fullUrl !== null) {
-        imageUrl = fullUrl
-      }
+    const cachedUrls = await getCachedSignedUrls(allPaths)
+
+    // Build photos array with URLs mapped back
+    const photos: PendingMatchPhoto[] = imageEntries.map(([, entry], index) => {
+      const { thumbnailIdx, imageIdx } = pathIndexMap[index]
 
       // Build detection summaries
-      const detections: DetectionSummary[] = Array.from(detectionCounts.entries()).map(
-        ([detectionId, count]) => ({
-          id: detectionId,
-          pending_match_count: count,
-        })
-      )
+      const detections: DetectionSummary[] = Array.from(
+        entry.detectionCounts.entries()
+      ).map(([detectionId, count]) => ({
+        id: detectionId,
+        pending_match_count: count,
+      }))
 
-      photos.push({
-        id: image.id,
-        file_path: image.file_path,
-        captured_at: image.captured_at,
-        thumbnailUrl,
-        imageUrl,
+      return {
+        id: entry.image.id,
+        file_path: entry.image.file_path,
+        captured_at: entry.image.captured_at,
+        thumbnailUrl: thumbnailIdx >= 0 ? cachedUrls[thumbnailIdx] : null,
+        imageUrl: cachedUrls[imageIdx],
         detections,
-      })
-    }
+      }
+    })
 
     // Sort by captured_at descending (most recent first)
     photos.sort((a, b) => {

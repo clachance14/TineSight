@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getMatchCandidates } from '@/lib/services/matching'
-import { getSignedViewUrl } from '@/lib/services/photos'
+import { getCachedSignedUrls } from '@/lib/cache/signed-url-cache'
 import type { Deer } from '@/types/database'
 
 interface DeerSummary {
@@ -105,30 +105,45 @@ export async function GET(
       return NextResponse.json({ error: 'Failed to fetch deer details' }, { status: 500 })
     }
 
-    // Build deer lookup map with representative image URLs
+    // Build deer lookup map with representative image URLs - CACHED batch operation
     const deerMap = new Map<string, DeerSummary>()
 
-    if (deerList !== null) {
-      for (const deer of deerList) {
+    if (deerList !== null && deerList.length > 0) {
+      // Collect all file paths first
+      const deerWithPaths = deerList.map((deer) => {
         const deerData = deer as Deer & { images?: { file_path: string } | null }
-        let representativeImageUrl: string | null = null
-
-        // Get signed URL for representative image if it exists
-        if (deerData.images?.file_path !== undefined && deerData.images?.file_path !== null) {
-          const { data: signedUrl, error: urlError } = await getSignedViewUrl(deerData.images.file_path)
-          if (urlError === null && signedUrl !== null) {
-            representativeImageUrl = signedUrl
-          }
+        return {
+          deerData,
+          filePath: deerData.images?.file_path ?? null,
         }
+      })
 
+      // Get all URLs from cache (only non-null paths)
+      const filePaths = deerWithPaths
+        .map(({ filePath }) => filePath)
+        .filter((p): p is string => p !== null)
+
+      const cachedUrls = await getCachedSignedUrls(filePaths)
+
+      // Build lookup for file path -> URL
+      const urlLookup = new Map<string, string | null>()
+      let urlIndex = 0
+      for (const { filePath } of deerWithPaths) {
+        if (filePath !== null) {
+          urlLookup.set(filePath, cachedUrls[urlIndex++])
+        }
+      }
+
+      // Build map with results
+      deerWithPaths.forEach(({ deerData, filePath }) => {
         deerMap.set(deerData.id, {
           id: deerData.id,
           name: deerData.name,
           first_seen: deerData.first_seen,
           last_seen: deerData.last_seen,
-          representative_image_url: representativeImageUrl,
+          representative_image_url: filePath ? (urlLookup.get(filePath) ?? null) : null,
         })
-      }
+      })
     }
 
     // Build response with deer details

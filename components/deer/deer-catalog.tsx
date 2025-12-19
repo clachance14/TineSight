@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import Image from 'next/image'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
@@ -17,6 +16,12 @@ interface DeerProfile {
   notes: string | null
   sighting_count: number
   reference_image_url?: string | null
+  reference_bbox?: {
+    x: number | null
+    y: number | null
+    width: number | null
+    height: number | null
+  } | null
   created_at: string
 }
 
@@ -106,15 +111,33 @@ export function DeerCatalog({ onDeerClick, onCreateClick }: DeerCatalogProps): R
               >
                 <CardContent className="p-3">
                   <div className="relative aspect-square overflow-hidden rounded-lg bg-slate">
-                    {d.reference_image_url !== null && d.reference_image_url !== undefined ? (
-                      <Image
-                        src={d.reference_image_url}
-                        alt={d.name}
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 640px) 50vw, 25vw"
-                        unoptimized
-                      />
+                    {d.reference_image_url && d.reference_bbox?.x != null ? (
+                      (() => {
+                        // Calculate proper zoom to fit bbox with padding
+                        const imageSize = 10000
+                        const widthPct = ((d.reference_bbox.width ?? 1000) / imageSize) * 100
+                        const heightPct = ((d.reference_bbox.height ?? 1000) / imageSize) * 100
+                        const padding = 0.20
+                        const regionWidthPct = widthPct * (1 + 2 * padding)
+                        const regionHeightPct = heightPct * (1 + 2 * padding)
+                        const bgSizeX = (100 / regionWidthPct) * 100
+                        const bgSizeY = (100 / regionHeightPct) * 100
+                        const bgSize = Math.min(bgSizeX, bgSizeY, 2000)
+                        const centerXPct = ((d.reference_bbox.x ?? 5000) / imageSize) * 100
+                        const centerYPct = ((d.reference_bbox.y ?? 5000) / imageSize) * 100
+
+                        return (
+                          <div
+                            className="absolute inset-0"
+                            style={{
+                              backgroundImage: `url(${d.reference_image_url})`,
+                              backgroundSize: `${bgSize}%`,
+                              backgroundPosition: `${centerXPct}% ${centerYPct}%`,
+                              backgroundRepeat: 'no-repeat',
+                            }}
+                          />
+                        )
+                      })()
                     ) : (
                       <div className="flex h-full w-full items-center justify-center">
                         <span className="text-4xl">🦌</span>

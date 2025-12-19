@@ -2,8 +2,6 @@
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { analyzePhoto } from "./analyze-photo";
-import { analyzePhotoSam2 } from "./analyze-photo-sam2";
-import { isSam2PipelineEnabled } from "@/lib/config/feature-flags";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
@@ -59,57 +57,28 @@ export const batchProcess = task({
 
       logger.info("Batch status updated to processing", { batchId });
 
-      // Fan-out: Trigger analyze-photo job for each image
-      // Check feature flag to determine which pipeline to use
-      const useSam2Pipeline = isSam2PipelineEnabled();
-
+      // Fan-out: Trigger analyze-photo job for each image using Gemini pipeline
       logger.info("Fan-out: triggering analyze-photo jobs", {
         batchId,
         imageCount: imageIds.length,
-        pipeline: useSam2Pipeline ? "sam2" : "gemini",
       });
 
-      if (useSam2Pipeline) {
-        // Use SAM2 pipeline for deer and antler detection
-        await analyzePhotoSam2.batchTriggerAndWait(
-          imageIds.map(imageId => ({ payload: { imageId, batchId } }))
-        );
-      } else {
-        // Use Gemini pipeline (existing)
-        await analyzePhoto.batchTriggerAndWait(
-          imageIds.map(imageId => ({ payload: { imageId, batchId } }))
-        );
-      }
+      // Use batchTrigger (fire and forget) instead of batchTriggerAndWait
+      // This is faster and more reliable - individual jobs update batch counters themselves
+      await analyzePhoto.batchTrigger(
+        imageIds.map(imageId => ({ payload: { imageId, batchId } }))
+      );
 
-      logger.info("All analyze-photo jobs completed", {
+      logger.info("All analyze-photo jobs triggered", {
         batchId,
         imageCount: imageIds.length,
-        pipeline: useSam2Pipeline ? "sam2" : "gemini",
       });
 
-      // Update batch status to 'completed'
-      logger.info("All image jobs triggered, updating batch to completed", {
+      // Note: batch status will remain 'processing' - individual jobs update counters
+      // The batch will be marked 'completed' when all jobs finish (tracked via counters)
+      logger.info("Batch fan-out completed - jobs are processing", {
         batchId,
-      });
-
-      const { error: completeError } = await supabase
-        .from("processing_batches")
-        .update({
-          status: "completed",
-        })
-        .eq("id", batchId);
-
-      if (completeError) {
-        logger.error("Failed to mark batch as completed", {
-          batchId,
-          error: completeError.message,
-        });
-        throw new Error(`Failed to complete batch: ${completeError.message}`);
-      }
-
-      logger.info("Batch processing completed successfully", {
-        batchId,
-        processedImages: imageIds.length,
+        triggeredJobs: imageIds.length,
       });
 
       return {

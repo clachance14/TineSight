@@ -78,6 +78,31 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Query database for all pending images in this batch (more robust than relying on frontend)
+    const { data: pendingImages, error: imagesError } = await supabase
+      .from('images')
+      .select('id')
+      .eq('batch_id', body.batchId)
+      .eq('detection_status', 'pending')
+
+    if (imagesError) {
+      console.error('Failed to fetch pending images:', imagesError)
+      return NextResponse.json(
+        { error: 'Failed to fetch pending images' },
+        { status: 500 }
+      )
+    }
+
+    const imageIds = pendingImages?.map((img) => img.id) ?? []
+
+    if (imageIds.length === 0) {
+      console.warn('No pending images found for batch:', body.batchId)
+      return NextResponse.json(
+        { error: 'No pending images found for this batch' },
+        { status: 400 }
+      )
+    }
+
     // Update batch status to processing
     const { data: updatedBatch, error: updateError } = await updateBatchStatus(
       body.batchId,
@@ -94,27 +119,32 @@ export async function POST(request: NextRequest) {
 
     // Trigger background processing job via Trigger.dev
     try {
-      await tasks.trigger('batch-process', {
+      const triggerResult = await tasks.trigger('batch-process', {
         batchId: body.batchId,
-        imageIds: body.uploadedImageIds,
+        imageIds,
       })
 
       console.log('Batch processing triggered:', {
         batchId: body.batchId,
-        imageCount: body.uploadedImageIds.length,
+        imageCount: imageIds.length,
         userId: user.id,
+        jobId: triggerResult?.id,
       })
     } catch (triggerError) {
       console.error('Failed to trigger batch processing:', triggerError)
-      // Don't fail the request - batch is marked as processing
-      // and can be manually retried later
+      // Revert batch status so it can be retried
+      await updateBatchStatus(body.batchId, 'pending')
+      return NextResponse.json(
+        { error: 'Failed to start processing. Please try again.' },
+        { status: 500 }
+      )
     }
 
     // Return success response
     const response: UploadCompleteResponse = {
       status: 'processing',
-      message: `Processing ${body.uploadedImageIds.length} photo${
-        body.uploadedImageIds.length === 1 ? '' : 's'
+      message: `Processing ${imageIds.length} photo${
+        imageIds.length === 1 ? '' : 's'
       }...`,
     }
 

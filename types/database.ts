@@ -39,6 +39,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      batch_metrics: {
+        Row: {
+          batch_id: string
+          created_at: string
+          duration_ms: number | null
+          gemini_call_type: string
+          id: string
+          image_id: string | null
+          is_rate_limited: boolean
+          model_used: string
+          prompt_tokens: number
+          response_tokens: number
+          retry_count: number
+          total_tokens: number
+        }
+        Insert: {
+          batch_id: string
+          created_at?: string
+          duration_ms?: number | null
+          gemini_call_type: string
+          id?: string
+          image_id?: string | null
+          is_rate_limited?: boolean
+          model_used: string
+          prompt_tokens?: number
+          response_tokens?: number
+          retry_count?: number
+          total_tokens?: number
+        }
+        Update: {
+          batch_id?: string
+          created_at?: string
+          duration_ms?: number | null
+          gemini_call_type?: string
+          id?: string
+          image_id?: string | null
+          is_rate_limited?: boolean
+          model_used?: string
+          prompt_tokens?: number
+          response_tokens?: number
+          retry_count?: number
+          total_tokens?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "batch_metrics_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "processing_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_metrics_image_id_fkey"
+            columns: ["image_id"]
+            isOneToOne: false
+            referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cameras: {
         Row: {
           created_at: string
@@ -261,7 +321,6 @@ export type Database = {
           analysis_source: string | null
           antler_bbox: Json | null
           antler_description: string | null
-          antler_points: number | null
           bbox_height: number | null
           bbox_width: number | null
           bbox_x: number | null
@@ -269,9 +328,11 @@ export type Database = {
           class: string | null
           confidence: number | null
           created_at: string
+          crop_file_path: string | null
           deer_id: string | null
           deleted_at: string | null
           distinguishing_features: string | null
+          estimated_point_range: string | null
           gemini_confidence: number | null
           head_bbox: Json | null
           id: string
@@ -282,6 +343,7 @@ export type Database = {
           sam3_antler_score: number | null
           sam3_deer_score: number | null
           sex: string | null
+          size_class: string | null
           species: string | null
         }
         Insert: {
@@ -289,7 +351,6 @@ export type Database = {
           analysis_source?: string | null
           antler_bbox?: Json | null
           antler_description?: string | null
-          antler_points?: number | null
           bbox_height?: number | null
           bbox_width?: number | null
           bbox_x?: number | null
@@ -297,9 +358,11 @@ export type Database = {
           class?: string | null
           confidence?: number | null
           created_at?: string
+          crop_file_path?: string | null
           deer_id?: string | null
           deleted_at?: string | null
           distinguishing_features?: string | null
+          estimated_point_range?: string | null
           gemini_confidence?: number | null
           head_bbox?: Json | null
           id?: string
@@ -310,6 +373,7 @@ export type Database = {
           sam3_antler_score?: number | null
           sam3_deer_score?: number | null
           sex?: string | null
+          size_class?: string | null
           species?: string | null
         }
         Update: {
@@ -317,7 +381,6 @@ export type Database = {
           analysis_source?: string | null
           antler_bbox?: Json | null
           antler_description?: string | null
-          antler_points?: number | null
           bbox_height?: number | null
           bbox_width?: number | null
           bbox_x?: number | null
@@ -325,9 +388,11 @@ export type Database = {
           class?: string | null
           confidence?: number | null
           created_at?: string
+          crop_file_path?: string | null
           deer_id?: string | null
           deleted_at?: string | null
           distinguishing_features?: string | null
+          estimated_point_range?: string | null
           gemini_confidence?: number | null
           head_bbox?: Json | null
           id?: string
@@ -338,6 +403,7 @@ export type Database = {
           sam3_antler_score?: number | null
           sam3_deer_score?: number | null
           sex?: string | null
+          size_class?: string | null
           species?: string | null
         }
         Relationships: [
@@ -353,6 +419,44 @@ export type Database = {
             columns: ["image_id"]
             isOneToOne: false
             referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      filter_presets: {
+        Row: {
+          created_at: string | null
+          filters: Json
+          id: string
+          is_default: boolean | null
+          name: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          filters: Json
+          id?: string
+          is_default?: boolean | null
+          name: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          filters?: Json
+          id?: string
+          is_default?: boolean | null
+          name?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "filter_presets_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -843,18 +947,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
-// Convenience type exports
-export type Camera = Tables<'cameras'>
-export type Deer = Tables<'deer'>
-export type DeerEmbedding = Tables<'deer_embeddings'>
-export type Detection = Tables<'detections'>
-export type DetectionInsert = TablesInsert<'detections'>
-export type Image = Tables<'images'>
-export type ImageInsert = TablesInsert<'images'>
-export type ImageUpdate = TablesUpdate<'images'>
-export type ProcessingBatch = Tables<'processing_batches'>
-export type ProcessingBatchInsert = TablesInsert<'processing_batches'>
-export type ProcessingBatchUpdate = TablesUpdate<'processing_batches'>
-export type Profile = Tables<'profiles'>
-export type ProfileInsert = TablesInsert<'profiles'>

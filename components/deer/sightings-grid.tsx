@@ -6,13 +6,15 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { BLUR_DATA_URL } from '@/lib/constants/image'
 
 interface Sighting {
   id: string
   image_id: string
   thumbnail_url?: string
   captured_at?: string
-  antler_points?: number
+  size_class?: string
 }
 
 interface SightingsGridProps {
@@ -69,7 +71,8 @@ export function SightingsGrid({
                       fill
                       className="object-cover"
                       sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-                      unoptimized
+                      placeholder="blur"
+                      blurDataURL={BLUR_DATA_URL}
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center">
@@ -81,9 +84,15 @@ export function SightingsGrid({
                   <p className="text-xs text-cream-dark">
                     {formatDate(sighting.captured_at)}
                   </p>
-                  {sighting.antler_points !== null && sighting.antler_points !== undefined && (
-                    <Badge variant="secondary" className="text-xs">
-                      {sighting.antler_points}pt
+                  {sighting.size_class && (
+                    <Badge
+                      variant={sighting.size_class.toLowerCase() === 'trophy' ? 'default' : 'secondary'}
+                      className={cn(
+                        'text-xs',
+                        sighting.size_class.toLowerCase() === 'trophy' && 'bg-copper text-cream'
+                      )}
+                    >
+                      {sighting.size_class.charAt(0).toUpperCase() + sighting.size_class.slice(1)}
                     </Badge>
                   )}
                 </div>

@@ -5,6 +5,7 @@ import type { Image, ImageInsert, ImageUpdate, Detection, Json } from '@/types/d
 export interface PhotoFilters {
   status?: string
   hasDeer?: boolean
+  hasDetections?: boolean  // true = with detections, false = without, undefined = all
   batchId?: string
   cameraId?: string
   isArchived?: boolean
@@ -13,6 +14,10 @@ export interface PhotoFilters {
   sex?: string  // 'buck' | 'doe' | 'fawn' | 'unknown'
   minPoints?: number
   maxPoints?: number
+  sizeClass?: string  // 'trophy' | 'standard' | 'basket' | 'spike' | 'unknown'
+  dateFrom?: string  // ISO date string
+  dateTo?: string  // ISO date string
+  deerId?: string  // Filter by named deer
   limit?: number
   offset?: number
   cursor?: string  // Photo ID to start after (for cursor-based pagination)
@@ -21,6 +26,7 @@ export interface PhotoFilters {
 // Data types for creating and updating photos
 export interface CreatePhotoData {
   file_path: string
+  batch_id?: string | null
   camera_id?: string | null
   file_size_bytes?: number | null
   captured_at?: string | null
@@ -55,14 +61,31 @@ export async function getPhotos(
 }> {
   const supabase = await createClient()
 
-  // Determine if we need to filter by detections (qualityStatus or minConfidence)
+  // Determine if we need to filter by detections
   const needsQualityFilter = filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all'
   const needsConfidenceFilter = filters?.minConfidence !== undefined
+  const needsSexFilter = filters?.sex !== undefined
+  const needsSizeClassFilter = filters?.sizeClass !== undefined
+  const needsPointsFilter = filters?.minPoints !== undefined || filters?.maxPoints !== undefined
+  const needsDeerFilter = filters?.deerId !== undefined
+  const needsHasDetectionsFilter = filters?.hasDetections !== undefined
 
-  // If filtering by quality status or confidence, we need to join with detections
-  if (needsQualityFilter || needsConfidenceFilter) {
-    // Build detection query based on filters
-    let detectionQuery = supabase.from('detections').select('image_id')
+  // If filtering by detection-related fields, we need to join with detections
+  if (needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter) {
+
+    // For hasDetections filter, we need ALL image_ids with any detection (unfiltered)
+    let allImageIdsWithDetections: string[] = []
+    if (needsHasDetectionsFilter) {
+      const { data: allDetections } = await supabase
+        .from('detections')
+        .select('image_id')
+        .is('deleted_at', null)
+      allImageIdsWithDetections = [...new Set((allDetections ?? []).map((d: { image_id: string }) => d.image_id))]
+    }
+
+    // Build detection query based on OTHER filters (not hasDetections)
+    let detectionQuery = supabase.from('detections').select('image_id, estimated_point_range')
+      .is('deleted_at', null)  // Exclude soft-deleted detections
 
     // Apply quality status filter
     if (needsQualityFilter) {
@@ -75,25 +98,83 @@ export async function getPhotos(
       detectionQuery = detectionQuery.gte('confidence', threshold)
     }
 
+    // Apply sex filter
+    if (needsSexFilter) {
+      detectionQuery = detectionQuery.eq('sex', filters!.sex!)
+    }
+
+    // Apply size class filter
+    if (needsSizeClassFilter) {
+      detectionQuery = detectionQuery.eq('size_class', filters!.sizeClass!)
+    }
+
+    // Apply deer filter
+    if (needsDeerFilter) {
+      detectionQuery = detectionQuery.eq('deer_id', filters!.deerId!)
+    }
+
     const { data: detections, error: detectionsError } = await detectionQuery
 
     if (detectionsError !== null) {
       return { data: null, error: detectionsError, count: null }
     }
 
-    // Get unique image IDs that match the detection criteria
-    const imageIds = [...new Set((detections ?? []).map((d: { image_id: string }) => d.image_id))]
+    // Filter detections by point range if needed
+    let filteredDetections = detections ?? []
+    if (needsPointsFilter) {
+      filteredDetections = filteredDetections.filter((d: { estimated_point_range: string | null }) => {
+        if (!d.estimated_point_range) return false
 
-    if (imageIds.length === 0) {
-      return { data: [], error: null, count: 0 }
+        // Parse point range (e.g., "8-10" or "10-12")
+        const match = d.estimated_point_range.match(/(\d+)-(\d+)/)
+        if (!match) return false
+
+        const minRange = parseInt(match[1]!, 10)
+        const maxRange = parseInt(match[2]!, 10)
+
+        // Check if range overlaps with filter criteria
+        if (filters?.minPoints !== undefined && maxRange < filters.minPoints) return false
+        if (filters?.maxPoints !== undefined && minRange > filters.maxPoints) return false
+
+        return true
+      })
     }
+
+    // Get unique image IDs that match the filtered detection criteria
+    const filteredImageIds = [...new Set(filteredDetections.map((d: { image_id: string }) => d.image_id))]
 
     // Build query with image ID filter
     let query = supabase
       .from('images')
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
-      .in('id', imageIds)
+
+    // Handle hasDetections filter - uses ALL detections, not filtered ones
+    if (filters?.hasDetections === false) {
+      // Show images WITHOUT any detections
+      if (allImageIdsWithDetections.length > 0) {
+        query = query.not('id', 'in', `(${allImageIdsWithDetections.join(',')})`)
+      }
+      // If no images have detections, all images match (no filter needed)
+    } else if (filters?.hasDetections === true) {
+      // Show images WITH detections (any detection, then apply other filters)
+      // If other filters are also active, intersect with those
+      const hasOtherFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter
+      const imageIdsToUse = hasOtherFilters ? filteredImageIds : allImageIdsWithDetections
+
+      if (imageIdsToUse.length === 0) {
+        return { data: [], error: null, count: 0 }
+      }
+      query = query.in('id', imageIdsToUse)
+    } else {
+      // hasDetections is undefined but other detection filters are active
+      if (filteredImageIds.length === 0) {
+        return { data: [], error: null, count: 0 }
+      }
+      query = query.in('id', filteredImageIds)
+    }
+
+    query = query
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
 
@@ -116,6 +197,15 @@ export async function getPhotos(
 
     if (filters?.isArchived !== undefined) {
       query = query.eq('is_archived', filters.isArchived)
+    }
+
+    // Apply date range filters
+    if (filters?.dateFrom !== undefined) {
+      query = query.gte('captured_at', filters.dateFrom)
+    }
+
+    if (filters?.dateTo !== undefined) {
+      query = query.lte('captured_at', filters.dateTo)
     }
 
     // Apply cursor-based pagination
@@ -171,6 +261,15 @@ export async function getPhotos(
 
   if (filters?.isArchived !== undefined) {
     query = query.eq('is_archived', filters.isArchived)
+  }
+
+  // Apply date range filters
+  if (filters?.dateFrom !== undefined) {
+    query = query.gte('captured_at', filters.dateFrom)
+  }
+
+  if (filters?.dateTo !== undefined) {
+    query = query.lte('captured_at', filters.dateTo)
   }
 
   // Apply cursor-based pagination
@@ -244,23 +343,139 @@ export async function getPhoto(
 /**
  * Get adjacent photo IDs (prev/next) for navigation
  * Returns prev (newer) and next (older) photos based on imported_at order
+ * When filters are provided, navigation is constrained to matching photos
  */
 export async function getAdjacentPhotos(
   userId: string,
-  currentPhotoId: string
+  currentPhotoId: string,
+  filters?: Omit<PhotoFilters, 'limit' | 'offset' | 'cursor'>
 ): Promise<{
   prevId: string | null
   nextId: string | null
 }> {
   const supabase = await createClient()
 
-  // Get all photo IDs ordered by imported_at desc (newest first)
-  const { data: photos } = await supabase
+  // Check if any detection-based filters are active
+  const needsQualityFilter = filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all'
+  const needsConfidenceFilter = filters?.minConfidence !== undefined
+  const needsSexFilter = filters?.sex !== undefined
+  const needsSizeClassFilter = filters?.sizeClass !== undefined
+  const needsPointsFilter = filters?.minPoints !== undefined || filters?.maxPoints !== undefined
+  const needsDeerFilter = filters?.deerId !== undefined
+  const needsHasDetectionsFilter = filters?.hasDetections !== undefined
+  const hasDetectionFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter
+
+  let allImageIdsWithDetections: string[] = []
+  let filteredImageIds: string[] = []
+
+  // If detection filters are active, get matching image IDs first
+  if (hasDetectionFilters) {
+    // For hasDetections filter, we need ALL image_ids with any detection (unfiltered)
+    if (needsHasDetectionsFilter) {
+      const { data: allDetections } = await supabase
+        .from('detections')
+        .select('image_id')
+        .is('deleted_at', null)
+      allImageIdsWithDetections = [...new Set((allDetections ?? []).map((d: { image_id: string }) => d.image_id))]
+    }
+
+    // Build detection query based on OTHER filters (not hasDetections)
+    let detectionQuery = supabase.from('detections').select('image_id, estimated_point_range')
+      .is('deleted_at', null)  // Exclude soft-deleted detections
+
+    if (needsQualityFilter) {
+      detectionQuery = detectionQuery.eq('quality_status', filters!.qualityStatus!)
+    }
+    if (needsConfidenceFilter) {
+      const threshold = filters!.minConfidence! / 100
+      detectionQuery = detectionQuery.gte('confidence', threshold)
+    }
+    if (needsSexFilter) {
+      detectionQuery = detectionQuery.eq('sex', filters!.sex!)
+    }
+    if (needsSizeClassFilter) {
+      detectionQuery = detectionQuery.eq('size_class', filters!.sizeClass!)
+    }
+    if (needsDeerFilter) {
+      detectionQuery = detectionQuery.eq('deer_id', filters!.deerId!)
+    }
+
+    const { data: detections } = await detectionQuery
+
+    let filteredDetections = detections ?? []
+    if (needsPointsFilter) {
+      filteredDetections = filteredDetections.filter((d: { estimated_point_range: string | null }) => {
+        if (!d.estimated_point_range) return false
+        const match = d.estimated_point_range.match(/(\d+)-(\d+)/)
+        if (!match) return false
+        const minRange = parseInt(match[1]!, 10)
+        const maxRange = parseInt(match[2]!, 10)
+        if (filters?.minPoints !== undefined && maxRange < filters.minPoints) return false
+        if (filters?.maxPoints !== undefined && minRange > filters.maxPoints) return false
+        return true
+      })
+    }
+
+    filteredImageIds = [...new Set(filteredDetections.map((d: { image_id: string }) => d.image_id))]
+  }
+
+  // Build query for photo IDs
+  let query = supabase
     .from('images')
     .select('id')
     .eq('user_id', userId)
     .order('imported_at', { ascending: false })
     .order('id', { ascending: false })
+
+  // Apply detection-based filters
+  if (hasDetectionFilters) {
+    if (filters?.hasDetections === false) {
+      // Show images WITHOUT any detections
+      if (allImageIdsWithDetections.length > 0) {
+        query = query.not('id', 'in', `(${allImageIdsWithDetections.join(',')})`)
+      }
+    } else if (filters?.hasDetections === true) {
+      // Show images WITH detections
+      const hasOtherFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter
+      const imageIdsToUse = hasOtherFilters ? filteredImageIds : allImageIdsWithDetections
+      if (imageIdsToUse.length === 0) {
+        return { prevId: null, nextId: null }
+      }
+      query = query.in('id', imageIdsToUse)
+    } else if (filteredImageIds.length > 0) {
+      // Other detection filters are active (not hasDetections)
+      query = query.in('id', filteredImageIds)
+    } else if (needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter) {
+      // Other detection filters active but no matches
+      return { prevId: null, nextId: null }
+    }
+  }
+
+  // Apply photo-level filters
+  if (filters?.status !== undefined) {
+    query = query.eq('detection_status', filters.status)
+  }
+  if (filters?.hasDeer !== undefined) {
+    if (filters.hasDeer) {
+      query = query.not('classification', 'is', null)
+    } else {
+      query = query.is('classification', null)
+    }
+  }
+  if (filters?.cameraId !== undefined) {
+    query = query.eq('camera_id', filters.cameraId)
+  }
+  if (filters?.isArchived !== undefined) {
+    query = query.eq('is_archived', filters.isArchived)
+  }
+  if (filters?.dateFrom !== undefined) {
+    query = query.gte('captured_at', filters.dateFrom)
+  }
+  if (filters?.dateTo !== undefined) {
+    query = query.lte('captured_at', filters.dateTo)
+  }
+
+  const { data: photos } = await query
 
   if (!photos || photos.length === 0) {
     return { prevId: null, nextId: null }
@@ -295,6 +510,7 @@ export async function createPhoto(
   const photoData: ImageInsert = {
     user_id: userId,
     file_path: data.file_path,
+    ...(data.batch_id !== undefined && { batch_id: data.batch_id }),
     ...(data.camera_id !== undefined && { camera_id: data.camera_id }),
     ...(data.file_size_bytes !== undefined && { file_size_bytes: data.file_size_bytes }),
     ...(data.captured_at !== undefined && { captured_at: data.captured_at }),
@@ -470,6 +686,49 @@ export async function getSignedViewUrl(
   }
 
   return { data: data.signedUrl, error: null }
+}
+
+/**
+ * Get signed URLs for multiple photos in a single batch request
+ * Much more efficient than calling getSignedViewUrl for each file
+ */
+export async function getSignedViewUrls(
+  filePaths: string[]
+): Promise<{
+  data: Map<string, string>
+  errors: string[]
+}> {
+  if (filePaths.length === 0) {
+    return { data: new Map(), errors: [] }
+  }
+
+  const supabase = await createClient()
+
+  // Batch request for all URLs at once (valid for 1 hour)
+  const { data, error } = await supabase.storage
+    .from('photos')
+    .createSignedUrls(filePaths, 3600)
+
+  const urlMap = new Map<string, string>()
+  const errors: string[] = []
+
+  if (error !== null) {
+    errors.push(error.message)
+    return { data: urlMap, errors }
+  }
+
+  // Map results back to paths
+  if (data) {
+    for (const item of data) {
+      if (item.error) {
+        errors.push(`${item.path}: ${item.error}`)
+      } else if (item.signedUrl && item.path) {
+        urlMap.set(item.path, item.signedUrl)
+      }
+    }
+  }
+
+  return { data: urlMap, errors }
 }
 
 /**

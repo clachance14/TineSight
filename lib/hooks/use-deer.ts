@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 interface Deer {
   id: string
@@ -10,7 +10,19 @@ interface Deer {
   updated_at: string
 }
 
+interface DeerCatalogResponse {
+  deer: Deer[]
+  nextCursor: string | null
+  total: number
+}
+
 interface DeerWithSightings extends Deer {
+  reference_bbox?: {
+    x: number | null
+    y: number | null
+    width: number | null
+    height: number | null
+  } | null
   sightings: Array<{
     id: string
     image_id: string
@@ -43,17 +55,49 @@ interface UseDeerOptions {
 }
 
 /**
- * Hook to fetch deer catalog
+ * Hook to fetch deer catalog (first page only, for dropdowns/filters)
  */
-export function useDeerCatalog(search?: string) {
-  return useQuery<{ deer: Deer[] }>({
-    queryKey: ['deer-catalog', search],
+export function useDeerCatalog(search?: string, options?: { limit?: number }) {
+  const limit = options?.limit ?? 50
+
+  return useQuery<DeerCatalogResponse>({
+    queryKey: ['deer-catalog', search, limit],
     queryFn: async () => {
-      const url = search ? `/api/deer?search=${encodeURIComponent(search)}` : '/api/deer'
+      const params = new URLSearchParams()
+      if (search) params.set('search', search)
+      params.set('limit', limit.toString())
+      const url = `/api/deer?${params}`
       const res = await fetch(url)
       if (!res.ok) throw new Error('Failed to fetch catalog')
       return res.json()
     },
+    staleTime: 5 * 60 * 1000, // 5 minutes - deer catalog rarely changes
+    gcTime: 30 * 60 * 1000,   // Keep in cache for 30 minutes
+  })
+}
+
+/**
+ * Hook to fetch deer catalog with infinite scroll pagination
+ */
+export function useDeerCatalogInfinite(search?: string, options?: { limit?: number }) {
+  const limit = options?.limit ?? 24
+
+  return useInfiniteQuery<DeerCatalogResponse>({
+    queryKey: ['deer-catalog-infinite', search],
+    queryFn: async ({ pageParam }) => {
+      const params = new URLSearchParams()
+      if (search) params.set('search', search)
+      params.set('limit', limit.toString())
+      if (pageParam) params.set('cursor', pageParam as string)
+      const url = `/api/deer?${params}`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('Failed to fetch catalog')
+      return res.json()
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   })
 }
 
@@ -76,6 +120,8 @@ export function useDeer(deerId: string | null, options: UseDeerOptions = {}) {
       return res.json()
     },
     enabled: !!deerId,
+    staleTime: 2 * 60 * 1000, // 2 minutes
+    gcTime: 10 * 60 * 1000,   // 10 minutes
   })
 }
 

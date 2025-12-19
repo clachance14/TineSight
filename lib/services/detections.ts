@@ -19,7 +19,8 @@ export interface CreateDetectionData {
  */
 export interface DetectionEditableFields {
   sex?: 'buck' | 'doe' | 'fawn' | 'unknown' | null
-  antler_points?: number | null
+  size_class?: string | null
+  estimated_point_range?: string | null
   age_class?: 'young' | 'mature' | 'old' | 'unknown' | null
   species?: 'whitetail' | 'mule_deer' | 'elk' | 'unknown' | null
   distinguishing_features?: string | null
@@ -98,29 +99,19 @@ export async function createDetections(
  * Get all detections for a specific image
  *
  * @param imageId - UUID of the image
- * @param options - Optional configuration
- * @param options.filterSam2ByConfidence - If true, filter SAM2 detections by sam2_deer_score >= 0.3
  * @returns Array of detections for the image
  */
 export async function getDetectionsForImage(
-  imageId: string,
-  options?: { filterSam2ByConfidence?: boolean }
+  imageId: string
 ): Promise<{ data: Detection[] | null; error: Error | null }> {
   const supabase = await createClient()
 
-  let query = supabase
+  const { data, error } = await supabase
     .from('detections')
     .select('*')
     .eq('image_id', imageId)
     .is('deleted_at', null)
-
-  // Apply SAM2 confidence filter if requested
-  // Filter out SAM2 detections with low confidence scores (< 0.3)
-  if (options?.filterSam2ByConfidence) {
-    query = query.or('analysis_source.neq.sam2,sam2_deer_score.gte.0.3')
-  }
-
-  const { data, error } = await query.order('confidence', { ascending: false, nullsFirst: false })
+    .order('confidence', { ascending: false, nullsFirst: false })
 
   return { data: data as Detection[] | null, error }
 }
@@ -334,62 +325,6 @@ export async function getOrphanedEmbeddings(
   })
 
   return { data: flattenedData, error: null }
-}
-
-/**
- * Data structure for creating a SAM2-analyzed detection
- */
-export interface CreateSam2DetectionData {
-  bbox_x: number         // Center X (0-10000 normalized)
-  bbox_y: number         // Center Y (0-10000 normalized)
-  bbox_width: number     // Width (0-10000 normalized)
-  bbox_height: number    // Height (0-10000 normalized)
-  sam2_deer_score: number  // Confidence 0-1
-  antler_bbox?: {
-    x: number
-    y: number
-    width: number
-    height: number
-  } | null
-  sam2_antler_score?: number | null
-}
-
-/**
- * Create detections from SAM2 analysis results
- * Note: Expects coordinates already normalized to 0-10000 scale
- *
- * @param imageId - UUID of the image
- * @param detections - Array of SAM2 detection data (coordinates must be pre-normalized to 0-10000 scale)
- * @returns Array of created detection records
- */
-export async function createSam2Detections(
-  imageId: string,
-  detections: CreateSam2DetectionData[]
-): Promise<{ data: Detection[] | null; error: Error | null }> {
-  const supabase = await createClient()
-
-  const insertData = detections.map((detection) => ({
-    image_id: imageId,
-    bbox_x: detection.bbox_x,
-    bbox_y: detection.bbox_y,
-    bbox_width: detection.bbox_width,
-    bbox_height: detection.bbox_height,
-    sam2_deer_score: detection.sam2_deer_score,
-    antler_bbox: detection.antler_bbox ?? null,
-    sam2_antler_score: detection.sam2_antler_score ?? null,
-    analysis_source: 'sam2',
-    class: 'deer', // Always 'deer' for SAM2 detections
-    confidence: detection.sam2_deer_score, // Map sam2_deer_score to legacy confidence field
-    deer_id: null, // Not linked to deer profile yet
-    is_reference: false,
-  }))
-
-  const { data, error } = await supabase
-    .from('detections')
-    .insert(insertData as never[])
-    .select()
-
-  return { data: data as Detection[] | null, error }
 }
 
 /**

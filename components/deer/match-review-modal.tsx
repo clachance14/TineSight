@@ -24,7 +24,8 @@ interface MatchReview {
     thumbnail_url?: string
     species: string
     sex: string
-    antler_points: number | null
+    size_class: string | null
+    estimated_point_range: string | null
     age_class: string | null
   }
   suggested_deer: {
@@ -168,16 +169,26 @@ export function MatchReviewModal({
                     alt="Detection"
                     fill
                     className="object-cover"
-                    unoptimized
+                    sizes="(max-width: 768px) 50vw, 300px"
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center text-4xl">🦌</div>
                 )}
               </div>
               <div className="flex gap-2 flex-wrap">
-                {match.detection.antler_points && (
-                  <Badge variant="default" className="bg-copper">
-                    {match.detection.antler_points} points
+                {match.detection.size_class && (
+                  <Badge
+                    variant={match.detection.size_class.toLowerCase() === 'trophy' ? 'default' : 'secondary'}
+                    className={cn(
+                      match.detection.size_class.toLowerCase() === 'trophy' && 'bg-copper text-cream'
+                    )}
+                  >
+                    {match.detection.size_class.charAt(0).toUpperCase() + match.detection.size_class.slice(1)}
+                  </Badge>
+                )}
+                {match.detection.estimated_point_range && (
+                  <Badge variant="outline" className="text-xs">
+                    {match.detection.estimated_point_range}
                   </Badge>
                 )}
                 <Badge variant="secondary">{match.detection.age_class || 'Unknown age'}</Badge>
@@ -201,7 +212,7 @@ export function MatchReviewModal({
                     alt={match.suggested_deer.name}
                     fill
                     className="object-cover"
-                    unoptimized
+                    sizes="(max-width: 768px) 50vw, 300px"
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center text-muted-foreground">

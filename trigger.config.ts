@@ -4,6 +4,6 @@ export default defineConfig({
   project: "proj_rtasprdfdazkqkobaydv",
   runtime: "node",
   logLevel: "log",
-  maxDuration: 300, // 5 minutes for ML jobs
+  maxDuration: 600, // 10 minutes for ML jobs
   dirs: ["./trigger"],
 });

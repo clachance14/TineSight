@@ -2,6 +2,8 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getDeerById, updateDeer, deleteDeer } from '@/lib/services/deer'
+import { getCachedSignedUrl, getCachedSignedUrls } from '@/lib/cache/signed-url-cache'
+import { jsonWithCache } from '@/lib/utils/cache-headers'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -30,6 +32,35 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
+  // Get reference image URL and bbox if available
+  let referenceImageUrl: string | null = null
+  let referenceBbox: { x: number | null; y: number | null; width: number | null; height: number | null } | null = null
+
+  if (deer.reference_detection_id) {
+    const { data: refDetection } = await supabase
+      .from('detections')
+      .select('bbox_x, bbox_y, bbox_width, bbox_height, images!inner(file_path)')
+      .eq('id', deer.reference_detection_id)
+      .single()
+
+    if (refDetection) {
+      const imageData = refDetection as unknown as {
+        images: { file_path: string }
+        bbox_x: number | null
+        bbox_y: number | null
+        bbox_width: number | null
+        bbox_height: number | null
+      }
+      referenceImageUrl = await getCachedSignedUrl(imageData.images.file_path)
+      referenceBbox = {
+        x: imageData.bbox_x,
+        y: imageData.bbox_y,
+        width: imageData.bbox_width,
+        height: imageData.bbox_height,
+      }
+    }
+  }
+
   // Parse pagination params
   const searchParams = request.nextUrl.searchParams
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
@@ -51,33 +82,31 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     .select(`
       id,
       image_id,
-      antler_points,
+      size_class,
+      estimated_point_range,
       images!inner(file_path, captured_at)
     `)
     .eq('deer_id', deerId)
     .order('created_at', { ascending: false })
     .range(offset, offset + pageSize - 1)
 
-  // Get signed URLs for sightings
-  const sightingsWithUrls = await Promise.all(
-    (sightings || []).map(async (sighting: any) => {
-      const { data: urlData } = await supabase
-        .storage
-        .from('images')
-        .createSignedUrl(sighting.images.file_path, 3600)
+  // Get signed URLs for sightings - CACHED batch operation
+  const sightingFilePaths = (sightings || []).map((s: any) => s.images.file_path)
+  const cachedUrls = await getCachedSignedUrls(sightingFilePaths)
 
-      return {
-        id: sighting.id,
-        image_id: sighting.image_id,
-        thumbnail_url: urlData?.signedUrl || null,
-        captured_at: sighting.images.captured_at,
-        antler_points: sighting.antler_points,
-      }
-    })
-  )
+  const sightingsWithUrls = (sightings || []).map((sighting: any, index: number) => ({
+    id: sighting.id,
+    image_id: sighting.image_id,
+    thumbnail_url: cachedUrls[index],
+    captured_at: sighting.images.captured_at,
+    size_class: sighting.size_class,
+    estimated_point_range: sighting.estimated_point_range,
+  }))
 
-  return NextResponse.json({
+  return jsonWithCache({
     ...deer,
+    reference_image_url: referenceImageUrl,
+    reference_bbox: referenceBbox,
     sightings: sightingsWithUrls,
     pagination: {
       page,
@@ -85,7 +114,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       total,
       totalPages,
     },
-  })
+  }, 'private-medium')
 }
 
 /**

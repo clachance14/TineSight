@@ -1,4 +1,3 @@
-// @ts-nocheck - Supabase Database generic types not properly resolved in build context
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { compareDeers as compareWithGemini } from "@/lib/gemini/client";
@@ -29,10 +28,10 @@ export const compareDeer = task({
     const supabase = createAdminClient() as SupabaseClient<Database>;
 
     try {
-      // Get detection and its image
+      // Get detection and its crop image
       const { data: detection, error: detectionError } = await supabase
         .from("detections")
-        .select("id, image_id, head_bbox, images!inner(file_path)")
+        .select("id, image_id, crop_file_path")
         .eq("id", detectionId)
         .single();
 
@@ -40,53 +39,108 @@ export const compareDeer = task({
         throw new Error(`Detection not found: ${detectionError?.message}`);
       }
 
-      // Generate signed URL for detection image
-      const { data: detectionUrl } = await supabase.storage
-        .from("photos")
-        .createSignedUrl((detection as any).images.file_path, 3600);
-
-      if (!detectionUrl) {
-        throw new Error("Failed to get detection image URL");
+      if (!detection.crop_file_path) {
+        throw new Error(`Detection ${detectionId} has no crop_file_path - run crop generation first`);
       }
 
-      // Get reference images for all catalog deer
-      const catalogImages: Array<{ id: string; name: string; url: string }> = [];
+      // Generate signed URL for detection crop
+      const { data: detectionCropUrl, error: cropUrlError } = await supabase.storage
+        .from("photos")
+        .createSignedUrl(detection.crop_file_path, 3600);
+
+      if (cropUrlError || !detectionCropUrl) {
+        throw new Error(`Failed to get detection crop URL: ${cropUrlError?.message}`);
+      }
+
+      // Download crop image as base64
+      const cropResponse = await fetch(detectionCropUrl.signedUrl);
+      if (!cropResponse.ok) {
+        throw new Error(`Failed to download detection crop: ${cropResponse.statusText}`);
+      }
+
+      const cropBuffer = await cropResponse.arrayBuffer();
+      const detectionBase64 = Buffer.from(cropBuffer).toString("base64");
+      const detectionMimeType = "image/jpeg"; // Crops are saved as JPEG
+
+      // Get reference crop images for all catalog deer
+      const catalogDeerWithImages: Array<{
+        id: string;
+        name: string;
+        referenceImageBase64: string;
+        referenceImageMimeType: string;
+      }> = [];
 
       for (const deer of catalogDeer) {
-        const { data: refDetection } = await supabase
+        const { data: refDetection, error: refError } = await supabase
           .from("detections")
-          .select("image_id, images!inner(file_path)")
+          .select("id, crop_file_path")
           .eq("id", deer.reference_detection_id)
           .single();
 
-        if (refDetection) {
-          const { data: refUrl } = await supabase.storage
-            .from("photos")
-            .createSignedUrl((refDetection as any).images.file_path, 3600);
-
-          if (refUrl) {
-            catalogImages.push({
-              id: deer.id,
-              name: deer.name,
-              url: refUrl.signedUrl,
-            });
-          }
+        if (refError || !refDetection) {
+          logger.warn(`Reference detection not found for deer ${deer.name}`, {
+            deerName: deer.name,
+            referenceDetectionId: deer.reference_detection_id,
+          });
+          continue;
         }
+
+        if (!refDetection.crop_file_path) {
+          logger.warn(`Reference detection missing crop_file_path for deer ${deer.name}`, {
+            deerName: deer.name,
+            referenceDetectionId: deer.reference_detection_id,
+          });
+          continue;
+        }
+
+        // Generate signed URL for reference crop
+        const { data: refCropUrl, error: refCropUrlError } = await supabase.storage
+          .from("photos")
+          .createSignedUrl(refDetection.crop_file_path, 3600);
+
+        if (refCropUrlError || !refCropUrl) {
+          logger.warn(`Failed to get reference crop URL for deer ${deer.name}`, {
+            deerName: deer.name,
+            error: refCropUrlError?.message,
+          });
+          continue;
+        }
+
+        // Download reference crop as base64
+        const refCropResponse = await fetch(refCropUrl.signedUrl);
+        if (!refCropResponse.ok) {
+          logger.warn(`Failed to download reference crop for deer ${deer.name}`, {
+            deerName: deer.name,
+            status: refCropResponse.statusText,
+          });
+          continue;
+        }
+
+        const refCropBuffer = await refCropResponse.arrayBuffer();
+        const referenceImageBase64 = Buffer.from(refCropBuffer).toString("base64");
+
+        catalogDeerWithImages.push({
+          id: deer.id,
+          name: deer.name,
+          referenceImageBase64,
+          referenceImageMimeType: "image/jpeg", // Crops are saved as JPEG
+        });
       }
 
-      if (catalogImages.length === 0) {
-        throw new Error("No catalog reference images found");
+      if (catalogDeerWithImages.length === 0) {
+        throw new Error("No catalog reference images found - all reference detections missing crops");
       }
 
       logger.info("Calling Gemini for comparison", {
         detectionId,
-        catalogImagesCount: catalogImages.length,
+        catalogImagesCount: catalogDeerWithImages.length,
       });
 
-      // Call Gemini for comparison
+      // Call Gemini for comparison with base64 images
       const result = await compareWithGemini(
-        detectionUrl.signedUrl,
-        catalogImages
+        detectionBase64,
+        detectionMimeType,
+        catalogDeerWithImages
       );
 
       logger.info("Gemini comparison complete", {

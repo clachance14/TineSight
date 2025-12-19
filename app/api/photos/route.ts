@@ -1,8 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getPhotos } from '@/lib/services/photos'
-import { getSignedViewUrl } from '@/lib/services/photos'
+import { getPhotos, getSignedViewUrls } from '@/lib/services/photos'
 import type { Image } from '@/types/database'
 
 interface PhotoResponse extends Image {
@@ -45,6 +44,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const sexParam = searchParams.get('sex')
     const minPointsParam = searchParams.get('min_points')
     const maxPointsParam = searchParams.get('max_points')
+    const dateFromParam = searchParams.get('dateFrom')
+    const dateToParam = searchParams.get('dateTo')
+    const sizeClassParam = searchParams.get('sizeClass')
+    const qualityStatusParam = searchParams.get('qualityStatus')
+    const cameraIdParam = searchParams.get('cameraId')
+    const deerIdParam = searchParams.get('deerId')
 
     // Validate and parse limit (default 50, max 100)
     let limit = 50
@@ -69,6 +74,22 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       } else {
         return NextResponse.json(
           { error: 'Invalid hasDeer: must be "true" or "false"' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Parse hasDetections filter
+    const hasDetectionsParam = searchParams.get('hasDetections')
+    let hasDetections: boolean | undefined
+    if (hasDetectionsParam !== null) {
+      if (hasDetectionsParam === 'true') {
+        hasDetections = true
+      } else if (hasDetectionsParam === 'false') {
+        hasDetections = false
+      } else {
+        return NextResponse.json(
+          { error: 'Invalid hasDetections: must be "true" or "false"' },
           { status: 400 }
         )
       }
@@ -112,6 +133,68 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       }
     }
 
+    // Parse dateFrom filter
+    let dateFrom: string | undefined
+    if (dateFromParam !== null) {
+      const date = new Date(dateFromParam)
+      if (!isNaN(date.getTime())) {
+        dateFrom = dateFromParam
+      } else {
+        return NextResponse.json(
+          { error: 'Invalid dateFrom: must be a valid ISO date string' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Parse dateTo filter
+    let dateTo: string | undefined
+    if (dateToParam !== null) {
+      const date = new Date(dateToParam)
+      if (!isNaN(date.getTime())) {
+        dateTo = dateToParam
+      } else {
+        return NextResponse.json(
+          { error: 'Invalid dateTo: must be a valid ISO date string' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Parse sizeClass filter
+    let sizeClass: string | undefined
+    if (sizeClassParam !== null) {
+      const validSizeClasses = ['trophy', 'standard', 'basket', 'spike', 'unknown', 'all']
+      if (validSizeClasses.includes(sizeClassParam)) {
+        sizeClass = sizeClassParam === 'all' ? undefined : sizeClassParam
+      } else {
+        return NextResponse.json(
+          { error: `Invalid sizeClass: must be one of ${validSizeClasses.join(', ')}` },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Parse qualityStatus filter
+    let qualityStatus: string | undefined
+    if (qualityStatusParam !== null) {
+      const validQualityStatuses = ['high_quality', 'manual_review', 'low_quality', 'all']
+      if (validQualityStatuses.includes(qualityStatusParam)) {
+        qualityStatus = qualityStatusParam === 'all' ? undefined : qualityStatusParam
+      } else {
+        return NextResponse.json(
+          { error: `Invalid qualityStatus: must be one of ${validQualityStatuses.join(', ')}` },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Parse cameraId filter
+    let cameraId: string | undefined
+    if (cameraIdParam !== null && cameraIdParam.trim() !== '') {
+      cameraId = cameraIdParam
+    }
+
     // Build query to get photos
     // First, get one extra photo to determine if there's a next page
     const fetchLimit = limit + 1
@@ -120,11 +203,18 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const filters: {
       status?: string
       hasDeer?: boolean
+      hasDetections?: boolean
       batchId?: string
+      qualityStatus?: string
       minConfidence?: number
       sex?: string
       minPoints?: number
       maxPoints?: number
+      dateFrom?: string
+      dateTo?: string
+      sizeClass?: string
+      cameraId?: string
+      deerId?: string
       cursor?: string
       limit: number
       offset: number
@@ -139,6 +229,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
 
     if (hasDeer !== undefined) {
       filters.hasDeer = hasDeer
+    }
+
+    if (hasDetections !== undefined) {
+      filters.hasDetections = hasDetections
+    }
+
+    if (qualityStatus !== undefined) {
+      filters.qualityStatus = qualityStatus
     }
 
     if (minConfidence !== undefined) {
@@ -157,11 +255,28 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       filters.maxPoints = maxPoints
     }
 
+    if (dateFrom !== undefined) {
+      filters.dateFrom = dateFrom
+    }
+
+    if (dateTo !== undefined) {
+      filters.dateTo = dateTo
+    }
+
+    if (sizeClass !== undefined) {
+      filters.sizeClass = sizeClass
+    }
+
+    if (cameraId !== undefined) {
+      filters.cameraId = cameraId
+    }
+
+    if (deerIdParam !== null && deerIdParam.trim() !== '') {
+      filters.deerId = deerIdParam
+    }
+
     if (batchId !== null) {
-      // Note: batchId is not in the PhotoFilters interface in the service
-      // We'll handle this by adding it if the service supports it
-      // For now, we'll omit it as the service doesn't support it yet
-      // TODO: Add batchId filter support to photos service
+      filters.batchId = batchId
     }
 
     // Apply cursor for pagination
@@ -199,13 +314,19 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     // Fetch quality status and generate signed URLs in parallel for performance
     const photoIds = photosToReturn.map((p) => p.id)
 
-    // Build URL generation promises (thumbnail + full image for each photo)
-    const urlPromises = photosToReturn.flatMap((photo) => [
-      photo.thumbnail_path
-        ? getSignedViewUrl(photo.thumbnail_path)
-        : Promise.resolve({ data: null, error: null }),
-      getSignedViewUrl(photo.file_path),
-    ])
+    // Collect all file paths for batch URL generation (much faster than individual calls)
+    const allPaths: string[] = []
+    const thumbnailPaths: string[] = []
+    const imagePaths: string[] = []
+
+    for (const photo of photosToReturn) {
+      if (photo.thumbnail_path) {
+        thumbnailPaths.push(photo.thumbnail_path)
+        allPaths.push(photo.thumbnail_path)
+      }
+      allPaths.push(photo.file_path)
+      imagePaths.push(photo.file_path)
+    }
 
     // Build quality status query promise
     const qualityPromise = photoIds.length > 0
@@ -216,11 +337,13 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
           .not('quality_status', 'is', null)
       : Promise.resolve({ data: null })
 
-    // Execute all in parallel - this is the key performance optimization
-    const [urlResults, qualityResult] = await Promise.all([
-      Promise.all(urlPromises),
+    // Execute batch URL generation and quality query in parallel
+    const [urlResult, qualityResult] = await Promise.all([
+      getSignedViewUrls(allPaths),
       qualityPromise,
     ])
+
+    const urlMap = urlResult.data
 
     // Process quality status results into a map
     const qualityMap = new Map<string, string | null>()
@@ -242,15 +365,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       }
     }
 
-    // Map URL results back to photos (2 URLs per photo: thumbnail, full)
-    const photosWithUrls: PhotoResponse[] = photosToReturn.map((photo, index) => {
-      const thumbnailResult = urlResults[index * 2]
-      const imageResult = urlResults[index * 2 + 1]
-
+    // Map URL results back to photos using the batch URL map
+    const photosWithUrls: PhotoResponse[] = photosToReturn.map((photo) => {
       return {
         ...photo,
-        thumbnailUrl: thumbnailResult?.data ?? null,
-        imageUrl: imageResult?.data ?? null,
+        thumbnailUrl: photo.thumbnail_path ? urlMap.get(photo.thumbnail_path) ?? null : null,
+        imageUrl: urlMap.get(photo.file_path) ?? null,
         bestQualityStatus: qualityMap.get(photo.id) ?? null,
       }
     })

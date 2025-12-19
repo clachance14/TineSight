@@ -48,7 +48,6 @@ npx trigger.dev@latest dev         # Start local Trigger.dev worker
 Utility scripts (in `scripts/`):
 ```bash
 node scripts/cleanup-orphans.mjs   # Delete failed images
-node scripts/check-replicate.mjs   # Verify Replicate API status
 node scripts/retry-failed.mjs      # Reset failed images and retry
 node scripts/trigger-batch.mjs     # Trigger batch processing
 ```
@@ -101,7 +100,6 @@ trigger/
 scripts/
 ├── env.mjs           # Dotenv loader for .env.local
 ├── cleanup-orphans.mjs
-├── check-replicate.mjs
 ├── retry-failed.mjs
 └── trigger-batch.mjs
 

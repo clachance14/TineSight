@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
   const { data: catalogDeer, error: catalogError } = await supabase
     .from('deer')
     .select('id, name, reference_detection_id')
-    .eq('account_id', user.id)
+    .eq('user_id', user.id)
     .not('reference_detection_id', 'is', null)
 
   if (catalogError) {

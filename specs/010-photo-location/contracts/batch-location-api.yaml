@@ -1,0 +1,223 @@
+openapi: 3.0.3
+info:
+  title: Photo Location API
+  description: API extensions for photo location feature
+  version: 1.0.0
+
+paths:
+  /api/photos/upload:
+    post:
+      summary: Initialize photo upload batch (extended with location)
+      description: |
+        Creates a processing batch and returns signed URLs for photo uploads.
+        Extended to accept optional location data for the batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - files
+              properties:
+                files:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/UploadFileRequest'
+                  minItems: 1
+                # Location fields (all optional)
+                locationLat:
+                  type: number
+                  format: double
+                  minimum: -90
+                  maximum: 90
+                  description: Latitude coordinate
+                  example: 31.9686
+                locationLng:
+                  type: number
+                  format: double
+                  minimum: -180
+                  maximum: 180
+                  description: Longitude coordinate
+                  example: -99.9018
+                areaName:
+                  type: string
+                  description: User-defined name for the location
+                  example: "North Ridge"
+                directionCompass:
+                  type: integer
+                  minimum: 0
+                  maximum: 360
+                  description: Camera facing direction in degrees (0 = North)
+                  example: 45
+                directionNotes:
+                  type: string
+                  description: Free-text description of camera direction
+                  example: "Facing the food plot"
+      responses:
+        '200':
+          description: Batch created with signed URLs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadInitResponse'
+        '401':
+          description: Unauthorized
+        '400':
+          description: Invalid request body
+
+  /api/photos/areas:
+    get:
+      summary: Get distinct area names
+      description: |
+        Returns all unique area names from the user's batches.
+        Used to populate the area filter dropdown and autocomplete.
+      responses:
+        '200':
+          description: List of area names
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  areas:
+                    type: array
+                    items:
+                      type: string
+                    example: ["Creek Bottom", "Food Plot", "North Ridge", "South Feeder"]
+        '401':
+          description: Unauthorized
+        '500':
+          description: Server error
+
+  /api/photos:
+    get:
+      summary: Get photos (extended with area filter)
+      description: |
+        Returns paginated photos with optional filters.
+        Extended to support areaName filter parameter.
+      parameters:
+        - name: areaName
+          in: query
+          schema:
+            type: string
+          description: |
+            Filter by area name. Use "__no_area__" for photos without location.
+          example: "North Ridge"
+        # Existing parameters documented for completeness
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, processing, completed, failed]
+        - name: hasDeer
+          in: query
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Paginated photos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotosResponse'
+        '401':
+          description: Unauthorized
+
+components:
+  schemas:
+    UploadFileRequest:
+      type: object
+      required:
+        - id
+        - filename
+        - contentType
+        - size
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        contentType:
+          type: string
+        size:
+          type: integer
+        capturedAt:
+          type: string
+          format: date-time
+        make:
+          type: string
+        model:
+          type: string
+        deviceIdentifier:
+          type: string
+        exifSignature:
+          type: string
+        exifData:
+          type: object
+
+    UploadInitResponse:
+      type: object
+      properties:
+        batchId:
+          type: string
+          format: uuid
+        uploads:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              signedUrl:
+                type: string
+                format: uri
+              path:
+                type: string
+
+    PhotosResponse:
+      type: object
+      properties:
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Photo'
+        count:
+          type: integer
+        hasMore:
+          type: boolean
+
+    Photo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        batch_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        storage_path:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        created_at:
+          type: string
+          format: date-time
+        # Location inherited from batch (via join if needed)

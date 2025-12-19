@@ -6,12 +6,14 @@ interface DetectionResponse {
   id: string
   imageId: string
   imageUrl: string | null
+  cropUrl: string | null
   bboxX: number | null
   bboxY: number | null
   bboxWidth: number | null
   bboxHeight: number | null
   sex: string | null
-  antlerPoints: number | null
+  sizeClass: string | null
+  estimatedPointRange: string | null
   ageClass: string | null
   species: string | null
   distinguishingFeatures: string | null
@@ -23,10 +25,12 @@ interface DetectionResponse {
 
 interface UpdateDetectionInput {
   sex?: string | null
-  antlerPoints?: number | null
+  sizeClass?: string | null
+  estimatedPointRange?: string | null
   ageClass?: string | null
   species?: string | null
   distinguishingFeatures?: string | null
+  deerId?: string | null
 }
 
 interface DeleteDetectionResponse {
@@ -111,9 +115,12 @@ export function useUpdateDetection() {
     onSuccess: (data) => {
       // Invalidate the specific detection query
       queryClient.invalidateQueries({ queryKey: ['detection', data.id] })
-      // Invalidate photo queries to refresh detection lists
-      queryClient.invalidateQueries({ queryKey: ['photo'] })
-      queryClient.invalidateQueries({ queryKey: ['photos'] })
+      // Invalidate only the specific photo containing this detection (if imageId available)
+      if (data.imageId) {
+        queryClient.invalidateQueries({ queryKey: ['photo', data.imageId] })
+      }
+      // Invalidate photo stats since detection classifications affect counts
+      queryClient.invalidateQueries({ queryKey: ['photo-stats'] })
     },
   })
 }
@@ -126,13 +133,17 @@ export function useDeleteDetection() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (detectionId: string) => deleteDetectionApi(detectionId),
-    onSuccess: (_, detectionId) => {
+    mutationFn: ({ detectionId, imageId }: { detectionId: string; imageId?: string }) =>
+      deleteDetectionApi(detectionId),
+    onSuccess: (_, { detectionId, imageId }) => {
       // Remove the detection from cache
       queryClient.removeQueries({ queryKey: ['detection', detectionId] })
-      // Invalidate photo queries to remove deleted detection from lists
-      queryClient.invalidateQueries({ queryKey: ['photo'] })
-      queryClient.invalidateQueries({ queryKey: ['photos'] })
+      // Invalidate only the specific photo containing this detection
+      if (imageId) {
+        queryClient.invalidateQueries({ queryKey: ['photo', imageId] })
+      }
+      // Invalidate photo stats since deletion affects counts
+      queryClient.invalidateQueries({ queryKey: ['photo-stats'] })
     },
   })
 }

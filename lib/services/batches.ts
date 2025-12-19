@@ -124,82 +124,33 @@ export async function updateBatchStatus(
 }
 
 /**
- * Increment uploaded_images count
+ * Atomically increment batch counters
+ *
+ * Uses the increment_batch_counters RPC function to avoid race conditions.
+ * This is the preferred method for updating batch progress from background jobs.
+ *
+ * @param batchId - The batch ID to update
+ * @param params - Counter increments (processed, successful, failed)
+ * @returns Error if the operation failed
  */
-export async function incrementUploaded(
-  batchId: string
-): Promise<{
-  data: ProcessingBatch | null
-  error: Error | null
-}> {
-  const supabase = await createClient()
-
-  // First get the current batch to read the uploaded_images value
-  const { data: currentBatch, error: fetchError } = await supabase
-    .from('processing_batches')
-    .select('uploaded_images')
-    .eq('id', batchId)
-    .single()
-
-  if (fetchError !== null) {
-    return { data: null, error: fetchError }
-  }
-
-  // Increment the count
-  const currentCount = (currentBatch as ProcessingBatch).uploaded_images
-  const { data, error } = await supabase
-    .from('processing_batches')
-    .update({ uploaded_images: currentCount + 1 } as never)
-    .eq('id', batchId)
-    .select()
-    .single()
-
-  return { data: data as ProcessingBatch | null, error }
-}
-
-/**
- * Increment processed_images count and update success/failure counts
- */
-export async function incrementProcessed(
+export async function incrementBatchCounters(
   batchId: string,
-  success: boolean
-): Promise<{
-  data: ProcessingBatch | null
-  error: Error | null
-}> {
+  params: {
+    incrementProcessed?: number
+    incrementSuccessful?: number
+    incrementFailed?: number
+  }
+): Promise<{ error: Error | null }> {
   const supabase = await createClient()
 
-  // First get the current batch to read the counts
-  const { data: currentBatch, error: fetchError } = await supabase
-    .from('processing_batches')
-    .select('processed_images, successful_images, failed_images')
-    .eq('id', batchId)
-    .single()
+  const { error } = await supabase.rpc('increment_batch_counters', {
+    batch_id: batchId,
+    increment_processed: params.incrementProcessed ?? 0,
+    increment_successful: params.incrementSuccessful ?? 0,
+    increment_failed: params.incrementFailed ?? 0,
+  })
 
-  if (fetchError !== null) {
-    return { data: null, error: fetchError }
-  }
-
-  // Build update object with incremented counts
-  const batch = currentBatch as ProcessingBatch
-  const updateData = {
-    processed_images: batch.processed_images + 1,
-    successful_images: success
-      ? batch.successful_images + 1
-      : batch.successful_images,
-    failed_images: success
-      ? batch.failed_images
-      : batch.failed_images + 1,
-  }
-
-  const { data, error } = await supabase
-    .from('processing_batches')
-    .update(updateData as never)
-    .eq('id', batchId)
-    .select()
-    .single()
-
-  return { data: data as ProcessingBatch | null, error }
+  return { error }
 }
 
 /**

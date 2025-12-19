@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { getPhoto, getSignedViewUrl, getAdjacentPhotos } from '@/lib/services/photos'
+import { getPhoto, getSignedViewUrl, getAdjacentPhotos, type PhotoFilters } from '@/lib/services/photos'
 import { countReferenceROIs } from '@/lib/services/roi'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +13,7 @@ import type { Detection } from '@/types/database'
 
 interface PhotoDetailPageProps {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }
 
 export async function generateMetadata({ params }: PhotoDetailPageProps): Promise<Metadata> {
@@ -22,8 +23,9 @@ export async function generateMetadata({ params }: PhotoDetailPageProps): Promis
   }
 }
 
-export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) {
+export default async function PhotoDetailPage({ params, searchParams }: PhotoDetailPageProps) {
   const { id } = await params
+  const resolvedSearchParams = await searchParams
   const supabase = await createClient()
 
   // Get authenticated user
@@ -33,11 +35,51 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
     redirect('/login')
   }
 
+  // Parse filters from URL params
+  const filters: Omit<PhotoFilters, 'limit' | 'offset' | 'cursor'> = {}
+
+  const getParam = (key: string): string | undefined => {
+    const value = resolvedSearchParams[key]
+    return typeof value === 'string' ? value : undefined
+  }
+
+  const statusParam = getParam('status')
+  const hasDeerParam = getParam('hasDeer')
+  const qualityStatusParam = getParam('qualityStatus')
+  const minConfidenceParam = getParam('minConfidence')
+  const sexParam = getParam('sex')
+  const minPointsParam = getParam('minPoints')
+  const maxPointsParam = getParam('maxPoints')
+  const dateFromParam = getParam('dateFrom')
+  const dateToParam = getParam('dateTo')
+  const sizeClassParam = getParam('sizeClass')
+  const cameraIdParam = getParam('cameraId')
+
+  if (statusParam) filters.status = statusParam
+  if (hasDeerParam) filters.hasDeer = hasDeerParam === 'true'
+  if (qualityStatusParam) filters.qualityStatus = qualityStatusParam
+  if (minConfidenceParam) filters.minConfidence = parseInt(minConfidenceParam, 10)
+  if (sexParam) filters.sex = sexParam
+  if (minPointsParam) filters.minPoints = parseInt(minPointsParam, 10)
+  if (maxPointsParam) filters.maxPoints = parseInt(maxPointsParam, 10)
+  if (dateFromParam) filters.dateFrom = dateFromParam
+  if (dateToParam) filters.dateTo = dateToParam
+  if (sizeClassParam) filters.sizeClass = sizeClassParam
+  if (cameraIdParam) filters.cameraId = cameraIdParam
+
+  // Build query string for navigation links
+  const filterQueryString = new URLSearchParams(
+    Object.entries(resolvedSearchParams)
+      .filter(([, v]) => typeof v === 'string')
+      .map(([k, v]) => [k, v as string])
+  ).toString()
+
   // Fetch photo with detections, reference count, and adjacent photos in parallel
+  const hasFilters = Object.keys(filters).length > 0
   const [photoResult, referenceCountResult, adjacentPhotos] = await Promise.all([
     getPhoto(user.id, id),
     countReferenceROIs(),
-    getAdjacentPhotos(user.id, id),
+    getAdjacentPhotos(user.id, id, hasFilters ? filters : undefined),
   ])
 
   const { data: photo, error } = photoResult
@@ -56,14 +98,15 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
   }
 
   // Transform detections for PhotoDetailClient component
-  // Include Gemini analysis data (species, sex, antler points, age class) and quality info
+  // Include Gemini analysis data (species, sex, buck size class, age class) and quality info
   // Sort by confidence (highest first)
   const detections = photo.detections.map((d: Detection & {
     quality_status?: string | null;
     quality_score?: number | null;
     species?: string | null;
     sex?: string | null;
-    antler_points?: number | null;
+    size_class?: string | null;
+    estimated_point_range?: string | null;
     age_class?: string | null;
     deer?: { id: string; name: string | null } | null;
   }) => ({
@@ -80,7 +123,8 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
     qualityScore: d.quality_score ?? null,
     species: d.species ?? null,
     sex: d.sex ?? null,
-    antlerPoints: d.antler_points ?? null,
+    sizeClass: d.size_class ?? null,
+    estimatedPointRange: d.estimated_point_range ?? null,
     ageClass: d.age_class ?? null,
   })).sort((a, b) => b.confidence - a.confidence)
 
@@ -139,7 +183,7 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button variant="outline" size="icon" asChild>
-            <Link href="/photos">
+            <Link href={filterQueryString ? `/photos?${filterQueryString}` : '/photos'}>
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
@@ -157,7 +201,7 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
         <div className="flex items-center gap-2">
           {prevId ? (
             <Button variant="outline" size="icon" asChild>
-              <Link href={`/photos/${prevId}`}>
+              <Link href={filterQueryString ? `/photos/${prevId}?${filterQueryString}` : `/photos/${prevId}`}>
                 <ChevronLeft className="h-4 w-4" />
               </Link>
             </Button>
@@ -168,7 +212,7 @@ export default async function PhotoDetailPage({ params }: PhotoDetailPageProps) 
           )}
           {nextId ? (
             <Button variant="outline" size="icon" asChild>
-              <Link href={`/photos/${nextId}`}>
+              <Link href={filterQueryString ? `/photos/${nextId}?${filterQueryString}` : `/photos/${nextId}`}>
                 <ChevronRight className="h-4 w-4" />
               </Link>
             </Button>

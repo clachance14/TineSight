@@ -1,7 +1,27 @@
 'use client'
 
+import { useRef, useCallback } from 'react'
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import type { PhotoFilters } from '@/lib/services/photos'
+
+/**
+ * Exponential backoff configuration for polling
+ * Starts at baseInterval, doubles each poll with no changes, caps at maxInterval
+ * Resets to baseInterval when data changes
+ */
+const BACKOFF_CONFIG = {
+  baseInterval: 3000,   // Start at 3 seconds
+  maxInterval: 30000,   // Cap at 30 seconds
+  multiplier: 2,        // Double each time
+}
+
+/**
+ * Calculate next poll interval with exponential backoff
+ */
+function calculateBackoff(pollCount: number): number {
+  const interval = BACKOFF_CONFIG.baseInterval * Math.pow(BACKOFF_CONFIG.multiplier, pollCount)
+  return Math.min(interval, BACKOFF_CONFIG.maxInterval)
+}
 
 // Response types for API endpoints
 interface PhotosResponse {
@@ -74,9 +94,13 @@ interface BatchStatusResponse {
 
 /**
  * Hook to fetch photos with optional filters
- * Auto-refetches every 2 seconds when any photos are in 'processing' status
+ * Auto-refetches with exponential backoff when photos are processing
  */
 export function usePhotos(filters?: PhotoFilters) {
+  // Track poll count and previous processing IDs for backoff
+  const pollCountRef = useRef(0)
+  const prevProcessingIdsRef = useRef<string>('')
+
   return useQuery({
     queryKey: ['photos', filters],
     queryFn: async (): Promise<PhotosResponse> => {
@@ -89,6 +113,9 @@ export function usePhotos(filters?: PhotoFilters) {
       if (filters?.hasDeer !== undefined) {
         params.append('hasDeer', String(filters.hasDeer))
       }
+      if (filters?.hasDetections !== undefined) {
+        params.append('hasDetections', String(filters.hasDetections))
+      }
       if (filters?.batchId !== undefined) {
         params.append('batchId', filters.batchId)
       }
@@ -98,8 +125,32 @@ export function usePhotos(filters?: PhotoFilters) {
       if (filters?.isArchived !== undefined) {
         params.append('isArchived', String(filters.isArchived))
       }
+      if (filters?.qualityStatus !== undefined) {
+        params.append('qualityStatus', filters.qualityStatus)
+      }
       if (filters?.minConfidence !== undefined) {
         params.append('minConfidence', String(filters.minConfidence))
+      }
+      if (filters?.sex !== undefined) {
+        params.append('sex', filters.sex)
+      }
+      if (filters?.minPoints !== undefined) {
+        params.append('min_points', String(filters.minPoints))
+      }
+      if (filters?.maxPoints !== undefined) {
+        params.append('max_points', String(filters.maxPoints))
+      }
+      if (filters?.sizeClass !== undefined) {
+        params.append('sizeClass', filters.sizeClass)
+      }
+      if (filters?.dateFrom !== undefined) {
+        params.append('dateFrom', filters.dateFrom)
+      }
+      if (filters?.dateTo !== undefined) {
+        params.append('dateTo', filters.dateTo)
+      }
+      if (filters?.deerId !== undefined) {
+        params.append('deerId', filters.deerId)
       }
       if (filters?.limit !== undefined) {
         params.append('limit', String(filters.limit))
@@ -121,20 +172,46 @@ export function usePhotos(filters?: PhotoFilters) {
       return res.json()
     },
     refetchInterval: (query) => {
-      // Auto-refetch every 3 seconds if any photos are pending or processing
-      const hasActivePhotos = query.state.data?.photos?.some(
+      const photos = query.state.data?.photos
+      if (!photos) return false
+
+      // Get currently processing photo IDs
+      const processingPhotos = photos.filter(
         (p) => p.detection_status === 'pending' || p.detection_status === 'processing'
       )
-      return hasActivePhotos ? 3000 : false
+
+      // No active photos, stop polling and reset counter
+      if (processingPhotos.length === 0) {
+        pollCountRef.current = 0
+        prevProcessingIdsRef.current = ''
+        return false
+      }
+
+      // Check if processing set changed (photos completed)
+      const currentIds = processingPhotos.map(p => p.id).sort().join(',')
+      if (currentIds !== prevProcessingIdsRef.current) {
+        // Data changed, reset backoff
+        pollCountRef.current = 0
+        prevProcessingIdsRef.current = currentIds
+      } else {
+        // No change, increment backoff
+        pollCountRef.current += 1
+      }
+
+      return calculateBackoff(pollCountRef.current)
     },
   })
 }
 
 /**
  * Hook to fetch photos with infinite scroll pagination
- * Uses cursor-based pagination for efficient loading
+ * Uses cursor-based pagination with exponential backoff for polling
  */
 export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
+  // Track poll count and previous processing IDs for backoff
+  const pollCountRef = useRef(0)
+  const prevProcessingIdsRef = useRef<string>('')
+
   return useInfiniteQuery({
     queryKey: ['photos', 'infinite', filters],
     queryFn: async ({ pageParam }): Promise<PhotosResponse> => {
@@ -147,6 +224,9 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
       if (filters?.hasDeer !== undefined) {
         params.append('hasDeer', String(filters.hasDeer))
       }
+      if (filters?.hasDetections !== undefined) {
+        params.append('hasDetections', String(filters.hasDetections))
+      }
       if (filters?.batchId !== undefined) {
         params.append('batchId', filters.batchId)
       }
@@ -156,8 +236,32 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
       if (filters?.isArchived !== undefined) {
         params.append('isArchived', String(filters.isArchived))
       }
+      if (filters?.qualityStatus !== undefined) {
+        params.append('qualityStatus', filters.qualityStatus)
+      }
       if (filters?.minConfidence !== undefined) {
         params.append('minConfidence', String(filters.minConfidence))
+      }
+      if (filters?.sex !== undefined) {
+        params.append('sex', filters.sex)
+      }
+      if (filters?.minPoints !== undefined) {
+        params.append('min_points', String(filters.minPoints))
+      }
+      if (filters?.maxPoints !== undefined) {
+        params.append('max_points', String(filters.maxPoints))
+      }
+      if (filters?.sizeClass !== undefined) {
+        params.append('sizeClass', filters.sizeClass)
+      }
+      if (filters?.dateFrom !== undefined) {
+        params.append('dateFrom', filters.dateFrom)
+      }
+      if (filters?.dateTo !== undefined) {
+        params.append('dateTo', filters.dateTo)
+      }
+      if (filters?.deerId !== undefined) {
+        params.append('deerId', filters.deerId)
       }
       if (filters?.limit !== undefined) {
         params.append('limit', String(filters.limit))
@@ -185,13 +289,35 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     refetchInterval: (query) => {
-      // Auto-refetch every 3 seconds if any photos are pending or processing
-      const hasActivePhotos = query.state.data?.pages?.some((page) =>
-        page.photos.some(
+      const pages = query.state.data?.pages
+      if (!pages) return false
+
+      // Get all processing photos across all pages
+      const processingPhotos = pages.flatMap(page =>
+        page.photos.filter(
           (p) => p.detection_status === 'pending' || p.detection_status === 'processing'
         )
       )
-      return hasActivePhotos ? 3000 : false
+
+      // No active photos, stop polling and reset counter
+      if (processingPhotos.length === 0) {
+        pollCountRef.current = 0
+        prevProcessingIdsRef.current = ''
+        return false
+      }
+
+      // Check if processing set changed (photos completed)
+      const currentIds = processingPhotos.map(p => p.id).sort().join(',')
+      if (currentIds !== prevProcessingIdsRef.current) {
+        // Data changed, reset backoff
+        pollCountRef.current = 0
+        prevProcessingIdsRef.current = currentIds
+      } else {
+        // No change, increment backoff
+        pollCountRef.current += 1
+      }
+
+      return calculateBackoff(pollCountRef.current)
     },
   })
 }
@@ -218,9 +344,13 @@ export function usePhotoDetail(id: string) {
 
 /**
  * Hook to fetch batch status by ID
- * Auto-refetches every 2 seconds while batch is in 'processing' status
+ * Auto-refetches with exponential backoff while batch is processing
  */
 export function useBatchStatus(batchId: string) {
+  // Track poll count and previous processed count for backoff
+  const pollCountRef = useRef(0)
+  const prevProcessedCountRef = useRef<number>(-1)
+
   return useQuery({
     queryKey: ['batch', batchId],
     queryFn: async (): Promise<BatchStatusResponse> => {
@@ -233,11 +363,30 @@ export function useBatchStatus(batchId: string) {
 
       return res.json()
     },
-    enabled: !!batchId, // Only run query if batchId is provided
+    enabled: !!batchId,
     refetchInterval: (query) => {
-      // Auto-refetch every 2 seconds if batch is in 'processing' status
-      const isProcessing = query.state.data?.batch?.status === 'processing'
-      return isProcessing ? 2000 : false
+      const batch = query.state.data?.batch
+      if (!batch) return false
+
+      // Stop polling if batch is complete
+      if (batch.status !== 'processing' && batch.status !== 'pending' && batch.status !== 'uploading') {
+        pollCountRef.current = 0
+        prevProcessedCountRef.current = -1
+        return false
+      }
+
+      // Check if progress changed
+      const currentProcessed = batch.processed_images
+      if (currentProcessed !== prevProcessedCountRef.current) {
+        // Progress made, reset backoff
+        pollCountRef.current = 0
+        prevProcessedCountRef.current = currentProcessed
+      } else {
+        // No progress, increment backoff
+        pollCountRef.current += 1
+      }
+
+      return calculateBackoff(pollCountRef.current)
     },
   })
 }

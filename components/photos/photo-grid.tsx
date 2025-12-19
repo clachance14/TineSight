@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useCallback, useMemo, useState, memo } from 'react'
 import Image from 'next/image'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
 import { Badge } from '@/components/ui/badge'
@@ -9,35 +10,40 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { Loader2 } from 'lucide-react'
 
+// Constants for virtualization
+const ROW_HEIGHT = 200 // px - approximate height for aspect-square cards
+const GAP = 16 // gap-4 = 1rem = 16px
+
 interface PhotoGridProps {
   filters?: Omit<PhotoFilters, 'offset'>
   onPhotoClick?: (photoId: string) => void
+  // Optional: receive data from parent to share single data source
+  externalData?: {
+    photos: Photo[]
+    total: number
+    isLoading: boolean
+    hasNextPage: boolean
+    isFetchingNextPage: boolean
+    fetchNextPage: () => void
+  }
 }
 
-/**
- * PhotoGrid component displays a responsive masonry-style grid of photos
- * with infinite scroll, status badges, and loading states.
- */
-export function PhotoGrid({ filters, onPhotoClick }: PhotoGridProps) {
-  const {
-    data,
-    isLoading,
-    error,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } = usePhotosInfinite(filters)
-  const observerTarget = useRef<HTMLDivElement>(null)
+interface Photo {
+  id: string
+  thumbnailUrl: string | null
+  imageUrl: string | null
+  detection_status: string
+  bestQualityStatus: string | null
+}
 
-  // Flatten all pages into a single array of photos
-  const photos = useMemo(() => {
-    if (!data?.pages) return []
-    return data.pages.flatMap((page) => page.photos)
-  }, [data?.pages])
-
-  // Get total count from first page
-  const total = data?.pages?.[0]?.total ?? 0
-
+// Memoized individual photo card component
+const PhotoGridItem = memo(function PhotoGridItem({
+  photo,
+  onClick,
+}: {
+  photo: Photo
+  onClick: (id: string) => void
+}) {
   // Status badge variant mapping
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
@@ -54,10 +60,155 @@ export function PhotoGrid({ filters, onPhotoClick }: PhotoGridProps) {
     }
   }
 
-  // Format status text
   const formatStatus = (status: string) => {
     return status.charAt(0).toUpperCase() + status.slice(1)
   }
+
+  return (
+    <div
+      className={cn(
+        'group relative aspect-square cursor-pointer overflow-hidden rounded-lg bg-slate',
+        'transition-all duration-200 hover:ring-2 hover:ring-copper'
+      )}
+      onClick={() => onClick(photo.id)}
+    >
+      <div className="relative h-full w-full">
+        {photo.thumbnailUrl ? (
+          <Image
+            src={photo.thumbnailUrl}
+            alt="Trail camera photo"
+            fill
+            className="object-cover transition-transform duration-200 group-hover:scale-105"
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
+            placeholder="blur"
+            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k="
+          />
+        ) : photo.imageUrl ? (
+          <Image
+            src={photo.imageUrl}
+            alt="Trail camera photo"
+            fill
+            className="object-cover transition-transform duration-200 group-hover:scale-105"
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
+            placeholder="blur"
+            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k="
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-slate-700">
+            <svg
+              className="h-8 w-8 text-cream-dark/30"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+            </svg>
+          </div>
+        )}
+
+        {/* Status badge overlay */}
+        <div className="absolute right-2 top-2">
+          <Badge variant={getStatusBadgeVariant(photo.detection_status)}>
+            {formatStatus(photo.detection_status)}
+          </Badge>
+        </div>
+
+        {/* Quality status badge (if present) */}
+        {photo.bestQualityStatus && photo.bestQualityStatus !== 'pending' && (
+          <div className="absolute bottom-2 right-2">
+            <Badge
+              variant={
+                photo.bestQualityStatus === 'high_quality'
+                  ? 'success'
+                  : photo.bestQualityStatus === 'low_quality'
+                  ? 'destructive'
+                  : 'secondary'
+              }
+            >
+              {photo.bestQualityStatus === 'high_quality'
+                ? 'High'
+                : photo.bestQualityStatus === 'low_quality'
+                ? 'Low'
+                : 'Review'}
+            </Badge>
+          </div>
+        )}
+
+        {/* Hover overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-deep/60 via-transparent to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+      </div>
+    </div>
+  )
+})
+
+/**
+ * PhotoGrid component displays a virtualized responsive grid of photos
+ * with infinite scroll, status badges, and loading states.
+ * Uses @tanstack/react-virtual for performance with large datasets.
+ */
+export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProps) {
+  // Use external data if provided (single source of truth), otherwise fetch internally
+  const internalQuery = usePhotosInfinite(externalData ? undefined : filters)
+
+  const {
+    data,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = externalData
+    ? {
+        data: { pages: [{ photos: externalData.photos, total: externalData.total, nextCursor: null }] },
+        isLoading: externalData.isLoading,
+        error: null,
+        fetchNextPage: externalData.fetchNextPage,
+        hasNextPage: externalData.hasNextPage,
+        isFetchingNextPage: externalData.isFetchingNextPage,
+      }
+    : internalQuery
+
+  const parentRef = useRef<HTMLDivElement>(null)
+  const [columns, setColumns] = useState(5)
+
+  // Calculate columns based on viewport width (matching grid breakpoints)
+  useEffect(() => {
+    const updateColumns = () => {
+      const width = window.innerWidth
+      if (width < 640) setColumns(2)       // grid-cols-2
+      else if (width < 1024) setColumns(3) // sm:grid-cols-3
+      else if (width < 1280) setColumns(4) // lg:grid-cols-4
+      else setColumns(5)                   // xl:grid-cols-5
+    }
+    updateColumns()
+    window.addEventListener('resize', updateColumns)
+    return () => window.removeEventListener('resize', updateColumns)
+  }, [])
+
+  // Flatten all pages into a single array of photos
+  const photos = useMemo(() => {
+    if (!data?.pages) return []
+    return data.pages.flatMap((page) => page.photos)
+  }, [data?.pages])
+
+  // Get total count from first page
+  const total = data?.pages?.[0]?.total ?? 0
+
+  // Calculate row count for virtualization
+  const rowCount = Math.ceil(photos.length / columns)
+
+  // Virtualizer for rows
+  const virtualizer = useVirtualizer({
+    count: rowCount,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT + GAP,
+    overscan: 3, // Render 3 extra rows above/below viewport
+  })
 
   // Handle photo click
   const handlePhotoClick = useCallback(
@@ -69,28 +220,19 @@ export function PhotoGrid({ filters, onPhotoClick }: PhotoGridProps) {
     [onPhotoClick]
   )
 
-  // Infinite scroll implementation
+  // Check if we're near the bottom to trigger infinite scroll
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
-          fetchNextPage()
-        }
-      },
-      { threshold: 0.1 }
-    )
+    const virtualItems = virtualizer.getVirtualItems()
+    if (virtualItems.length === 0) return
 
-    const currentTarget = observerTarget.current
-    if (currentTarget) {
-      observer.observe(currentTarget)
-    }
+    const lastItem = virtualItems[virtualItems.length - 1]
+    if (!lastItem) return
 
-    return () => {
-      if (currentTarget) {
-        observer.unobserve(currentTarget)
-      }
+    // If we're viewing the last few rows and there's more data, fetch it
+    if (lastItem.index >= rowCount - 3 && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage()
     }
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
+  }, [virtualizer.getVirtualItems(), rowCount, hasNextPage, isFetchingNextPage, fetchNextPage])
 
   // Loading skeleton
   if (isLoading) {
@@ -175,95 +317,55 @@ export function PhotoGrid({ filters, onPhotoClick }: PhotoGridProps) {
     )
   }
 
-  // Photo grid
+  // Virtualized photo grid
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {photos.map((photo) => (
-          <div
-            key={photo.id}
-            className={cn(
-              'group relative aspect-square cursor-pointer overflow-hidden rounded-lg bg-slate',
-              'transition-all duration-200 hover:ring-2 hover:ring-copper'
-            )}
-            onClick={() => handlePhotoClick(photo.id)}
-          >
-            {/* Photo thumbnail */}
-            <div className="relative h-full w-full">
-              {photo.thumbnailUrl ? (
-                <Image
-                  src={photo.thumbnailUrl}
-                  alt="Trail camera photo"
-                  fill
-                  className="object-cover transition-transform duration-200 group-hover:scale-105"
-                  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-                  unoptimized // Signed URLs from Supabase don't work well with Next.js image optimization
-                />
-              ) : photo.imageUrl ? (
-                <Image
-                  src={photo.imageUrl}
-                  alt="Trail camera photo"
-                  fill
-                  className="object-cover transition-transform duration-200 group-hover:scale-105"
-                  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-                  unoptimized
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-slate-700">
-                  <svg
-                    className="h-8 w-8 text-cream-dark/30"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+      {/* Virtualized scroll container */}
+      <div
+        ref={parentRef}
+        className="h-[calc(100vh-280px)] overflow-auto"
+        style={{ contain: 'strict' }}
+      >
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            width: '100%',
+            position: 'relative',
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const startIndex = virtualRow.index * columns
+            const rowPhotos = photos.slice(startIndex, startIndex + columns)
+
+            return (
+              <div
+                key={virtualRow.key}
+                className="absolute left-0 top-0 w-full"
+                style={{
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <div
+                  className="grid gap-4"
+                  style={{
+                    gridTemplateColumns: `repeat(${columns}, 1fr)`,
+                    height: `${ROW_HEIGHT}px`,
+                  }}
+                >
+                  {rowPhotos.map((photo) => (
+                    <PhotoGridItem
+                      key={photo.id}
+                      photo={photo}
+                      onClick={handlePhotoClick}
                     />
-                  </svg>
+                  ))}
                 </div>
-              )}
-
-              {/* Status badge overlay */}
-              <div className="absolute right-2 top-2">
-                <Badge variant={getStatusBadgeVariant(photo.detection_status)}>
-                  {formatStatus(photo.detection_status)}
-                </Badge>
               </div>
-
-
-              {/* Quality status badge (if present) */}
-              {photo.bestQualityStatus && photo.bestQualityStatus !== 'pending' && (
-                <div className="absolute bottom-2 right-2">
-                  <Badge
-                    variant={
-                      photo.bestQualityStatus === 'high_quality'
-                        ? 'success'
-                        : photo.bestQualityStatus === 'low_quality'
-                        ? 'destructive'
-                        : 'secondary'
-                    }
-                  >
-                    {photo.bestQualityStatus === 'high_quality'
-                      ? 'High'
-                      : photo.bestQualityStatus === 'low_quality'
-                      ? 'Low'
-                      : 'Review'}
-                  </Badge>
-                </div>
-              )}
-
-              {/* Hover overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-deep/60 via-transparent to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
-            </div>
-          </div>
-        ))}
+            )
+          })}
+        </div>
       </div>
-
-      {/* Infinite scroll trigger (invisible element) */}
-      {hasNextPage && <div ref={observerTarget} className="h-4" />}
 
       {/* Loading more indicator */}
       {isFetchingNextPage && (

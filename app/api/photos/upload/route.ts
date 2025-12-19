@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createBatch } from '@/lib/services/batches'
-import { createPhoto, getSignedUploadUrl } from '@/lib/services/photos'
-import { findOrCreateCamera, type CameraMetadata } from '@/lib/services/cameras'
+import { getSignedUploadUrl } from '@/lib/services/photos'
+import { findOrCreateCamera } from '@/lib/services/cameras'
 import type { Json } from '@/types/database'
 
 // File validation constants
@@ -123,76 +123,74 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create image records and generate signed upload URLs
-    const uploads: UploadResponse[] = []
-    const errors: string[] = []
-
-    for (const file of body.files) {
-      try {
-        // Generate signed upload URL
-        const { data: uploadData, error: uploadError } = await getSignedUploadUrl(
-          user.id,
-          batch.id,
-          file.filename
-        )
-
-        if (uploadError !== null || uploadData === null) {
-          console.error('Failed to generate signed URL:', uploadError)
-          errors.push(`${file.filename}: Failed to generate upload URL`)
-          continue
-        }
-
-        // Find or create camera from EXIF metadata
-        let cameraId: string | null = null
-        if (file.make || file.model || file.deviceIdentifier || file.exifSignature) {
-          const cameraMetadata: CameraMetadata = {
-            make: file.make ?? null,
-            model: file.model ?? null,
-            deviceIdentifier: file.deviceIdentifier ?? null,
-            exifSignature: file.exifSignature ?? null,
-          }
-
-          const { data: camera, error: cameraError } = await findOrCreateCamera(
-            user.id,
-            cameraMetadata
-          )
-
-          if (cameraError !== null) {
-            console.error(`Failed to find/create camera for ${file.filename}:`, cameraError)
-            // Don't fail the upload - just log the error and continue without camera_id
-          } else if (camera !== null) {
-            cameraId = camera.id
-          }
-        }
-
-        // Create image record in database with EXIF metadata and camera_id
-        const { data: image, error: imageError } = await createPhoto(user.id, {
-          file_path: uploadData.path,
-          camera_id: cameraId,
-          file_size_bytes: file.size,
-          detection_status: 'pending',
-          captured_at: file.capturedAt ?? null,
-          exif_data: file.exifData ?? null,
-        })
-
-        if (imageError !== null || image === null) {
-          console.error('Failed to create image record:', imageError)
-          errors.push(`${file.filename}: Failed to create database record`)
-          continue
-        }
-
-        uploads.push({
-          fileId: file.id,
-          filename: file.filename,
-          uploadUrl: uploadData.signedUrl,
-          imageId: image.id,
-          path: uploadData.path,
-        })
-      } catch (error) {
-        console.error(`Error processing file ${file.filename}:`, error)
-        errors.push(`${file.filename}: Unexpected error`)
+    // Single camera lookup - all files in a batch are assumed from the same camera
+    let sharedCameraId: string | null = null
+    const firstFile = body.files[0]
+    if (firstFile && (firstFile.make || firstFile.model || firstFile.deviceIdentifier || firstFile.exifSignature)) {
+      const cameraMetadata = {
+        make: firstFile.make ?? null,
+        model: firstFile.model ?? null,
+        deviceIdentifier: firstFile.deviceIdentifier ?? null,
+        exifSignature: firstFile.exifSignature ?? null,
+      }
+      const { data: camera } = await findOrCreateCamera(user.id, cameraMetadata)
+      if (camera !== null) {
+        sharedCameraId = camera.id
       }
     }
+
+    // Parallelize signed URL generation (camera already resolved)
+    const uploadPromises = body.files.map(async (file) => {
+      // Generate signed upload URL
+      const { data: uploadData, error: uploadError } = await getSignedUploadUrl(
+        user.id,
+        batch.id,
+        file.filename
+      )
+
+      if (uploadError !== null || uploadData === null) {
+        return { file, error: `${file.filename}: Failed to generate upload URL` }
+      }
+
+      return { file, uploadData, cameraId: sharedCameraId, error: null }
+    })
+
+    const results = await Promise.all(uploadPromises)
+
+    // Separate successes and errors
+    const successes = results.filter(r => r.error === null && r.uploadData)
+    const errors = results.filter(r => r.error !== null).map(r => r.error!)
+
+    // Batch insert all photos at once
+    const photoRecords = successes.map(r => ({
+      user_id: user.id,
+      file_path: r.uploadData!.path,
+      batch_id: batch.id,
+      camera_id: r.cameraId ?? null,
+      file_size_bytes: r.file.size,
+      detection_status: 'pending' as const,
+      captured_at: r.file.capturedAt ?? null,
+      exif_data: r.file.exifData ?? null,
+    }))
+
+    const { data: photos, error: insertError } = await supabase
+      .from('images')
+      .insert(photoRecords)
+      .select()
+
+    if (insertError || !photos) {
+      console.error('Failed to batch insert photos:', insertError)
+      return NextResponse.json({ error: 'Failed to create photo records' }, { status: 500 })
+    }
+
+    // Build upload response
+    const uploads = successes.map((r, index) => ({
+      fileId: r.file.id,
+      filename: r.file.filename,
+      uploadUrl: r.uploadData!.signedUrl,
+      imageId: photos[index]!.id,
+      path: r.uploadData!.path,
+    }))
 
     // If all files failed, return error
     if (uploads.length === 0) {

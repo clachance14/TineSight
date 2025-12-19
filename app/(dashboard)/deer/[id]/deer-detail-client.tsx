@@ -75,9 +75,10 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
     const regionHeightPct = heightPct * (1 + 2 * padding)
 
     // Calculate background size to show the padded region
+    // Use Math.min to ensure entire bbox fits (contain), not Math.max (cover/crop)
     const bgSizeX = (100 / regionWidthPct) * 100
     const bgSizeY = (100 / regionHeightPct) * 100
-    const bgSize = Math.min(Math.max(bgSizeX, bgSizeY), 2000)
+    const bgSize = Math.min(bgSizeX, bgSizeY, 2000)
 
     return {
       backgroundImage: `url(${imageUrl})`,

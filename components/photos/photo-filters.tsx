@@ -1,170 +1,165 @@
 "use client"
 
-import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Slider } from "@/components/ui/slider"
-import { ChevronDown, X, Link2, SlidersHorizontal } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { X, Link2, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { PhotoFilterChips } from "./photo-filter-chips"
 
 export interface PhotoFilters {
-  status?: 'all' | 'processing' | 'completed' | 'failed' | undefined
-  hasDeer?: boolean | null | undefined
-  batchId?: string | undefined
-  qualityStatus?: 'all' | 'high_quality' | 'low_quality' | 'manual_review' | 'pending' | undefined
-  minConfidence?: number | undefined
-  sex?: 'buck' | 'doe' | 'fawn' | 'unknown' | 'all' | undefined
-  minPoints?: number | undefined
-  maxPoints?: number | undefined
+  status?: 'all' | 'processing' | 'completed' | 'failed'
+  hasDeer?: boolean | null
+  hasDetections?: boolean | null  // true = with detections, false = without, null = all
+  batchId?: string
+  qualityStatus?: 'all' | 'high_quality' | 'low_quality' | 'manual_review' | 'pending'
+  minConfidence?: number
+  sex?: 'buck' | 'doe' | 'fawn' | 'unknown' | 'all'
+  minPoints?: number
+  maxPoints?: number
+  dateFrom?: string
+  dateTo?: string
+  datePreset?: 'today' | 'last7days' | 'last30days' | 'custom'
+  cameraId?: string
+  sizeClass?: 'trophy' | 'standard' | 'basket' | 'spike' | 'unknown' | 'all'
+  deerId?: string
+}
+
+interface DeerOption {
+  id: string
+  name: string
 }
 
 interface PhotoFiltersProps {
   filters: PhotoFilters
   onFiltersChange: (filters: PhotoFilters) => void
+  onOpenDrawer: () => void
+  deerList?: DeerOption[]
 }
 
-const STATUS_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'processing', label: 'Processing' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'failed', label: 'Failed' },
-] as const
+// Helper to remove properties from filters object
+function omitProperties<T, K extends keyof T>(
+  obj: T,
+  ...keys: K[]
+): Omit<T, K> {
+  const result = { ...obj } as T
+  for (const key of keys) {
+    delete (result as Record<string, unknown>)[key as string]
+  }
+  return result as Omit<T, K>
+}
 
-const DEER_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'true', label: 'Has Deer' },
-  { value: 'false', label: 'Empty' },
-] as const
-
-const QUALITY_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'high_quality', label: 'High Quality' },
-  { value: 'low_quality', label: 'Low Quality' },
-  { value: 'manual_review', label: 'Manual Review' },
-  { value: 'pending', label: 'Pending' },
-] as const
-
-const SEX_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'buck', label: 'Bucks' },
-  { value: 'doe', label: 'Does' },
-  { value: 'fawn', label: 'Fawns' },
-] as const
-
-const POINTS_OPTIONS = [
-  { value: 'all', label: 'All', min: undefined, max: undefined },
-  { value: '10+', label: '10+', min: 10, max: undefined },
-  { value: '8-9', label: '8-9', min: 8, max: 9 },
-  { value: '6-7', label: '6-7', min: 6, max: 7 },
-  { value: '<6', label: '<6', min: undefined, max: 5 },
-] as const
-
-export function PhotoFilters({ filters, onFiltersChange }: PhotoFiltersProps) {
-  const [confidenceOpen, setConfidenceOpen] = useState(false)
-  const [lastConfidence, setLastConfidence] = useState(50)
-
+export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList = [] }: PhotoFiltersProps) {
   // Check if any filters are active
   const hasActiveFilters =
     (filters.status && filters.status !== 'all') ||
     filters.hasDeer !== null ||
+    filters.hasDetections !== null ||
     filters.batchId ||
     (filters.qualityStatus && filters.qualityStatus !== 'all') ||
     filters.minConfidence !== undefined ||
     (filters.sex && filters.sex !== 'all') ||
     filters.minPoints !== undefined ||
-    filters.maxPoints !== undefined
+    filters.maxPoints !== undefined ||
+    (filters.sizeClass && filters.sizeClass !== 'all') ||
+    filters.dateFrom ||
+    filters.dateTo ||
+    filters.datePreset ||
+    filters.cameraId ||
+    filters.deerId
 
-  // Get display labels for active filters
-  const getStatusLabel = () => {
-    const option = STATUS_OPTIONS.find(o => o.value === (filters.status || 'all'))
-    return option?.label || 'Status'
-  }
+  // Count drawer-only filters (those not available as quick filters)
+  const drawerFilterCount = [
+    filters.minConfidence !== undefined,
+    filters.minPoints !== undefined,
+    filters.maxPoints !== undefined,
+    filters.dateFrom !== undefined,
+    filters.dateTo !== undefined,
+    filters.datePreset !== undefined,
+    filters.cameraId !== undefined,
+    filters.batchId !== undefined,
+  ].filter(Boolean).length
 
-  const getDeerLabel = () => {
-    if (filters.hasDeer === null) return 'Detection'
-    return filters.hasDeer ? 'Has Deer' : 'Empty'
-  }
-
-  const getQualityLabel = () => {
-    const option = QUALITY_OPTIONS.find(o => o.value === (filters.qualityStatus || 'all'))
-    return option?.label || 'Quality'
-  }
-
-  // Handlers
-  const handleStatusChange = (value: string) => {
-    onFiltersChange({ ...filters, status: value as PhotoFilters['status'] })
-  }
-
-  const handleDeerChange = (value: string) => {
-    const hasDeer = value === 'all' ? null : value === 'true'
-    onFiltersChange({ ...filters, hasDeer })
-  }
-
-  const handleQualityChange = (value: string) => {
-    onFiltersChange({ ...filters, qualityStatus: value as PhotoFilters['qualityStatus'] })
-  }
-
-  const handleConfidenceChange = (value: number[]) => {
-    const confidence = value[0]
-    if (confidence !== undefined) {
-      setLastConfidence(confidence)
-      onFiltersChange({ ...filters, minConfidence: confidence })
-    }
-  }
-
-  const handleConfidenceToggle = () => {
-    if (filters.minConfidence !== undefined) {
-      setLastConfidence(filters.minConfidence)
-      onFiltersChange({ ...filters, minConfidence: undefined })
+  // Quick filter toggle handlers
+  const toggleBucks = () => {
+    const isActive = filters.sex === 'buck' && filters.sizeClass !== 'trophy'
+    if (isActive) {
+      onFiltersChange({
+        ...omitProperties(filters, 'sizeClass'),
+        sex: 'all',
+      } as PhotoFilters)
     } else {
-      onFiltersChange({ ...filters, minConfidence: lastConfidence })
+      onFiltersChange({
+        ...filters,
+        sex: 'buck',
+      })
     }
   }
 
-  const handleSexChange = (value: string) => {
+  const toggleDoes = () => {
+    const isActive = filters.sex === 'doe'
     onFiltersChange({
       ...filters,
-      sex: value as PhotoFilters['sex'],
-      // Clear points filter when changing sex away from buck
-      minPoints: value === 'buck' ? filters.minPoints : undefined,
-      maxPoints: value === 'buck' ? filters.maxPoints : undefined,
+      sex: isActive ? 'all' : 'doe',
     })
   }
 
-  const handlePointsChange = (option: typeof POINTS_OPTIONS[number]) => {
+  const toggleTrophy = () => {
+    const isActive = filters.sex === 'buck' && filters.sizeClass === 'trophy'
     onFiltersChange({
       ...filters,
-      minPoints: option.min,
-      maxPoints: option.max,
+      sex: isActive ? 'all' : 'buck',
+      sizeClass: isActive ? 'all' : 'trophy',
     })
   }
 
-  const getActivePointsFilter = () => {
-    const { minPoints, maxPoints } = filters
-    if (minPoints === undefined && maxPoints === undefined) return 'all'
-    if (minPoints === 10) return '10+'
-    if (minPoints === 8 && maxPoints === 9) return '8-9'
-    if (minPoints === 6 && maxPoints === 7) return '6-7'
-    if (maxPoints === 5) return '<6'
-    return 'all'
+  const toggleHighQuality = () => {
+    const isActive = filters.qualityStatus === 'high_quality'
+    onFiltersChange({
+      ...filters,
+      qualityStatus: isActive ? 'all' : 'high_quality',
+    })
+  }
+
+  const toggleProcessing = () => {
+    const isActive = filters.status === 'processing'
+    onFiltersChange({
+      ...filters,
+      status: isActive ? 'all' : 'processing',
+    })
+  }
+
+  const toggleFailed = () => {
+    const isActive = filters.status === 'failed'
+    onFiltersChange({
+      ...filters,
+      status: isActive ? 'all' : 'failed',
+    })
+  }
+
+  const toggleWithDetections = () => {
+    const isActive = filters.hasDetections === true
+    onFiltersChange({
+      ...filters,
+      hasDetections: isActive ? null : true,
+    })
+  }
+
+  const toggleNoDetections = () => {
+    const isActive = filters.hasDetections === false
+    onFiltersChange({
+      ...filters,
+      hasDetections: isActive ? null : false,
+    })
   }
 
   const clearFilters = () => {
     onFiltersChange({
       status: 'all',
       hasDeer: null,
-      batchId: undefined,
+      hasDetections: null,
       qualityStatus: 'all',
-      minConfidence: undefined,
       sex: 'all',
-      minPoints: undefined,
-      maxPoints: undefined,
+      sizeClass: 'all',
     })
   }
 
@@ -172,11 +167,19 @@ export function PhotoFilters({ filters, onFiltersChange }: PhotoFiltersProps) {
     const params = new URLSearchParams()
     if (filters.status && filters.status !== 'all') params.set('status', filters.status)
     if (filters.hasDeer !== null) params.set('hasDeer', String(filters.hasDeer))
+    if (filters.hasDetections !== null && filters.hasDetections !== undefined) params.set('hasDetections', String(filters.hasDetections))
     if (filters.qualityStatus && filters.qualityStatus !== 'all') params.set('qualityStatus', filters.qualityStatus)
     if (filters.minConfidence !== undefined) params.set('minConfidence', String(filters.minConfidence))
     if (filters.sex && filters.sex !== 'all') params.set('sex', filters.sex)
     if (filters.minPoints !== undefined) params.set('minPoints', String(filters.minPoints))
     if (filters.maxPoints !== undefined) params.set('maxPoints', String(filters.maxPoints))
+    if (filters.sizeClass && filters.sizeClass !== 'all') params.set('sizeClass', filters.sizeClass)
+    if (filters.dateFrom) params.set('dateFrom', filters.dateFrom)
+    if (filters.dateTo) params.set('dateTo', filters.dateTo)
+    if (filters.datePreset) params.set('datePreset', filters.datePreset)
+    if (filters.cameraId) params.set('cameraId', filters.cameraId)
+    if (filters.batchId) params.set('batchId', filters.batchId)
+    if (filters.deerId) params.set('deerId', filters.deerId)
 
     const url = `${window.location.origin}/photos${params.toString() ? `?${params.toString()}` : ''}`
     try {
@@ -186,217 +189,192 @@ export function PhotoFilters({ filters, onFiltersChange }: PhotoFiltersProps) {
     }
   }
 
-  const confidenceActive = filters.minConfidence !== undefined
-  const deerValue = filters.hasDeer === null ? 'all' : String(filters.hasDeer)
+  // Check which quick filters are active
+  const isBucksActive = filters.sex === 'buck' && filters.sizeClass !== 'trophy'
+  const isDoesActive = filters.sex === 'doe'
+  const isTrophyActive = filters.sex === 'buck' && filters.sizeClass === 'trophy'
+  const isHighQualityActive = filters.qualityStatus === 'high_quality'
+  const isProcessingActive = filters.status === 'processing'
+  const isFailedActive = filters.status === 'failed'
+  const isWithDetectionsActive = filters.hasDetections === true
+  const isNoDetectionsActive = filters.hasDetections === false
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      {/* Status Dropdown */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(
-              "h-8 gap-1.5 text-xs",
-              filters.status && filters.status !== 'all' && "border-copper text-copper"
-            )}
-          >
-            {getStatusLabel()}
-            <ChevronDown className="size-3 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-36">
-          <DropdownMenuRadioGroup value={filters.status || 'all'} onValueChange={handleStatusChange}>
-            {STATUS_OPTIONS.map((option) => (
-              <DropdownMenuRadioItem key={option.value} value={option.value}>
-                {option.label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+    <div className="space-y-3">
+      {/* Quick Filter Bar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Quick Filter Toggles */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleBucks}
+          className={cn(
+            "h-8 text-xs",
+            isBucksActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
+          )}
+        >
+          Bucks
+        </Button>
 
-      {/* Deer Detection Dropdown */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(
-              "h-8 gap-1.5 text-xs",
-              filters.hasDeer !== null && "border-copper text-copper"
-            )}
-          >
-            {getDeerLabel()}
-            <ChevronDown className="size-3 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-36">
-          <DropdownMenuRadioGroup value={deerValue} onValueChange={handleDeerChange}>
-            {DEER_OPTIONS.map((option) => (
-              <DropdownMenuRadioItem key={option.value} value={option.value}>
-                {option.label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleDoes}
+          className={cn(
+            "h-8 text-xs",
+            isDoesActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
+          )}
+        >
+          Does
+        </Button>
 
-      {/* Sex Dropdown */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(
-              "h-8 gap-1.5 text-xs",
-              filters.sex && filters.sex !== 'all' && "border-copper text-copper"
-            )}
-          >
-            {SEX_OPTIONS.find(o => o.value === (filters.sex || 'all'))?.label || 'Sex'}
-            <ChevronDown className="size-3 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-36">
-          <DropdownMenuRadioGroup value={filters.sex || 'all'} onValueChange={handleSexChange}>
-            {SEX_OPTIONS.map((option) => (
-              <DropdownMenuRadioItem key={option.value} value={option.value}>
-                {option.label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleTrophy}
+          className={cn(
+            "h-8 text-xs",
+            isTrophyActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
+          )}
+        >
+          Trophy
+        </Button>
 
-      {/* Quality Dropdown */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(
-              "h-8 gap-1.5 text-xs",
-              filters.qualityStatus && filters.qualityStatus !== 'all' && "border-copper text-copper"
-            )}
-          >
-            {getQualityLabel()}
-            <ChevronDown className="size-3 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-40">
-          <DropdownMenuRadioGroup value={filters.qualityStatus || 'all'} onValueChange={handleQualityChange}>
-            {QUALITY_OPTIONS.map((option) => (
-              <DropdownMenuRadioItem key={option.value} value={option.value}>
-                {option.label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleHighQuality}
+          className={cn(
+            "h-8 text-xs",
+            isHighQualityActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
+          )}
+        >
+          High Quality
+        </Button>
 
-      {/* Confidence Popover */}
-      <DropdownMenu open={confidenceOpen} onOpenChange={setConfidenceOpen}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(
-              "h-8 gap-1.5 text-xs",
-              confidenceActive && "border-copper text-copper"
-            )}
-          >
-            <SlidersHorizontal className="size-3" />
-            {confidenceActive ? `≥${filters.minConfidence}%` : 'Confidence'}
-            <ChevronDown className="size-3 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-64 p-3">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Min Confidence</span>
-              <button
-                onClick={handleConfidenceToggle}
-                className={cn(
-                  "text-xs font-medium px-2 py-0.5 rounded transition-colors",
-                  confidenceActive
-                    ? "bg-copper/20 text-copper"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {confidenceActive ? 'On' : 'Off'}
-              </button>
-            </div>
-            <div className="flex items-center gap-3">
-              <Slider
-                value={[filters.minConfidence ?? lastConfidence]}
-                min={0}
-                max={100}
-                step={5}
-                onValueChange={handleConfidenceChange}
-                disabled={!confidenceActive}
-                className={cn("flex-1", !confidenceActive && "opacity-40")}
-              />
-              <span className={cn(
-                "text-xs w-10 text-right tabular-nums",
-                confidenceActive ? "text-copper font-medium" : "text-muted-foreground"
-              )}>
-                {confidenceActive ? `${filters.minConfidence}%` : `${lastConfidence}%`}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Show photos with detections above this threshold
-            </p>
-          </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleProcessing}
+          className={cn(
+            "h-8 text-xs",
+            isProcessingActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
+          )}
+        >
+          Processing
+        </Button>
 
-      {/* Points Quick Filters (only for bucks) */}
-      {filters.sex === 'buck' && (
-        <div className="flex items-center gap-1">
-          {POINTS_OPTIONS.map((option) => (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleFailed}
+          className={cn(
+            "h-8 text-xs",
+            isFailedActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
+          )}
+        >
+          Failed
+        </Button>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleWithDetections}
+          className={cn(
+            "h-8 text-xs",
+            isWithDetectionsActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
+          )}
+        >
+          With Deer
+        </Button>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleNoDetections}
+          className={cn(
+            "h-8 text-xs",
+            isNoDetectionsActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
+          )}
+        >
+          No Deer
+        </Button>
+
+        {/* Named Deer Dropdown */}
+        {deerList.length > 0 && (
+          <Select
+            value={filters.deerId ?? "all"}
+            onValueChange={(value) => {
+              if (value === "all") {
+                onFiltersChange(omitProperties(filters, 'deerId'))
+              } else {
+                onFiltersChange({ ...filters, deerId: value })
+              }
+            }}
+          >
+            <SelectTrigger size="sm" className={cn(
+              "h-8 text-xs min-w-[120px]",
+              filters.deerId && "bg-copper text-white border-copper"
+            )}>
+              <SelectValue placeholder="Named Deer" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Deer</SelectItem>
+              {deerList.map((deer) => (
+                <SelectItem key={deer.id} value={deer.id}>
+                  {deer.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {/* More Filters Button */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onOpenDrawer}
+          className="h-8 gap-1.5 text-xs relative"
+        >
+          <SlidersHorizontal className="size-3" />
+          More Filters
+          {drawerFilterCount > 0 && (
+            <span className="absolute -top-1 -right-1 size-4 rounded-full bg-copper text-white text-[10px] font-medium flex items-center justify-center">
+              {drawerFilterCount}
+            </span>
+          )}
+        </Button>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Action Buttons */}
+        {hasActiveFilters && (
+          <div className="flex items-center gap-1">
             <Button
-              key={option.value}
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className={cn(
-                "h-8 text-xs px-2",
-                getActivePointsFilter() === option.value && "border-copper text-copper bg-copper/10"
-              )}
-              onClick={() => handlePointsChange(option)}
+              onClick={copyFilterUrl}
+              className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground"
             >
-              {option.label}
+              <Link2 className="size-3" />
+              <span className="hidden sm:inline">Copy link</span>
             </Button>
-          ))}
-        </div>
-      )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearFilters}
+              className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3" />
+              <span className="hidden sm:inline">Clear</span>
+            </Button>
+          </div>
+        )}
+      </div>
 
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Action buttons */}
-      {hasActiveFilters && (
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={copyFilterUrl}
-            className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <Link2 className="size-3" />
-            <span className="hidden sm:inline">Copy link</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={clearFilters}
-            className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <X className="size-3" />
-            <span className="hidden sm:inline">Clear</span>
-          </Button>
-        </div>
-      )}
+      {/* Active Filter Chips */}
+      <PhotoFilterChips filters={filters} onFiltersChange={onFiltersChange} />
     </div>
   )
 }

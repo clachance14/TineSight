@@ -64,7 +64,7 @@ export default async function DeerDetailPage({ params }: DeerDetailPageProps) {
       }
       const { data: urlData } = await supabase
         .storage
-        .from('images')
+        .from('photos')
         .createSignedUrl(imageData.images.file_path, 3600)
 
       referenceImageUrl = urlData?.signedUrl ?? null

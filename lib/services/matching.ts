@@ -94,7 +94,7 @@ export async function getCatalogWithReferences(
   const { data, error } = await supabase
     .from('deer')
     .select('id, name, reference_detection_id')
-    .eq('account_id', userId)
+    .eq('user_id', userId)
     .not('reference_detection_id', 'is', null)
 
   return { data: data as Array<{ id: string; name: string; reference_detection_id: string }> | null, error }

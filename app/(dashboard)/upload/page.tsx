@@ -1,23 +1,33 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useQueryClient } from '@tanstack/react-query'
 import { PhotoUploader } from '@/components/photos/photo-uploader'
 import { UploadProgressPanel } from '@/components/photos/upload-progress-panel'
-import { useUploadStore } from '@/lib/stores/upload'
+import { useUploadStore, batchedUpdateProgress } from '@/lib/stores/upload'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Image } from 'lucide-react'
 
+const CHUNK_SIZE = 20
+const PARALLEL_CHUNKS = 1
+const PROGRESS_THROTTLE_MS = 500 // Max 2 updates per second per file
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+    arr.slice(i * size, i * size + size)
+  )
+}
+
 export default function UploadPage() {
   const queryClient = useQueryClient()
+  const progressThrottles = useRef<Map<string, number>>(new Map())
 
   const {
     uploadQueue,
     setIsPreparing,
     startUpload,
-    updateFileProgress,
     markFileCompleted,
     markFileFailed,
   } = useUploadStore()
@@ -26,104 +36,134 @@ export default function UploadPage() {
     const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
     if (pendingFiles.length === 0) return
 
-    setIsPreparing(true)
+    const chunks = chunkArray(pendingFiles, CHUNK_SIZE)
 
-    try {
-      // Step 1: Initialize batch and get signed URLs
-      const response = await fetch('/api/photos/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          files: pendingFiles.map((f) => ({
-            id: f.id,
-            filename: f.filename,
-            contentType: f.file.type,
-            size: f.file.size,
-            capturedAt: f.capturedAt?.toISOString(),
-            make: f.make,
-            model: f.model,
-            deviceIdentifier: f.deviceIdentifier,
-            exifSignature: f.exifSignature,
-            exifData: f.exifData,
-          })),
-        }),
-      })
+    // Process a single chunk
+    const processChunk = async (chunk: typeof pendingFiles) => {
+      try {
+        // Step 1: Initialize batch and get signed URLs for this chunk
+        const response = await fetch('/api/photos/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            files: chunk.map((f) => ({
+              id: f.id,
+              filename: f.filename,
+              contentType: f.file?.type ?? 'image/jpeg',
+              size: f.file?.size ?? 0,
+              capturedAt: f.capturedAt?.toISOString(),
+              make: f.make,
+              model: f.model,
+              deviceIdentifier: f.deviceIdentifier,
+              exifSignature: f.exifSignature,
+              exifData: f.exifData,
+            })),
+          }),
+        })
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || 'Failed to initialize upload')
-      }
-
-      const { batchId, uploads } = await response.json()
-
-      // Step 2: Update store with upload URLs and mark as uploading
-      startUpload(batchId, uploads)
-
-      // Step 3: Upload each file to its signed URL
-      const uploadPromises = pendingFiles.map(async (file) => {
-        const uploadInfo = uploads.find((u: { fileId: string }) => u.fileId === file.id)
-        if (!uploadInfo) {
-          markFileFailed(file.id, 'No upload URL received')
-          return
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.error || 'Failed to initialize upload')
         }
 
-        try {
-          const xhr = new XMLHttpRequest()
+        const { batchId, uploads } = await response.json()
 
-          xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-              const progress = Math.round((event.loaded / event.total) * 100)
-              updateFileProgress(file.id, progress)
-            }
+        // Step 2: Update store with upload URLs and mark as uploading
+        startUpload(batchId, uploads)
+
+        // Step 3: Upload each file to its signed URL
+        const uploadPromises = chunk.map(async (file) => {
+          const uploadInfo = uploads.find((u: { fileId: string }) => u.fileId === file.id)
+          if (!uploadInfo) {
+            markFileFailed(file.id, 'No upload URL received')
+            return
           }
 
-          await new Promise<void>((resolve, reject) => {
-            xhr.onload = () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve()
-              } else {
-                reject(new Error(`Upload failed: ${xhr.status}`))
+          try {
+            // File must exist for pending uploads
+            if (!file.file) {
+              markFileFailed(file.id, 'File data not available')
+              return
+            }
+            const fileData = file.file
+
+            const xhr = new XMLHttpRequest()
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable) {
+                const now = Date.now()
+                const lastUpdate = progressThrottles.current.get(file.id) || 0
+                // Throttle updates to max 2 per second, but always send 100%
+                const progress = Math.round((event.loaded / event.total) * 100)
+                if (progress === 100 || now - lastUpdate > PROGRESS_THROTTLE_MS) {
+                  progressThrottles.current.set(file.id, now)
+                  batchedUpdateProgress(file.id, progress)
+                }
               }
             }
-            xhr.onerror = () => reject(new Error('Network error'))
 
-            xhr.open('PUT', uploadInfo.uploadUrl)
-            xhr.setRequestHeader('Content-Type', file.file.type)
-            xhr.send(file.file)
-          })
+            await new Promise<void>((resolve, reject) => {
+              xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  resolve()
+                } else {
+                  // Log Supabase error details
+                  console.error(`[Upload Failed] ${file.filename}`, {
+                    status: xhr.status,
+                    statusText: xhr.statusText,
+                    response: xhr.responseText?.slice(0, 500),
+                  })
+                  reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`))
+                }
+              }
+              xhr.onerror = () => {
+                // Log browser/network error
+                console.error(`[Network Error] ${file.filename}`, {
+                  readyState: xhr.readyState,
+                })
+                reject(new Error('Network error - browser connection failed'))
+              }
+              xhr.ontimeout = () => {
+                console.error(`[Timeout] ${file.filename}`)
+                reject(new Error('Upload timeout'))
+              }
+              xhr.timeout = 120000 // 120 second timeout
+              xhr.open('PUT', uploadInfo.uploadUrl)
+              xhr.setRequestHeader('Content-Type', fileData.type)
+              xhr.send(fileData)
+            })
 
-          markFileCompleted(file.id)
-        } catch (err) {
-          markFileFailed(file.id, err instanceof Error ? err.message : 'Upload failed')
-        }
-      })
+            markFileCompleted(file.id)
+          } catch (err) {
+            markFileFailed(file.id, err instanceof Error ? err.message : 'Upload failed')
+          }
+        })
 
-      await Promise.all(uploadPromises)
+        await Promise.all(uploadPromises)
 
-      // Step 4: Mark batch as complete with ONLY successfully uploaded image IDs
-      const currentQueue = useUploadStore.getState().uploadQueue
-      const successfulUploads = uploads.filter((u: { fileId: string; imageId: string }) => {
-        const file = currentQueue.find(f => f.id === u.fileId)
-        return file?.status === 'completed'
-      })
-      const uploadedImageIds = successfulUploads.map((u: { imageId: string }) => u.imageId)
-
-      if (uploadedImageIds.length > 0) {
+        // Step 4: Trigger processing for this chunk immediately
         await fetch('/api/photos/upload/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batchId, uploadedImageIds }),
+          body: JSON.stringify({ batchId, uploadedImageIds: uploads.map((u: { imageId: string }) => u.imageId) }),
         })
+
+      } catch (err) {
+        console.error('Chunk upload failed:', err)
       }
-
-      // Step 5: Refresh photo list
-      await queryClient.invalidateQueries({ queryKey: ['photos'] })
-
-    } catch (err) {
-      console.error('Upload failed:', err)
-      setIsPreparing(false)
     }
-  }, [uploadQueue, setIsPreparing, startUpload, updateFileProgress, markFileCompleted, markFileFailed, queryClient])
+
+    setIsPreparing(true)
+
+    // Process chunks in parallel batches of PARALLEL_CHUNKS
+    for (let i = 0; i < chunks.length; i += PARALLEL_CHUNKS) {
+      const batch = chunks.slice(i, i + PARALLEL_CHUNKS)
+      await Promise.all(batch.map(processChunk))
+    }
+
+    // Step 5: Refresh photo list after all chunks
+    await queryClient.invalidateQueries({ queryKey: ['photos'] })
+    setIsPreparing(false)
+  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient])
 
   return (
     <div className="space-y-6">

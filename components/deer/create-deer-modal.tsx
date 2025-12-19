@@ -19,6 +19,14 @@ interface CreateDeerModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   detectionId: string
+  cropUrl?: string | null | undefined
+  imageUrl?: string | null | undefined
+  bbox?: {
+    x: number
+    y: number
+    width: number
+    height: number
+  } | null | undefined
   onSuccess?: (deer: { id: string; name: string }) => void
 }
 
@@ -35,6 +43,9 @@ export function CreateDeerModal({
   open,
   onOpenChange,
   detectionId,
+  cropUrl,
+  imageUrl,
+  bbox,
   onSuccess,
 }: CreateDeerModalProps): React.JSX.Element {
   const [name, setName] = useState('')
@@ -83,6 +94,27 @@ export function CreateDeerModal({
         <DialogHeader>
           <DialogTitle>Name This Deer</DialogTitle>
         </DialogHeader>
+        {(cropUrl || imageUrl) && (
+          <div className="flex justify-center">
+            {cropUrl ? (
+              <img
+                src={cropUrl}
+                alt="Deer to name"
+                className="max-h-48 rounded-lg object-contain"
+              />
+            ) : imageUrl && bbox ? (
+              <div
+                className="h-48 w-full max-w-[300px] rounded-lg"
+                style={{
+                  backgroundImage: `url(${imageUrl})`,
+                  backgroundSize: `${Math.min((100 / (bbox.width / 10000)) * 100, 2000)}%`,
+                  backgroundPosition: `${(bbox.x / 10000) * 100}% ${(bbox.y / 10000) * 100}%`,
+                  backgroundRepeat: 'no-repeat',
+                }}
+              />
+            ) : null}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Name</Label>

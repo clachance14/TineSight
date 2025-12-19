@@ -1,12 +1,15 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef, memo } from 'react'
+import { useRouter } from 'next/navigation'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { X, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { useUploadStore } from '@/lib/stores/upload'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 export function UploadProgressPanel() {
+  const router = useRouter()
   const {
     uploadQueue,
     isPreparing,
@@ -16,18 +19,43 @@ export function UploadProgressPanel() {
     failedCount,
     totalCount,
     reset,
+    clearCompletedFiles,
   } = useUploadStore()
 
-  // Auto-dismiss after 3 seconds when upload is complete
+  // Use simplified view for bulk uploads to avoid React performance issues
+  const isBulkUpload = totalCount > 20
+
+  // Virtualized list for bulk uploads
+  const parentRef = useRef<HTMLDivElement>(null)
+  const virtualizer = useVirtualizer({
+    count: uploadQueue.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 24, // ~24px per row
+    overscan: 5, // Render 5 extra items above/below viewport
+  })
+
+  // Auto-dismiss and navigate to photos after 3 seconds when upload is complete
   useEffect(() => {
     if (!isUploading && uploadQueue.length > 0 && overallProgress === 100) {
       const timer = setTimeout(() => {
         reset()
+        router.push('/photos')
       }, 3000)
       return () => clearTimeout(timer)
     }
     return undefined
-  }, [isUploading, uploadQueue.length, overallProgress, reset])
+  }, [isUploading, uploadQueue.length, overallProgress, reset, router])
+
+  // Auto-clear completed files from memory during upload to prevent memory bloat
+  useEffect(() => {
+    if (completedCount > 0 && isUploading && totalCount > 50) {
+      const timer = setTimeout(() => {
+        clearCompletedFiles()
+      }, 5000) // Clear completed files after 5 seconds
+      return () => clearTimeout(timer)
+    }
+    return undefined
+  }, [completedCount, isUploading, totalCount, clearCompletedFiles])
 
   // Only show when preparing, uploading, or recently completed
   // Don't show for pending files - that's handled by PhotoUploader summary
@@ -88,11 +116,45 @@ export function UploadProgressPanel() {
               </div>
 
               {/* Individual File Progress */}
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {uploadQueue.map((file) => (
-                  <FileProgressItem key={file.id} file={file} />
-                ))}
-              </div>
+              {isBulkUpload ? (
+                // Virtualized bulk view - only renders visible items
+                <div ref={parentRef} className="max-h-60 overflow-y-auto">
+                  <div
+                    style={{
+                      height: `${virtualizer.getTotalSize()}px`,
+                      width: '100%',
+                      position: 'relative',
+                    }}
+                  >
+                    {virtualizer.getVirtualItems().map((virtualRow) => {
+                      const file = uploadQueue[virtualRow.index]
+                      if (!file) return null
+                      return (
+                        <div
+                          key={file.id}
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: `${virtualRow.size}px`,
+                            transform: `translateY(${virtualRow.start}px)`,
+                          }}
+                        >
+                          <BulkFileItem file={file} />
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : (
+                // Full progress view for small uploads
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {uploadQueue.map((file) => (
+                    <FileProgressItem key={file.id} file={file} />
+                  ))}
+                </div>
+              )}
 
               {/* Success Message */}
               {allComplete && (
@@ -119,7 +181,39 @@ interface FileProgressItemProps {
   }
 }
 
-function FileProgressItem({ file }: FileProgressItemProps) {
+// Simplified item for bulk uploads - no progress bar, just status icon and filename
+// Memoized to prevent unnecessary re-renders during bulk uploads
+const BulkFileItem = memo(function BulkFileItem({ file }: FileProgressItemProps) {
+  const StatusIcon = () => {
+    switch (file.status) {
+      case 'completed':
+        return <CheckCircle2 className="h-3 w-3 text-primary shrink-0" />
+      case 'failed':
+        return <XCircle className="h-3 w-3 text-destructive shrink-0" />
+      case 'uploading':
+        return <Loader2 className="h-3 w-3 text-muted-foreground animate-spin shrink-0" />
+      default:
+        return <div className="h-3 w-3 shrink-0" />
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <StatusIcon />
+      <span
+        className={cn(
+          'truncate',
+          file.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'
+        )}
+      >
+        {file.filename}
+      </span>
+    </div>
+  )
+})
+
+// Memoized to prevent unnecessary re-renders
+const FileProgressItem = memo(function FileProgressItem({ file }: FileProgressItemProps) {
   const truncateFilename = (name: string, maxLength = 35) => {
     if (name.length <= maxLength) return name
     const ext = name.split('.').pop()
@@ -172,7 +266,7 @@ function FileProgressItem({ file }: FileProgressItemProps) {
       )}
     </div>
   )
-}
+})
 
 interface ProgressBarProps {
   progress: number

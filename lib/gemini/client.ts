@@ -1,7 +1,20 @@
 import { GoogleGenAI } from "@google/genai";
-import { zodToJsonSchema } from "zod-to-json-schema";
-import { analysisSchema, comparisonSchema, type AnalysisResult, type ComparisonResult } from "./types";
-import { PHOTO_ANALYSIS_PROMPT, buildComparisonPromptWithCatalog } from "./prompts";
+import { analysisSchema, comparisonSchema, detectionOnlySchema, deerAnalysisSchema, type AnalysisResult, type ComparisonResult, type DetectionOnlyResult, type DeerAnalysisResult } from "./types";
+import { PHOTO_ANALYSIS_PROMPT, buildComparisonPromptWithCatalog, DEER_CLASSIFICATION_PROMPT, DETECTION_ONLY_PROMPT, DEER_ANALYSIS_PROMPT } from "./prompts";
+import { DETECTION_SCHEMA, CLASSIFICATION_SCHEMA, COMPARISON_SCHEMA, ANALYSIS_SCHEMA, DEER_ANALYSIS_SCHEMA } from "./schemas";
+
+/**
+ * Metrics captured from a Gemini API call
+ */
+export interface GeminiMetrics {
+  promptTokens: number;
+  responseTokens: number;
+  totalTokens: number;
+  modelUsed: string;
+  wasRateLimited: boolean;
+  retryCount: number;
+  durationMs: number;
+}
 
 // Singleton Gemini client
 let geminiClient: GoogleGenAI | null = null;
@@ -18,92 +31,6 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 /**
- * Parse a detection string into a structured object
- * Handles Gemini's inconsistent output formats like:
- * - "box_2d: [350,614,793,829], species: whitetail, sex: buck, ..."
- */
-function parseDetectionString(str: string): Record<string, unknown> | null {
-  try {
-    const result: Record<string, unknown> = {};
-
-    // Match patterns for simplified detection format
-    const patterns = [
-      { key: 'box_2d', regex: /box_2d:\s*\[([^\]]+)\]/i },
-      { key: 'species', regex: /species:\s*"?(\w+)"?/i },
-      { key: 'sex', regex: /sex:\s*"?(\w+)"?/i },
-      { key: 'antler_points', regex: /antler_points:\s*(\d+|null)/i },
-      { key: 'confidence', regex: /confidence:\s*(\d+)/i },
-    ];
-
-    for (const { key, regex } of patterns) {
-      const match = str.match(regex);
-      if (match && match[1]) {
-        if (key === 'box_2d') {
-          const nums = match[1].split(',').map(n => parseInt(n.trim(), 10));
-          if (nums.length === 4 && nums.every(n => !isNaN(n))) {
-            result[key] = nums as [number, number, number, number];
-          }
-        } else if (key === 'antler_points') {
-          result[key] = match[1] === 'null' ? null : parseInt(match[1], 10);
-        } else if (key === 'confidence') {
-          result[key] = parseInt(match[1], 10);
-        } else {
-          result[key] = match[1].toLowerCase();
-        }
-      }
-    }
-
-    // Validate we have box_2d
-    if (!result['box_2d']) {
-      return null;
-    }
-
-    // Set defaults for missing required fields
-    if (!result['species']) result['species'] = 'unknown';
-    if (!result['sex']) result['sex'] = 'unknown';
-    if (result['antler_points'] === undefined) result['antler_points'] = null;
-    if (result['confidence'] === undefined) result['confidence'] = 50;
-
-    return result;
-  } catch {
-    console.warn('Failed to parse detection string:', str);
-    return null;
-  }
-}
-
-/**
- * Group individual field strings into detection objects
- * Handles case where Gemini returns each field as a separate array element
- */
-function groupDetectionStrings(detections: unknown[]): unknown[] {
-  if (detections.length === 0) return [];
-
-  const firstStr = detections[0];
-  if (typeof firstStr !== 'string') return detections;
-
-  // If first string contains multiple fields (comma-separated values), parse each string individually
-  if (firstStr.includes(',') && firstStr.includes('box_2d')) {
-    return detections.map(d => typeof d === 'string' ? parseDetectionString(d) : d).filter(Boolean);
-  }
-
-  // Otherwise, group every 5 strings into one detection
-  // (box_2d, species, sex, antler_points, confidence)
-  const grouped: unknown[] = [];
-  const fieldsPerDetection = 5;
-
-  for (let i = 0; i < detections.length; i += fieldsPerDetection) {
-    const chunk = detections.slice(i, i + fieldsPerDetection);
-    const combined = chunk.filter(s => typeof s === 'string').join(', ');
-    const parsed = parseDetectionString(combined);
-    if (parsed) {
-      grouped.push(parsed);
-    }
-  }
-
-  return grouped;
-}
-
-/**
  * Retry configuration for Gemini API calls
  */
 const RETRY_CONFIG = {
@@ -113,49 +40,170 @@ const RETRY_CONFIG = {
 };
 
 /**
+ * Primary Gemini model - configurable via environment variable
+ * Options: gemini-3-flash-preview (better accuracy, 67% more expensive)
+ *          gemini-2.5-flash (default, good balance)
+ */
+const PRIMARY_MODEL = process.env['GEMINI_MODEL'] || "gemini-2.5-flash";
+
+/**
  * Model fallback chain - try these in order if primary is overloaded
  */
 const MODEL_FALLBACK_CHAIN = [
+  PRIMARY_MODEL,
   "gemini-2.5-flash",
   "gemini-2.0-flash",
   "gemini-1.5-flash",
-];
+].filter((v, i, a) => a.indexOf(v) === i); // Dedupe if primary is already in list
 
 /**
- * Exponential backoff retry wrapper
+ * Model for Stage 1 detection (bounding boxes)
+ */
+const DETECTION_MODEL = PRIMARY_MODEL;
+
+/**
+ * Result from withRetry including retry metrics
+ */
+interface RetryResult<T> {
+  result: T;
+  retryCount: number;
+  wasRateLimited: boolean;
+}
+
+/**
+ * Exponential backoff retry wrapper with metrics tracking
  */
 async function withRetry<T>(
   fn: () => Promise<T>,
-  attemptNumber: number = 1
-): Promise<T> {
+  attemptNumber: number = 1,
+  rateLimitHit: boolean = false
+): Promise<RetryResult<T>> {
   try {
-    return await fn();
+    const result = await fn();
+    return {
+      result,
+      retryCount: attemptNumber - 1,
+      wasRateLimited: rateLimitHit
+    };
   } catch (error) {
     if (attemptNumber >= RETRY_CONFIG.maxAttempts) {
       throw error;
     }
 
     // Check if error is retryable (rate limit, network error, etc.)
-    const isRetryable =
+    const isRateLimit =
       error instanceof Error &&
       (error.message.includes("rate limit") ||
-       error.message.includes("timeout") ||
-       error.message.includes("network") ||
-       error.message.includes("503") ||
        error.message.includes("429"));
+
+    const isRetryable =
+      isRateLimit ||
+      (error instanceof Error &&
+        (error.message.includes("timeout") ||
+         error.message.includes("network") ||
+         error.message.includes("503")));
 
     if (!isRetryable) {
       throw error;
     }
 
+    // Track if we hit a rate limit
+    const hitRateLimit = rateLimitHit || isRateLimit;
+
     // Calculate delay with exponential backoff
     const delay = RETRY_CONFIG.initialDelayMs * Math.pow(RETRY_CONFIG.backoffMultiplier, attemptNumber - 1);
 
-    console.log(`Retry attempt ${attemptNumber}/${RETRY_CONFIG.maxAttempts} after ${delay}ms delay`);
+    console.log(`Retry attempt ${attemptNumber}/${RETRY_CONFIG.maxAttempts} after ${delay}ms delay${isRateLimit ? ' (rate limited)' : ''}`);
     await new Promise(resolve => setTimeout(resolve, delay));
 
-    return withRetry(fn, attemptNumber + 1);
+    return withRetry(fn, attemptNumber + 1, hitRateLimit);
   }
+}
+
+/**
+ * Result from detectDeer including metrics
+ */
+export interface DetectDeerResult {
+  result: DetectionOnlyResult;
+  metrics: GeminiMetrics;
+}
+
+/**
+ * Detect deer in a trail camera photo (Stage 1: localization only)
+ *
+ * This is the first stage of the two-stage pipeline that focuses solely on
+ * detecting bounding boxes and confidence scores without classification.
+ *
+ * @param imageBase64 - Base64-encoded image data (without data:image prefix)
+ * @param mimeType - Image MIME type (e.g., "image/jpeg", "image/png")
+ * @returns Detection result with bounding boxes, confidence scores, and API metrics
+ */
+export async function detectDeer(
+  imageBase64: string,
+  mimeType: string
+): Promise<DetectDeerResult> {
+  const ai = getGeminiClient();
+  const startTime = Date.now();
+
+  console.log(`Using model for detection: ${DETECTION_MODEL}`);
+  const { result, retryCount, wasRateLimited } = await withRetry(async () => {
+    const response = await ai.models.generateContent({
+      model: DETECTION_MODEL,
+      contents: [
+        {
+          parts: [
+            { inlineData: { data: imageBase64, mimeType } },
+            { text: DETECTION_ONLY_PROMPT }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: DETECTION_SCHEMA,
+        temperature: 0.1,
+      }
+    });
+    return response;
+  });
+
+  const durationMs = Date.now() - startTime;
+
+  // Process the response
+  const text = result.text;
+  if (!text) {
+    throw new Error("Gemini returned empty response");
+  }
+
+  // Parse and validate response against schema
+  const parsed = JSON.parse(text);
+
+  // Extract token usage
+  const promptTokens = result.usageMetadata?.promptTokenCount ?? 0;
+  const responseTokens = result.usageMetadata?.candidatesTokenCount ?? 0;
+  const totalTokens = result.usageMetadata?.totalTokenCount ?? 0;
+
+  // Debug: Log raw Gemini response and token usage
+  console.log(`Gemini (${DETECTION_MODEL}) detection response:`, JSON.stringify(parsed, null, 2));
+  console.log(`Gemini (${DETECTION_MODEL}) token usage:`, {
+    promptTokens,
+    responseTokens,
+    totalTokens,
+  });
+
+  const validated = detectionOnlySchema.parse(parsed);
+
+  return {
+    result: validated,
+    metrics: {
+      promptTokens,
+      responseTokens,
+      totalTokens,
+      modelUsed: DETECTION_MODEL,
+      wasRateLimited,
+      retryCount,
+      durationMs,
+    }
+  };
 }
 
 /**
@@ -177,8 +225,8 @@ export async function analyzePhoto(
   for (const model of MODEL_FALLBACK_CHAIN) {
     try {
       console.log(`Trying model: ${model}`);
-      const result = await withRetry(async () => {
-        const response = await ai.models.generateContent({
+      const { result: response } = await withRetry(async () => {
+        const resp = await ai.models.generateContent({
           model,
           contents: [
             {
@@ -189,17 +237,16 @@ export async function analyzePhoto(
             }
           ],
           config: {
-            // Use JSON response mode WITHOUT responseJsonSchema
-            // Google's bounding box detection works better with prompt-specified format
-            // See: https://ai.google.dev/gemini-api/docs/image-understanding
             responseMimeType: "application/json",
+            responseSchema: ANALYSIS_SCHEMA,
+            temperature: 0.1,
           }
         });
-        return response;
+        return resp;
       });
 
       // If we get here, the model worked - process the response
-      const text = result.text;
+      const text = response.text;
       if (!text) {
         throw new Error("Gemini returned empty response");
       }
@@ -209,48 +256,6 @@ export async function analyzePhoto(
 
       // Debug: Log raw Gemini response
       console.log(`Gemini (${model}) raw response:`, JSON.stringify(parsed, null, 2));
-
-      // Clean up Gemini response quirks before validation
-      // Gemini sometimes returns detections as strings or nulls instead of objects
-      if (parsed.detections && Array.isArray(parsed.detections)) {
-        const originalCount = parsed.detections.length;
-
-        // First, check if we need to group individual field strings into detection objects
-        // This handles the case where Gemini returns ["box_2d: [1,2,3,4]", "species: whitetail", ...]
-        const hasStringFields = parsed.detections.some(
-          (d: unknown) => typeof d === 'string' && /^(box_2d|head_bbox|species|sex|antler_points|age_class|distinguishing_features|confidence):/i.test(d as string)
-        );
-
-        if (hasStringFields) {
-          parsed.detections = groupDetectionStrings(parsed.detections);
-        } else {
-          // Filter out nulls and non-objects, attempt to parse strings
-          parsed.detections = parsed.detections
-            .filter((d: unknown) => d !== null && d !== undefined)
-            .map((d: unknown) => {
-              // If already an object with expected properties, use as-is
-              if (typeof d === 'object' && d !== null && 'box_2d' in d) {
-                return d;
-              }
-              // If it's a string, try to parse it (Gemini sometimes returns "key: value" format)
-              if (typeof d === 'string') {
-                return parseDetectionString(d);
-              }
-              return null;
-            })
-            .filter((d: unknown) => d !== null && typeof d === 'object' && 'box_2d' in d);
-        }
-
-        console.log(`Filtered detections: ${originalCount} -> ${parsed.detections.length}`);
-      }
-
-      // Provide defaults for optional top-level fields if missing
-      if (parsed.image_quality_score === undefined) {
-        parsed.image_quality_score = 50; // Default to medium quality
-      }
-      if (parsed.analysis_notes === undefined) {
-        parsed.analysis_notes = "";
-      }
 
       const validated = analysisSchema.parse(parsed);
       return validated;
@@ -323,13 +328,14 @@ export async function compareDeers(
   for (const model of MODEL_FALLBACK_CHAIN) {
     try {
       console.log(`Trying model for comparison: ${model}`);
-      const response = await withRetry(async () => {
+      const { result: response } = await withRetry(async () => {
         return await ai.models.generateContent({
           model,
           contents,
           config: {
             responseMimeType: "application/json",
-            responseJsonSchema: zodToJsonSchema(comparisonSchema as any) as any,
+            responseSchema: COMPARISON_SCHEMA,
+            temperature: 0.1,
           }
         });
       });
@@ -386,4 +392,216 @@ export async function validateGeminiClient(): Promise<boolean> {
     }
     throw new Error("Gemini API validation failed");
   }
+}
+
+/**
+ * Classification result for a cropped deer image
+ */
+export interface DeerClassificationResult {
+  sex: 'buck' | 'doe' | 'fawn' | 'unknown';
+  antler_points: number | null;
+  antler_description: string | null;
+  age_class: 'young' | 'mature' | 'old' | 'unknown';
+  confidence: number;
+}
+
+/**
+ * Result from classifyDeerCrop including metrics
+ */
+export interface ClassifyDeerResult {
+  result: DeerClassificationResult;
+  metrics: GeminiMetrics;
+}
+
+/**
+ * Classify a cropped deer image to determine sex, antler points, etc.
+ * Used as second stage after YOLO detection.
+ *
+ * @param cropBase64 - Base64-encoded cropped deer image
+ * @param mimeType - Image MIME type (e.g., "image/jpeg")
+ * @returns Classification result with sex, antler info, confidence, and API metrics
+ */
+export async function classifyDeerCrop(
+  cropBase64: string,
+  mimeType: string
+): Promise<ClassifyDeerResult> {
+  const ai = getGeminiClient();
+  const startTime = Date.now();
+
+  // Try each model in the fallback chain
+  let lastError: Error | null = null;
+  let totalRetryCount = 0;
+  let wasRateLimited = false;
+
+  for (const model of MODEL_FALLBACK_CHAIN) {
+    try {
+      const { result: response, retryCount, wasRateLimited: rateLimited } = await withRetry(async () => {
+        return await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              parts: [
+                { inlineData: { data: cropBase64, mimeType } },
+                { text: DEER_CLASSIFICATION_PROMPT }
+              ]
+            }
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: CLASSIFICATION_SCHEMA,
+            temperature: 0.1,
+          }
+        });
+      });
+
+      totalRetryCount += retryCount;
+      wasRateLimited = wasRateLimited || rateLimited;
+      const durationMs = Date.now() - startTime;
+
+      const text = response.text;
+      if (!text) {
+        throw new Error("Gemini returned empty response");
+      }
+
+      // Parse JSON response
+      const parsed = JSON.parse(text);
+
+      // Extract token usage
+      const promptTokens = response.usageMetadata?.promptTokenCount ?? 0;
+      const responseTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+      const totalTokens = response.usageMetadata?.totalTokenCount ?? 0;
+
+      // Log token usage for classification
+      console.log(`Gemini classification token usage:`, {
+        promptTokens,
+        responseTokens,
+        totalTokens,
+      });
+
+      // Return result with metrics
+      return {
+        result: parsed as DeerClassificationResult,
+        metrics: {
+          promptTokens,
+          responseTokens,
+          totalTokens,
+          modelUsed: model,
+          wasRateLimited,
+          retryCount: totalRetryCount,
+          durationMs,
+        }
+      };
+
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const isOverloaded = lastError.message.includes("503") ||
+                           lastError.message.includes("overloaded") ||
+                           lastError.message.includes("UNAVAILABLE");
+
+      if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
+        console.log(`Model ${model} overloaded for classification, trying next fallback...`);
+        continue;
+      }
+
+      throw lastError;
+    }
+  }
+
+  throw lastError || new Error("All Gemini models failed for classification");
+}
+
+/**
+ * Analyze a cropped deer image with Gemini's Thinking feature enabled
+ *
+ * This function uses Gemini 2.5 Flash with the Thinking (Reasoning) capability
+ * for more accurate antler point counting. The model internally reasons through
+ * the antler structure before providing the final count.
+ *
+ * @param imageBuffer - Buffer containing the cropped deer image (JPEG)
+ * @returns Detailed analysis result with sex, age, antlers, and reasoning trace
+ */
+export async function analyzeDeer(
+  imageBuffer: Buffer
+): Promise<DeerAnalysisResult> {
+  const ai = getGeminiClient();
+  const imageBase64 = imageBuffer.toString("base64");
+
+  let lastError: Error | null = null;
+
+  for (const model of MODEL_FALLBACK_CHAIN) {
+    try {
+      console.log(`Analyzing deer crop with model: ${model} (Thinking enabled)`);
+
+      const { result: response } = await withRetry(async () => {
+        return await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: DEER_ANALYSIS_PROMPT },
+                { inlineData: { data: imageBase64, mimeType: "image/jpeg" } }
+              ]
+            }
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: DEER_ANALYSIS_SCHEMA,
+            temperature: 0.2,
+            thinkingConfig: {
+              includeThoughts: false,
+              thinkingBudget: 1024
+            }
+          }
+        });
+      });
+
+      const text = response.text;
+      if (!text) {
+        throw new Error("Gemini returned empty response");
+      }
+
+      // Parse JSON response
+      const parsed = JSON.parse(text);
+
+      // Log token usage including thinking tokens
+      if (response.usageMetadata) {
+        console.log(`Gemini deer analysis token usage:`, {
+          promptTokens: response.usageMetadata.promptTokenCount,
+          responseTokens: response.usageMetadata.candidatesTokenCount,
+          totalTokens: response.usageMetadata.totalTokenCount,
+        });
+      }
+
+      // Validate against Zod schema
+      const validated = deerAnalysisSchema.parse(parsed);
+
+      console.log(`Deer analysis complete:`, {
+        sex: validated.sex,
+        age_class: validated.age_class,
+        has_antlers: validated.antlers.has_antlers,
+        size_class: validated.antlers.size_class,
+        estimated_point_range: validated.antlers.estimated_point_range,
+        confidence: validated.confidence,
+        reasoning: validated.reasoning_trace
+      });
+
+      return validated;
+
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const isOverloaded = lastError.message.includes("503") ||
+                           lastError.message.includes("overloaded") ||
+                           lastError.message.includes("UNAVAILABLE");
+
+      if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
+        console.log(`Model ${model} overloaded for deer analysis, trying next fallback...`);
+        continue;
+      }
+
+      throw lastError;
+    }
+  }
+
+  throw lastError || new Error("All Gemini models failed for deer analysis");
 }

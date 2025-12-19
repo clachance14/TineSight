@@ -1,17 +1,29 @@
 'use client'
 
+import { useMemo, memo } from 'react'
 import Image from 'next/image'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { BLUR_DATA_URL } from '@/lib/constants/image'
+
+// Size class ordering for sorting
+const SIZE_CLASS_ORDER: Record<string, number> = {
+  trophy: 4,
+  standard: 3,
+  basket: 2,
+  spike: 1,
+  unknown: 0
+}
 
 interface Detection {
   id: string
   image_id: string
   species: string
   sex: string
-  antler_points: number | null
+  size_class: string | null
+  estimated_point_range: string | null
   age_class: string | null
   gemini_confidence: number
   head_crop_url?: string
@@ -60,13 +72,18 @@ export function BuckGrid({ detections, isLoading, onDetectionClick }: BuckGridPr
     )
   }
 
-  // Sort by points (highest first), then by confidence
-  const sortedBucks = [...bucks].sort((a, b) => {
-    if ((b.antler_points ?? 0) !== (a.antler_points ?? 0)) {
-      return (b.antler_points ?? 0) - (a.antler_points ?? 0)
-    }
-    return b.gemini_confidence - a.gemini_confidence
-  })
+  // Sort by size class (trophy > standard > basket > spike > unknown), then by confidence
+  // Memoized to prevent re-sorting on every render
+  const sortedBucks = useMemo(() => {
+    return [...bucks].sort((a, b) => {
+      const sizeA = SIZE_CLASS_ORDER[a.size_class?.toLowerCase() ?? 'unknown'] ?? 0
+      const sizeB = SIZE_CLASS_ORDER[b.size_class?.toLowerCase() ?? 'unknown'] ?? 0
+      if (sizeB !== sizeA) {
+        return sizeB - sizeA
+      }
+      return b.gemini_confidence - a.gemini_confidence
+    })
+  }, [bucks])
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
@@ -85,11 +102,12 @@ export function BuckGrid({ detections, isLoading, onDetectionClick }: BuckGridPr
               {detection.head_crop_url || detection.thumbnail_url ? (
                 <Image
                   src={detection.head_crop_url || detection.thumbnail_url || ''}
-                  alt={`Buck ${detection.antler_points ?? '?'} points`}
+                  alt={`${detection.size_class ? detection.size_class.charAt(0).toUpperCase() + detection.size_class.slice(1) : 'Unknown'} buck`}
                   fill
                   className="object-cover"
                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw"
-                  unoptimized
+                  placeholder="blur"
+                  blurDataURL={BLUR_DATA_URL}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center">
@@ -97,16 +115,16 @@ export function BuckGrid({ detections, isLoading, onDetectionClick }: BuckGridPr
                 </div>
               )}
 
-              {/* Points badge */}
-              {detection.antler_points !== null && (
+              {/* Size class badge */}
+              {detection.size_class && (
                 <div className="absolute right-1 top-1">
                   <Badge
-                    variant={detection.antler_points >= 10 ? 'default' : 'secondary'}
+                    variant={detection.size_class.toLowerCase() === 'trophy' ? 'default' : 'secondary'}
                     className={cn(
-                      detection.antler_points >= 10 && 'bg-copper text-cream'
+                      detection.size_class.toLowerCase() === 'trophy' && 'bg-copper text-cream'
                     )}
                   >
-                    {detection.antler_points}pt
+                    {detection.size_class.charAt(0).toUpperCase() + detection.size_class.slice(1)}
                   </Badge>
                 </div>
               )}

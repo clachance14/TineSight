@@ -11,7 +11,7 @@ interface RouteParams {
  * GET /api/detections/[id]
  * Get a single detection with image URL for display in edit panel
  */
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
     const supabase = await createClient()
@@ -52,19 +52,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Get signed URL for the image
     const { data: signedUrl } = await supabase.storage
-      .from('images')
+      .from('photos')
       .createSignedUrl(image.file_path, 3600)
+
+    // Get signed URL for the crop image (if exists)
+    let cropUrl: string | null = null
+    if (detection.crop_file_path) {
+      const { data: cropSignedUrl } = await supabase.storage
+        .from('photos')
+        .createSignedUrl(detection.crop_file_path, 3600)
+      cropUrl = cropSignedUrl?.signedUrl || null
+    }
 
     return NextResponse.json({
       id: detection.id,
       imageId: detection.image_id,
       imageUrl: signedUrl?.signedUrl || null,
+      cropUrl,
       bboxX: detection.bbox_x,
       bboxY: detection.bbox_y,
       bboxWidth: detection.bbox_width,
       bboxHeight: detection.bbox_height,
       sex: detection.sex,
-      antlerPoints: detection.antler_points,
+      sizeClass: detection.size_class,
+      estimatedPointRange: detection.estimated_point_range,
       ageClass: detection.age_class,
       species: detection.species,
       distinguishingFeatures: detection.distinguishing_features,
@@ -119,20 +130,40 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (!validationResult.success) {
       return NextResponse.json({
         error: 'Validation failed',
-        details: validationResult.error.errors.map(e => ({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        details: validationResult.error.issues.map((e: any) => ({
           field: e.path.join('.'),
           message: e.message,
         })),
       }, { status: 400 })
     }
 
+    // If deer_id is being updated, verify the deer belongs to the same user
+    if (validationResult.data.deerId !== undefined && validationResult.data.deerId !== null) {
+      const { data: deer } = await supabase
+        .from('deer')
+        .select('user_id')
+        .eq('id', validationResult.data.deerId)
+        .single()
+
+      if (!deer) {
+        return NextResponse.json({ error: 'Deer profile not found' }, { status: 404 })
+      }
+
+      if (deer.user_id !== user.id) {
+        return NextResponse.json({ error: 'Forbidden - Cannot link to deer profile owned by another user' }, { status: 403 })
+      }
+    }
+
     // Convert camelCase to snake_case for database
     const updateData = {
       sex: validationResult.data.sex,
-      antler_points: validationResult.data.antlerPoints,
+      size_class: validationResult.data.sizeClass,
+      estimated_point_range: validationResult.data.estimatedPointRange,
       age_class: validationResult.data.ageClass,
       species: validationResult.data.species,
       distinguishing_features: validationResult.data.distinguishingFeatures,
+      deer_id: validationResult.data.deerId,
     }
 
     // Remove undefined values
@@ -155,7 +186,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       id: updated.id,
       imageId: updated.image_id,
       sex: updated.sex,
-      antlerPoints: updated.antler_points,
+      sizeClass: updated.size_class,
+      estimatedPointRange: updated.estimated_point_range,
       ageClass: updated.age_class,
       species: updated.species,
       distinguishingFeatures: updated.distinguishing_features,
@@ -174,7 +206,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
  * DELETE /api/detections/[id]
  * Soft-delete a detection (Owner only)
  */
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
     const supabase = await createClient()

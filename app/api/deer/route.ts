@@ -2,10 +2,16 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createDeer, getDeerCatalog } from '@/lib/services/deer'
+import { withCacheHeaders, jsonWithCache } from '@/lib/utils/cache-headers'
 
 /**
  * GET /api/deer
- * List deer catalog with optional search filter
+ * List deer catalog with pagination and optional search filter
+ *
+ * Query params:
+ * - search: string (optional) - Filter by deer name
+ * - limit: number (optional, default 24, max 100) - Page size
+ * - cursor: string (optional) - Pagination cursor from previous response
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -17,14 +23,37 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url)
   const search = searchParams.get('search') ?? undefined
+  const cursor = searchParams.get('cursor') ?? undefined
+  const limitParam = searchParams.get('limit')
 
-  const { data: deer, error } = await getDeerCatalog(user.id, search)
+  // Validate and parse limit (default 24, max 100)
+  let limit = 24
+  if (limitParam !== null) {
+    const parsedLimit = parseInt(limitParam, 10)
+    if (!isNaN(parsedLimit) && parsedLimit > 0) {
+      limit = Math.min(parsedLimit, 100)
+    }
+  }
+
+  // Build filters object, only including defined values
+  const filters: { search?: string; limit?: number; cursor?: string } = { limit }
+  if (search) filters.search = search
+  if (cursor) filters.cursor = cursor
+
+  const { data, error } = await getDeerCatalog(user.id, filters)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ deer })
+  return jsonWithCache(
+    {
+      deer: data?.deer ?? [],
+      nextCursor: data?.nextCursor ?? null,
+      total: data?.total ?? 0,
+    },
+    'private-short'
+  )
 }
 
 /**

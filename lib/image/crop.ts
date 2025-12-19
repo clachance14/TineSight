@@ -7,6 +7,7 @@
  */
 
 import sharp from 'sharp';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 /**
  * ROI coordinates (normalized 0-10000 scale)
@@ -107,7 +108,7 @@ export async function cropToROI(
 
   return image
     .extract(clampedRegion)
-    .jpeg({ quality: 90 })
+    .jpeg({ quality: 80 })
     .toBuffer();
 }
 
@@ -134,7 +135,7 @@ export async function cropToBoundingBox(
 
   return image
     .extract(clampedRegion)
-    .jpeg({ quality: 90 })
+    .jpeg({ quality: 80 })
     .toBuffer();
 }
 
@@ -145,14 +146,26 @@ export async function cropToBoundingBox(
  * @returns Image buffer
  */
 export async function fetchImageAsBuffer(imageUrl: string): Promise<Buffer> {
-  const response = await fetch(imageUrl);
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+  try {
+    const response = await fetch(imageUrl, { signal: controller.signal });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Image fetch timed out after 30 seconds');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
 }
 
 /**
@@ -208,4 +221,157 @@ export async function getImageDimensions(
     width: metadata.width,
     height: metadata.height,
   };
+}
+
+/**
+ * Convert Gemini bounding box coordinates (0-1000 scale, [ymin, xmin, ymax, xmax])
+ * to pixel coordinates for Sharp extraction
+ *
+ * Per Google docs: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/bounding-box-detection
+ * Gemini returns bounding boxes as [ymin, xmin, ymax, xmax] normalized 0-1000
+ */
+function geminiBoxToPixels(
+  boxCoords: [number, number, number, number],
+  imageWidth: number,
+  imageHeight: number
+): { left: number; top: number; width: number; height: number } {
+  const [ymin, xmin, ymax, xmax] = boxCoords;
+
+  // Convert from 0-1000 scale to pixels
+  const left = Math.round((xmin / 1000) * imageWidth);
+  const top = Math.round((ymin / 1000) * imageHeight);
+  const right = Math.round((xmax / 1000) * imageWidth);
+  const bottom = Math.round((ymax / 1000) * imageHeight);
+
+  return {
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+/**
+ * Crop image and upload to Supabase Storage
+ *
+ * Takes an image buffer and Gemini bounding box coordinates, crops the image,
+ * and uploads it to the photos bucket under the crops/ folder.
+ *
+ * @param supabase - Supabase client instance
+ * @param imageBuffer - Source image buffer (any format Sharp supports)
+ * @param boxCoords - Gemini bounding box [ymin, xmin, ymax, xmax] on 0-1000 scale
+ * @param detectionId - Detection ID to use as filename
+ * @returns Storage path like "crops/{detectionId}.jpg"
+ */
+export async function cropAndUpload(
+  supabase: SupabaseClient,
+  imageBuffer: Buffer,
+  boxCoords: [number, number, number, number],
+  detectionId: string
+): Promise<string> {
+  const image = sharp(imageBuffer);
+  const metadata = await image.metadata();
+
+  if (!metadata.width || !metadata.height) {
+    throw new Error('Unable to read image dimensions');
+  }
+
+  // Convert Gemini coordinates to pixel coordinates
+  const pixelRegion = geminiBoxToPixels(boxCoords, metadata.width, metadata.height);
+
+  // Ensure region is within image bounds
+  const clampedRegion = clampRegion(pixelRegion, metadata.width, metadata.height);
+
+  // Crop the image
+  const croppedBuffer = await image
+    .extract(clampedRegion)
+    .jpeg({ quality: 80 })
+    .toBuffer();
+
+  // Upload to Supabase Storage
+  const filePath = `crops/${detectionId}.jpg`;
+  const { error } = await supabase.storage
+    .from('photos')
+    .upload(filePath, croppedBuffer, {
+      contentType: 'image/jpeg',
+      upsert: true, // Allow overwriting if needed
+    });
+
+  if (error) {
+    throw new Error(`Failed to upload crop: ${error.message}`);
+  }
+
+  return filePath;
+}
+
+/**
+ * Crop image to memory without uploading
+ *
+ * Takes an image buffer and Gemini bounding box coordinates, crops the image,
+ * and returns both the buffer and base64-encoded string. This is optimized for
+ * the parallel processing pipeline where classification happens before upload.
+ *
+ * @param imageBuffer - Source image buffer (any format Sharp supports)
+ * @param boxCoords - Gemini bounding box [ymin, xmin, ymax, xmax] on 0-1000 scale
+ * @returns Object with cropped buffer and base64 string
+ */
+export async function cropToMemory(
+  imageBuffer: Buffer,
+  boxCoords: [number, number, number, number]
+): Promise<{ buffer: Buffer; base64: string }> {
+  const image = sharp(imageBuffer);
+  const metadata = await image.metadata();
+
+  if (!metadata.width || !metadata.height) {
+    throw new Error('Unable to read image dimensions');
+  }
+
+  // Convert Gemini coordinates to pixel coordinates
+  const pixelRegion = geminiBoxToPixels(boxCoords, metadata.width, metadata.height);
+
+  // Ensure region is within image bounds
+  const clampedRegion = clampRegion(pixelRegion, metadata.width, metadata.height);
+
+  // Crop the image
+  const croppedBuffer = await image
+    .extract(clampedRegion)
+    .jpeg({ quality: 80 })
+    .toBuffer();
+
+  return {
+    buffer: croppedBuffer,
+    base64: croppedBuffer.toString('base64'),
+  };
+}
+
+/**
+ * Upload a pre-cropped buffer to Supabase Storage
+ *
+ * Used after classification to upload the crop for audit trail.
+ * This separates the upload from the crop operation for better
+ * parallel processing.
+ *
+ * @param supabase - Supabase client instance
+ * @param cropBuffer - Pre-cropped JPEG buffer
+ * @param detectionId - Detection ID to use as filename
+ * @returns Storage path like "crops/{detectionId}.jpg"
+ */
+export async function uploadCropBuffer(
+  supabase: SupabaseClient,
+  cropBuffer: Buffer,
+  detectionId: string
+): Promise<string> {
+  const filePath = `crops/${detectionId}.jpg`;
+  const { error } = await supabase.storage
+    .from('photos')
+    .upload(filePath, cropBuffer, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+
+  if (error) {
+    throw new Error(`Failed to upload crop: ${error.message}`);
+  }
+
+  return filePath;
 }

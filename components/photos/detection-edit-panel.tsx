@@ -12,57 +12,48 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useDetection, useUpdateDetection, useDeleteDetection } from '@/lib/hooks/use-detection'
 import { useDetectionEdit } from '@/lib/stores/detection-edit'
 import { useToast } from '@/lib/hooks/use-toast'
 import { DeleteConfirmationDialog } from './delete-confirmation-dialog'
 import { CreateDeerModal } from '@/components/deer/create-deer-modal'
-import { cn } from '@/lib/utils'
+import { DeerProfileDropdown } from '@/components/deer/deer-profile-dropdown'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   detectionEditFormSchema,
   type DetectionEditFormValues,
   SEX_OPTIONS,
   AGE_CLASS_OPTIONS,
   SPECIES_OPTIONS,
+  SIZE_CLASS_OPTIONS,
+  ESTIMATED_POINT_RANGE_OPTIONS,
   SEX_LABELS,
   AGE_CLASS_LABELS,
   SPECIES_LABELS,
+  SIZE_CLASS_LABELS,
+  ESTIMATED_POINT_RANGE_LABELS,
 } from '@/lib/validations/detection'
 
-interface DetectionEditPanelProps {
-  /**
-   * Full image URL for displaying detection thumbnail
-   */
-  imageUrl?: string
-  /**
-   * Image dimensions for calculating crop position
-   */
-  imageWidth?: number
-  imageHeight?: number
-}
-
-export function DetectionEditPanel({
-  imageUrl,
-  imageWidth = 10000,
-  imageHeight = 10000,
-}: DetectionEditPanelProps) {
+export function DetectionEditPanel() {
   const router = useRouter()
   const { toast } = useToast()
+  const queryClient = useQueryClient()
   const { selectedDetectionId, isOpen, closePanel } = useDetectionEdit()
   const { data: detection, isLoading } = useDetection(selectedDetectionId || '')
   const updateDetection = useUpdateDetection()
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
+  const [isLinking, setIsLinking] = useState(false)
   const deleteDetection = useDeleteDetection()
 
   const form = useForm<DetectionEditFormValues>({
     resolver: zodResolver(detectionEditFormSchema),
     defaultValues: {
       sex: null,
-      antlerPoints: null,
+      sizeClass: null,
+      estimatedPointRange: null,
       ageClass: null,
       species: null,
       distinguishingFeatures: null,
@@ -74,7 +65,8 @@ export function DetectionEditPanel({
     if (detection) {
       form.reset({
         sex: detection.sex as DetectionEditFormValues['sex'],
-        antlerPoints: detection.antlerPoints,
+        sizeClass: detection.sizeClass as DetectionEditFormValues['sizeClass'],
+        estimatedPointRange: detection.estimatedPointRange as DetectionEditFormValues['estimatedPointRange'],
         ageClass: detection.ageClass as DetectionEditFormValues['ageClass'],
         species: detection.species as DetectionEditFormValues['species'],
         distinguishingFeatures: detection.distinguishingFeatures,
@@ -90,7 +82,8 @@ export function DetectionEditPanel({
         detectionId: selectedDetectionId,
         data: {
           sex: data.sex,
-          antlerPoints: data.antlerPoints,
+          sizeClass: data.sizeClass,
+          estimatedPointRange: data.estimatedPointRange,
           ageClass: data.ageClass,
           species: data.species,
           distinguishingFeatures: data.distinguishingFeatures,
@@ -131,91 +124,31 @@ export function DetectionEditPanel({
     }
   }
 
-  // Calculate thumbnail style using background-image
-  // IMPORTANT: bbox is in YOLO format (center-based, normalized to 10000)
-  const getThumbnailStyle = () => {
-    if (!detection || !detection.bboxX || !detection.bboxY ||
-        !detection.bboxWidth || !detection.bboxHeight) {
-      return {
-        backgroundImage: `url(${imageUrl || detection?.imageUrl || ''})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-      }
+  const handleLinkToExisting = async (deerId: string) => {
+    if (!selectedDetectionId) return
+
+    setIsLinking(true)
+    try {
+      await updateDetection.mutateAsync({
+        detectionId: selectedDetectionId,
+        data: { deerId },
+      })
+      // Invalidate deer catalog to update sighting counts
+      queryClient.invalidateQueries({ queryKey: ['deer-catalog'] })
+      closePanel()
+      toast({
+        title: 'Detection Linked',
+        description: 'Successfully added to deer profile.',
+      })
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to link detection',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsLinking(false)
     }
-
-    // Bbox is CENTER-based, normalized to imageWidth/imageHeight (typically 10000)
-    // Convert to percentages of the image
-    const centerXPct = (detection.bboxX / imageWidth) * 100
-    const centerYPct = (detection.bboxY / imageHeight) * 100
-    const widthPct = (detection.bboxWidth / imageWidth) * 100
-    const heightPct = (detection.bboxHeight / imageHeight) * 100
-
-    // Add 20% padding around bbox for context
-    const padding = 0.20
-    const regionWidthPct = widthPct * (1 + 2 * padding)
-    const regionHeightPct = heightPct * (1 + 2 * padding)
-
-    // Calculate background-size to make region fill container
-    // If bbox region is 10% of image width, we need background-size of 1000% to fill container
-    const bgSizeX = (100 / regionWidthPct) * 100
-    const bgSizeY = (100 / regionHeightPct) * 100
-    // Use max for "cover" behavior (fill container, crop overflow)
-    const bgSize = Math.max(bgSizeX, bgSizeY)
-
-    // Clamp to prevent extreme zoom (max 2000% = 20x zoom)
-    const clampedBgSize = Math.min(bgSize, 2000)
-
-    return {
-      backgroundImage: `url(${imageUrl || detection.imageUrl || ''})`,
-      backgroundSize: `${clampedBgSize}%`,
-      backgroundPosition: `${centerXPct}% ${centerYPct}%`,
-      backgroundRepeat: 'no-repeat',
-    }
-  }
-
-  // Calculate bbox overlay position
-  // With background-position centering the bbox, the bbox should be roughly centered
-  const getBboxOverlayStyle = () => {
-    if (!detection || !detection.bboxX || !detection.bboxY ||
-        !detection.bboxWidth || !detection.bboxHeight) {
-      return { display: 'none' }
-    }
-
-    // Must match getThumbnailStyle calculation
-    const widthPct = (detection.bboxWidth / imageWidth) * 100
-    const heightPct = (detection.bboxHeight / imageHeight) * 100
-
-    const padding = 0.20
-    const regionWidthPct = widthPct * (1 + 2 * padding)
-    const regionHeightPct = heightPct * (1 + 2 * padding)
-
-    // The bbox takes up (widthPct / regionWidthPct) of the visible region
-    // Since region fills container, bbox width in container = container * (widthPct / regionWidthPct)
-    const bboxWidthInContainer = (widthPct / regionWidthPct) * 100
-    const bboxHeightInContainer = (heightPct / regionHeightPct) * 100
-
-    // Bbox is centered in the visible region (because we added equal padding)
-    // So it's at 50% - half its size
-    const left = 50 - bboxWidthInContainer / 2
-    const top = 50 - bboxHeightInContainer / 2
-
-    return {
-      left: `${left}%`,
-      top: `${top}%`,
-      width: `${bboxWidthInContainer}%`,
-      height: `${bboxHeightInContainer}%`,
-    }
-  }
-
-  // Get confidence badge color based on level
-  const getConfidenceBadgeColor = () => {
-    if (!detection?.confidence) return 'bg-slate-deep/80 text-cream'
-
-    const confidence = detection.confidence
-    if (confidence >= 0.8) return 'bg-green-600/90 text-white'
-    if (confidence >= 0.6) return 'bg-yellow-600/90 text-white'
-    return 'bg-red-600/90 text-white'
   }
 
   // Handle keyboard shortcuts
@@ -238,6 +171,7 @@ export function DetectionEditPanel({
   }, [isOpen, closePanel, form, onSubmit])
 
   return (
+    <>
     <Sheet open={isOpen} onOpenChange={(open) => !open && closePanel()}>
       <SheetContent
         side="right"
@@ -263,30 +197,6 @@ export function DetectionEditPanel({
             </div>
           ) : (
             <div className="px-4 space-y-4">
-              {/* Detection Thumbnail */}
-              {(imageUrl || detection?.imageUrl) && detection?.bboxX && (
-                <div className="relative w-full h-32 sm:h-40 lg:h-48 rounded-lg overflow-hidden bg-slate border border-cream/10">
-                <div
-                  className="w-full h-full"
-                  style={getThumbnailStyle()}
-                  role="img"
-                  aria-label="Detection thumbnail"
-                />
-                <div
-                  className="absolute border-2 border-copper/60 rounded pointer-events-none"
-                  style={getBboxOverlayStyle()}
-                />
-                <div className={cn(
-                  "absolute top-2 right-2 px-2 py-1 rounded text-xs font-medium",
-                  getConfidenceBadgeColor()
-                )}>
-                  {detection.confidence
-                    ? `${Math.round(detection.confidence * 100)}%`
-                    : 'N/A'}
-                </div>
-              </div>
-            )}
-
             {/* Edit Form */}
             <form onSubmit={form.handleSubmit(onSubmit)} id="detection-edit-form" className="space-y-3">
               {/* Sex */}
@@ -318,24 +228,61 @@ export function DetectionEditPanel({
                 )}
               </div>
 
-              {/* Antler Points */}
+              {/* Size Class */}
               <div className="space-y-2">
-                <Label htmlFor="antlerPoints" className="text-cream">
-                  Antler Points
+                <Label htmlFor="sizeClass" className="text-cream">
+                  Size Class
                 </Label>
-                <Input
-                  id="antlerPoints"
-                  type="number"
-                  min={0}
-                  max={30}
-                  placeholder="0-30"
-                  {...form.register('antlerPoints', { valueAsNumber: true })}
-                  className="h-9 bg-slate border-cream/20 text-cream placeholder:text-cream/50 focus:border-copper focus:ring-copper text-sm"
-                />
-                {form.formState.errors.antlerPoints && (
-                  <p className="text-red-400 text-sm">
-                    {form.formState.errors.antlerPoints.message}
-                  </p>
+                <div className="relative">
+                  <select
+                    id="sizeClass"
+                    {...form.register('sizeClass')}
+                    className="w-full h-9 px-3 pr-10 rounded-md bg-slate border border-cream/20 text-cream focus:border-copper focus:ring-1 focus:ring-copper appearance-none cursor-pointer text-sm"
+                  >
+                    <option value="">Select size class...</option>
+                    {SIZE_CLASS_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {SIZE_CLASS_LABELS[option]}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-cream/50">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+                {form.formState.errors.sizeClass && (
+                  <p className="text-red-400 text-sm">{form.formState.errors.sizeClass.message}</p>
+                )}
+              </div>
+
+              {/* Estimated Point Range */}
+              <div className="space-y-2">
+                <Label htmlFor="estimatedPointRange" className="text-cream">
+                  Estimated Point Range
+                </Label>
+                <div className="relative">
+                  <select
+                    id="estimatedPointRange"
+                    {...form.register('estimatedPointRange')}
+                    className="w-full h-9 px-3 pr-10 rounded-md bg-slate border border-cream/20 text-cream focus:border-copper focus:ring-1 focus:ring-copper appearance-none cursor-pointer text-sm"
+                  >
+                    <option value="">Select point range...</option>
+                    {ESTIMATED_POINT_RANGE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {ESTIMATED_POINT_RANGE_LABELS[option]}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-cream/50">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+                {form.formState.errors.estimatedPointRange && (
+                  <p className="text-red-400 text-sm">{form.formState.errors.estimatedPointRange.message}</p>
                 )}
               </div>
 
@@ -462,13 +409,19 @@ export function DetectionEditPanel({
               </Button>
             </div>
             {detection && detection.sex === 'buck' && !detection.deerId && (
-              <Button
-                type="button"
-                className="w-full h-9 bg-copper hover:bg-copper-light text-white text-sm"
-                onClick={() => setCreateModalOpen(true)}
-              >
-                Create Deer Profile
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  className="flex-1 h-9 bg-copper hover:bg-copper-light text-white text-sm"
+                  onClick={() => setCreateModalOpen(true)}
+                >
+                  Create Deer Profile
+                </Button>
+                <DeerProfileDropdown
+                  onSelect={handleLinkToExisting}
+                  disabled={isLinking}
+                />
+              </div>
             )}
             <Button
               type="button"
@@ -481,20 +434,29 @@ export function DetectionEditPanel({
           </div>
         )}
       </SheetContent>
-
-      <DeleteConfirmationDialog
-        open={isDeleteDialogOpen}
-        onOpenChange={setIsDeleteDialogOpen}
-        onConfirm={handleDelete}
-        isDeleting={deleteDetection.isPending}
-      />
-
-      <CreateDeerModal
-        open={createModalOpen}
-        onOpenChange={setCreateModalOpen}
-        detectionId={detection?.id || ''}
-        onSuccess={(deer) => router.push(`/deer/${deer.id}`)}
-      />
     </Sheet>
+
+    <DeleteConfirmationDialog
+      open={isDeleteDialogOpen}
+      onOpenChange={setIsDeleteDialogOpen}
+      onConfirm={handleDelete}
+      isDeleting={deleteDetection.isPending}
+    />
+
+    <CreateDeerModal
+      open={createModalOpen}
+      onOpenChange={setCreateModalOpen}
+      detectionId={detection?.id || ''}
+      cropUrl={detection?.cropUrl}
+      imageUrl={detection?.imageUrl}
+      bbox={detection?.bboxX != null ? {
+        x: detection.bboxX,
+        y: detection.bboxY!,
+        width: detection.bboxWidth!,
+        height: detection.bboxHeight!,
+      } : null}
+      onSuccess={(deer) => router.push(`/deer/${deer.id}`)}
+    />
+    </>
   )
 }

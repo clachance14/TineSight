@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from 'react'
 import Link from 'next/link'
 import { useFeedback } from '@/lib/hooks/use-roi'
 import { useDetectionHover } from '@/lib/stores/detection-hover'
@@ -31,7 +32,8 @@ interface DetectionCardProps {
     deerId?: string | null
     species?: string | null
     sex?: string | null
-    antlerPoints?: number | null
+    sizeClass?: string | null
+    estimatedPointRange?: string | null
     ageClass?: string | null
   }
   index: number
@@ -39,7 +41,7 @@ interface DetectionCardProps {
   onHover?: (id: string | null) => void
 }
 
-export function DetectionCardWithFeedback({ detection, index }: DetectionCardProps) {
+export const DetectionCardWithFeedback = memo(function DetectionCardWithFeedback({ detection, index }: DetectionCardProps) {
   // Fetch feedback for this detection
   const { data: feedbackData } = useFeedback(detection.id)
   const feedback = feedbackData?.feedback || []
@@ -61,14 +63,16 @@ export function DetectionCardWithFeedback({ detection, index }: DetectionCardPro
     if (detection.sex && detection.sex !== 'unknown') {
       parts.push(detection.sex)
     }
-    if (detection.antlerPoints) {
-      parts.push(`${detection.antlerPoints}-point`)
-    }
     if (detection.ageClass && detection.ageClass !== 'unknown') {
       // Capitalize first letter (young -> Young, mature -> Mature)
       parts.push(detection.ageClass.charAt(0).toUpperCase() + detection.ageClass.slice(1))
     }
     return parts.length > 0 ? parts.join(' • ') : detection.class || 'Unknown'
+  }
+
+  // Format size class for display (capitalize)
+  const formatSizeClass = (sizeClass: string) => {
+    return sizeClass.charAt(0).toUpperCase() + sizeClass.slice(1)
   }
 
   return (
@@ -97,6 +101,30 @@ export function DetectionCardWithFeedback({ detection, index }: DetectionCardPro
       <div>
         <p className="text-sm text-cream capitalize font-medium">{formatDeerInfo()}</p>
       </div>
+
+      {/* Size class and point range badges for bucks */}
+      {detection.sex === 'buck' && (detection.sizeClass || detection.estimatedPointRange) && (
+        <div className="flex flex-wrap gap-1.5">
+          {detection.sizeClass && detection.sizeClass !== 'unknown' && (
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+              detection.sizeClass === 'trophy'
+                ? 'bg-copper text-cream'
+                : detection.sizeClass === 'standard'
+                ? 'bg-green-500/20 text-green-300'
+                : detection.sizeClass === 'basket'
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'bg-slate text-cream-dark'
+            }`}>
+              {formatSizeClass(detection.sizeClass)}
+            </span>
+          )}
+          {detection.estimatedPointRange && detection.estimatedPointRange !== 'unknown' && (
+            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-slate text-cream-dark border border-slate-600">
+              {detection.estimatedPointRange}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Quality status */}
       {detection.qualityStatus && detection.qualityStatus !== 'pending' && (
@@ -166,4 +194,4 @@ export function DetectionCardWithFeedback({ detection, index }: DetectionCardPro
       )}
     </div>
   )
-}
+})
