@@ -44,6 +44,20 @@ export function BuckGrid({ detections, isLoading, onDetectionClick }: BuckGridPr
   // Filter to only bucks
   const bucks = detections.filter((d) => d.sex === 'buck')
 
+  // Sort by size class (trophy > standard > basket > spike > unknown), then by confidence
+  // Memoized to prevent re-sorting on every render
+  // IMPORTANT: This hook must be called before any early returns (Rules of Hooks)
+  const sortedBucks = useMemo(() => {
+    return [...bucks].sort((a, b) => {
+      const sizeA = SIZE_CLASS_ORDER[a.size_class?.toLowerCase() ?? 'unknown'] ?? 0
+      const sizeB = SIZE_CLASS_ORDER[b.size_class?.toLowerCase() ?? 'unknown'] ?? 0
+      if (sizeB !== sizeA) {
+        return sizeB - sizeA
+      }
+      return b.gemini_confidence - a.gemini_confidence
+    })
+  }, [bucks])
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
@@ -71,19 +85,6 @@ export function BuckGrid({ detections, isLoading, onDetectionClick }: BuckGridPr
       </div>
     )
   }
-
-  // Sort by size class (trophy > standard > basket > spike > unknown), then by confidence
-  // Memoized to prevent re-sorting on every render
-  const sortedBucks = useMemo(() => {
-    return [...bucks].sort((a, b) => {
-      const sizeA = SIZE_CLASS_ORDER[a.size_class?.toLowerCase() ?? 'unknown'] ?? 0
-      const sizeB = SIZE_CLASS_ORDER[b.size_class?.toLowerCase() ?? 'unknown'] ?? 0
-      if (sizeB !== sizeA) {
-        return sizeB - sizeA
-      }
-      return b.gemini_confidence - a.gemini_confidence
-    })
-  }, [bucks])
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">

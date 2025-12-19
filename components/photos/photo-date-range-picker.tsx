@@ -38,12 +38,23 @@ export function PhotoDateRangePicker({
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
+    // Helper to format date in local timezone as YYYY-MM-DD
+    // Using toISOString() would return UTC dates, causing off-by-one-day errors
+    // for users in timezones behind UTC (e.g., at 11 PM PST on Dec 19th,
+    // toISOString() would return "2024-12-20")
+    const toLocalDateString = (date: Date): string => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
     let newDateFrom: string | undefined
     let newDateTo: string | undefined
 
     switch (preset) {
       case 'today': {
-        const todayStr = today.toISOString().split('T')[0]
+        const todayStr = toLocalDateString(today)
         newDateFrom = todayStr
         newDateTo = todayStr
         break
@@ -51,15 +62,15 @@ export function PhotoDateRangePicker({
       case 'last7days': {
         const sevenDaysAgo = new Date(today)
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-        newDateFrom = sevenDaysAgo.toISOString().split('T')[0]
-        newDateTo = today.toISOString().split('T')[0]
+        newDateFrom = toLocalDateString(sevenDaysAgo)
+        newDateTo = toLocalDateString(today)
         break
       }
       case 'last30days': {
         const thirtyDaysAgo = new Date(today)
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-        newDateFrom = thirtyDaysAgo.toISOString().split('T')[0]
-        newDateTo = today.toISOString().split('T')[0]
+        newDateFrom = toLocalDateString(thirtyDaysAgo)
+        newDateTo = toLocalDateString(today)
         break
       }
       case 'custom': {
