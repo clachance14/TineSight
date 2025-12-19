@@ -130,7 +130,7 @@ export async function GET(
       let urlIndex = 0
       for (const { filePath } of deerWithPaths) {
         if (filePath !== null) {
-          urlLookup.set(filePath, cachedUrls[urlIndex++])
+          urlLookup.set(filePath, cachedUrls[urlIndex++] ?? null)
         }
       }
 

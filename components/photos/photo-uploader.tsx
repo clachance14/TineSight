@@ -37,7 +37,7 @@ export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) 
   )
 
   const totalSize = useMemo(() => {
-    return pendingFiles.reduce((sum, f) => sum + f.file.size, 0)
+    return pendingFiles.reduce((sum, f) => sum + (f.file?.size ?? 0), 0)
   }, [pendingFiles])
 
   const formatFileSize = (bytes: number): string => {

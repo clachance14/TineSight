@@ -947,3 +947,18 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+// Convenience type aliases for common tables
+export type Camera = Tables<'cameras'>
+export type Deer = Tables<'deer'>
+export type DeerEmbedding = Tables<'deer_embeddings'>
+export type Detection = Tables<'detections'>
+export type DetectionInsert = TablesInsert<'detections'>
+export type Image = Tables<'images'>
+export type ImageInsert = TablesInsert<'images'>
+export type ImageUpdate = TablesUpdate<'images'>
+export type ProcessingBatch = Tables<'processing_batches'>
+export type ProcessingBatchInsert = TablesInsert<'processing_batches'>
+export type ProcessingBatchUpdate = TablesUpdate<'processing_batches'>
+export type Profile = Tables<'profiles'>
+export type ProfileInsert = TablesInsert<'profiles'>

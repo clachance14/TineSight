@@ -75,7 +75,7 @@ export async function getCachedSignedUrls(
 
   // Check cache for each path
   for (let i = 0; i < filePaths.length; i++) {
-    const filePath = filePaths[i]
+    const filePath = filePaths[i]!
     const cached = urlCache.get(filePath)
 
     if (cached && cached.expiresAt > now) {
@@ -94,9 +94,9 @@ export async function getCachedSignedUrls(
     // Update cache and results
     const fetchTime = Date.now()
     for (let j = 0; j < fetchResults.length; j++) {
-      const { data, error } = fetchResults[j]
-      const originalIndex = uncachedIndices[j]
-      const filePath = uncachedPaths[j]
+      const { data, error } = fetchResults[j]!
+      const originalIndex = uncachedIndices[j]!
+      const filePath = uncachedPaths[j]!
 
       if (!error && data) {
         results[originalIndex] = data
@@ -138,7 +138,7 @@ function cleanupExpiredEntries(): void {
 
     const toRemove = urlCache.size - MAX_CACHE_SIZE + 1000 // Remove extra buffer
     for (let i = 0; i < toRemove && i < entries.length; i++) {
-      urlCache.delete(entries[i][0])
+      urlCache.delete(entries[i]![0])
     }
   }
 }

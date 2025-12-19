@@ -108,7 +108,10 @@ export function DetectionEditPanel() {
     if (!selectedDetectionId) return
 
     try {
-      await deleteDetection.mutateAsync(selectedDetectionId)
+      await deleteDetection.mutateAsync({
+        detectionId: selectedDetectionId,
+        ...(detection?.imageId && { imageId: detection.imageId })
+      })
       setIsDeleteDialogOpen(false)
       closePanel()
       toast({

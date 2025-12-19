@@ -57,7 +57,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
     const batchId = searchParams.get('batch_id')
 
     // Single optimized RPC call replaces 3 sequential queries
-    const { data, error } = await supabase.rpc('get_photo_stats', {
+    // Note: get_photo_stats RPC function exists in DB but not in generated types
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('get_photo_stats', {
       p_user_id: user.id,
       p_batch_id: batchId ?? null,
     })

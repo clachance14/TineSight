@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useCallback } from 'react'
+import { useRef } from 'react'
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import type { PhotoFilters } from '@/lib/services/photos'
 

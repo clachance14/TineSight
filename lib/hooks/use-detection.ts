@@ -133,7 +133,7 @@ export function useDeleteDetection() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ detectionId, imageId }: { detectionId: string; imageId?: string }) =>
+    mutationFn: ({ detectionId }: { detectionId: string; imageId?: string }) =>
       deleteDetectionApi(detectionId),
     onSuccess: (_, { detectionId, imageId }) => {
       // Remove the detection from cache

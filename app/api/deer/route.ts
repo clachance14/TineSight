@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createDeer, getDeerCatalog } from '@/lib/services/deer'
-import { withCacheHeaders, jsonWithCache } from '@/lib/utils/cache-headers'
+import { jsonWithCache } from '@/lib/utils/cache-headers'
 
 /**
  * GET /api/deer

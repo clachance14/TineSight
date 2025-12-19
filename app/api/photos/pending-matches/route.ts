@@ -143,7 +143,7 @@ export async function GET(
 
     // Build photos array with URLs mapped back
     const photos: PendingMatchPhoto[] = imageEntries.map(([, entry], index) => {
-      const { thumbnailIdx, imageIdx } = pathIndexMap[index]
+      const { thumbnailIdx, imageIdx } = pathIndexMap[index]!
 
       // Build detection summaries
       const detections: DetectionSummary[] = Array.from(
@@ -157,8 +157,8 @@ export async function GET(
         id: entry.image.id,
         file_path: entry.image.file_path,
         captured_at: entry.image.captured_at,
-        thumbnailUrl: thumbnailIdx >= 0 ? cachedUrls[thumbnailIdx] : null,
-        imageUrl: cachedUrls[imageIdx],
+        thumbnailUrl: thumbnailIdx >= 0 ? (cachedUrls[thumbnailIdx] ?? null) : null,
+        imageUrl: cachedUrls[imageIdx] ?? null,
         detections,
       }
     })
