@@ -1,3 +1,4 @@
+// Deploy trigger: 2025-12-19
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
