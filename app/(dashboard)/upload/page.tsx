@@ -13,8 +13,10 @@ import { Button } from '@/components/ui/button'
 import { Image } from 'lucide-react'
 
 const CHUNK_SIZE = 20
-const PARALLEL_CHUNKS = 1
+const PARALLEL_CHUNKS = 3
 const PROGRESS_THROTTLE_MS = 500 // Max 2 updates per second per file
+const MAX_RETRIES = 3
+const RETRY_DELAY_MS = 1000
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
@@ -22,9 +24,74 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   )
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+interface FailedUpload {
+  fileId: string
+  filename: string
+  file: File
+  uploadUrl: string
+  attempt: number
+}
+
 export default function UploadPage() {
   const queryClient = useQueryClient()
   const progressThrottles = useRef<Map<string, number>>(new Map())
+  const failedUploadsRef = useRef<FailedUpload[]>([])
+
+  // Reusable XHR upload function
+  const uploadFile = useCallback((
+    fileId: string,
+    filename: string,
+    file: File,
+    uploadUrl: string
+  ): Promise<{ success: true } | { success: false; error: string }> => {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest()
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const now = Date.now()
+          const lastUpdate = progressThrottles.current.get(fileId) || 0
+          const progress = Math.round((event.loaded / event.total) * 100)
+          if (progress === 100 || now - lastUpdate > PROGRESS_THROTTLE_MS) {
+            progressThrottles.current.set(fileId, now)
+            batchedUpdateProgress(fileId, progress)
+          }
+        }
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve({ success: true })
+        } else {
+          console.error(`[Upload Failed] ${filename}`, {
+            status: xhr.status,
+            statusText: xhr.statusText,
+            response: xhr.responseText?.slice(0, 500),
+          })
+          resolve({ success: false, error: `Upload failed: ${xhr.status} ${xhr.statusText}` })
+        }
+      }
+
+      xhr.onerror = () => {
+        console.error(`[Network Error] ${filename}`, { readyState: xhr.readyState })
+        resolve({ success: false, error: 'Network error - browser connection failed' })
+      }
+
+      xhr.ontimeout = () => {
+        console.error(`[Timeout] ${filename}`)
+        resolve({ success: false, error: 'Upload timeout' })
+      }
+
+      xhr.timeout = 120000
+      xhr.open('PUT', uploadUrl)
+      xhr.setRequestHeader('Content-Type', file.type)
+      xhr.send(file)
+    })
+  }, [])
 
   const {
     uploadQueue,
@@ -69,6 +136,9 @@ export default function UploadPage() {
   const handleStartUpload = useCallback(async () => {
     const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
     if (pendingFiles.length === 0) return
+
+    // Clear failed uploads from previous runs
+    failedUploadsRef.current = []
 
     // Create upload session before chunking
     let sessionId: string | null = null
@@ -138,62 +208,25 @@ export default function UploadPage() {
             return
           }
 
-          try {
-            // File must exist for pending uploads
-            if (!file.file) {
-              markFileFailed(file.id, 'File data not available')
-              return
-            }
-            const fileData = file.file
+          // File must exist for pending uploads
+          if (!file.file) {
+            markFileFailed(file.id, 'File data not available')
+            return
+          }
 
-            const xhr = new XMLHttpRequest()
-            xhr.upload.onprogress = (event) => {
-              if (event.lengthComputable) {
-                const now = Date.now()
-                const lastUpdate = progressThrottles.current.get(file.id) || 0
-                // Throttle updates to max 2 per second, but always send 100%
-                const progress = Math.round((event.loaded / event.total) * 100)
-                if (progress === 100 || now - lastUpdate > PROGRESS_THROTTLE_MS) {
-                  progressThrottles.current.set(file.id, now)
-                  batchedUpdateProgress(file.id, progress)
-                }
-              }
-            }
+          const result = await uploadFile(file.id, file.filename, file.file, uploadInfo.uploadUrl)
 
-            await new Promise<void>((resolve, reject) => {
-              xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                  resolve()
-                } else {
-                  // Log Supabase error details
-                  console.error(`[Upload Failed] ${file.filename}`, {
-                    status: xhr.status,
-                    statusText: xhr.statusText,
-                    response: xhr.responseText?.slice(0, 500),
-                  })
-                  reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`))
-                }
-              }
-              xhr.onerror = () => {
-                // Log browser/network error
-                console.error(`[Network Error] ${file.filename}`, {
-                  readyState: xhr.readyState,
-                })
-                reject(new Error('Network error - browser connection failed'))
-              }
-              xhr.ontimeout = () => {
-                console.error(`[Timeout] ${file.filename}`)
-                reject(new Error('Upload timeout'))
-              }
-              xhr.timeout = 120000 // 120 second timeout
-              xhr.open('PUT', uploadInfo.uploadUrl)
-              xhr.setRequestHeader('Content-Type', fileData.type)
-              xhr.send(fileData)
-            })
-
+          if (result.success) {
             markFileCompleted(file.id)
-          } catch (err) {
-            markFileFailed(file.id, err instanceof Error ? err.message : 'Upload failed')
+          } else {
+            // Queue for retry instead of marking failed immediately
+            failedUploadsRef.current.push({
+              fileId: file.id,
+              filename: file.filename,
+              file: file.file,
+              uploadUrl: uploadInfo.uploadUrl,
+              attempt: 1,
+            })
           }
         })
 
@@ -219,7 +252,43 @@ export default function UploadPage() {
       await Promise.all(batch.map(processChunk))
     }
 
-    // Step 5: Refresh photo list after all chunks
+    // Step 5: Retry failed uploads at the end
+    while (failedUploadsRef.current.length > 0) {
+      const toRetry = [...failedUploadsRef.current]
+      failedUploadsRef.current = []
+
+      console.log(`[Retry] Retrying ${toRetry.length} failed uploads...`)
+
+      // Add delay before retry batch
+      await delay(RETRY_DELAY_MS)
+
+      for (const failed of toRetry) {
+        if (failed.attempt >= MAX_RETRIES) {
+          // Exhausted retries, mark as failed
+          console.error(`[Upload Failed] ${failed.filename} after ${MAX_RETRIES} attempts`)
+          markFileFailed(failed.fileId, `Upload failed after ${MAX_RETRIES} attempts`)
+          continue
+        }
+
+        // Reset progress for retry
+        batchedUpdateProgress(failed.fileId, 0)
+
+        const result = await uploadFile(failed.fileId, failed.filename, failed.file, failed.uploadUrl)
+
+        if (result.success) {
+          console.log(`[Retry Success] ${failed.filename} succeeded on attempt ${failed.attempt + 1}`)
+          markFileCompleted(failed.fileId)
+        } else {
+          // Queue for another retry
+          failedUploadsRef.current.push({
+            ...failed,
+            attempt: failed.attempt + 1,
+          })
+        }
+      }
+    }
+
+    // Step 6: Refresh photo list after all chunks and retries
     await queryClient.invalidateQueries({ queryKey: ['photos'] })
     await queryClient.invalidateQueries({ queryKey: ['upload-sessions'] })
     // Invalidate areas query if location was set (new area may have been added)
@@ -229,7 +298,7 @@ export default function UploadPage() {
       setPendingLocation(null)
     }
     setIsPreparing(false)
-  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient, pendingLocation, setPendingLocation])
+  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient, pendingLocation, setPendingLocation, uploadFile])
 
   return (
     <div className="space-y-6">
