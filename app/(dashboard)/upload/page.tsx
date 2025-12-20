@@ -12,8 +12,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Image } from 'lucide-react'
 
-const CHUNK_SIZE = 20
-const PARALLEL_CHUNKS = 3
+const CHUNK_SIZE = 25
+const PARALLEL_CHUNKS = 4
 const PROGRESS_THROTTLE_MS = 500 // Max 2 updates per second per file
 const MAX_RETRIES = 3
 const RETRY_DELAY_MS = 1000
@@ -158,98 +158,124 @@ export default function UploadPage() {
 
     const chunks = chunkArray(pendingFiles, CHUNK_SIZE)
 
-    // Process a single chunk
-    const processChunk = async (chunk: typeof pendingFiles) => {
-      try {
-        // Step 1: Initialize batch and get signed URLs for this chunk
-        const response = await fetch('/api/photos/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            uploadSessionId: sessionId,
-            // Include location data if set
-            ...(pendingLocation && {
-              locationLat: pendingLocation.lat,
-              locationLng: pendingLocation.lng,
-              areaName: pendingLocation.areaName,
-              directionCompass: pendingLocation.directionCompass,
-              directionNotes: pendingLocation.directionNotes,
-            }),
-            files: chunk.map((f) => ({
-              id: f.id,
-              filename: f.filename,
-              contentType: f.file?.type ?? 'image/jpeg',
-              size: f.file?.size ?? 0,
-              capturedAt: f.capturedAt?.toISOString(),
-              make: f.make,
-              model: f.model,
-              deviceIdentifier: f.deviceIdentifier,
-              exifSignature: f.exifSignature,
-              exifData: f.exifData,
-            })),
+    // Initialize a batch: get signed URLs from API
+    const initializeBatch = async (chunk: typeof pendingFiles) => {
+      const response = await fetch('/api/photos/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uploadSessionId: sessionId,
+          ...(pendingLocation && {
+            locationLat: pendingLocation.lat,
+            locationLng: pendingLocation.lng,
+            areaName: pendingLocation.areaName,
+            directionCompass: pendingLocation.directionCompass,
+            directionNotes: pendingLocation.directionNotes,
           }),
-        })
+          files: chunk.map((f) => ({
+            id: f.id,
+            filename: f.filename,
+            contentType: f.file?.type ?? 'image/jpeg',
+            size: f.file?.size ?? 0,
+            capturedAt: f.capturedAt?.toISOString(),
+            make: f.make,
+            model: f.model,
+            deviceIdentifier: f.deviceIdentifier,
+            exifSignature: f.exifSignature,
+            exifData: f.exifData,
+          })),
+        }),
+      })
 
-        if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.error || 'Failed to initialize upload')
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to initialize upload')
+      }
+
+      const { batchId, uploads } = await response.json()
+      return { chunk, batchId, uploads }
+    }
+
+    // Upload files using pre-fetched signed URLs
+    const uploadBatch = async (batchData: { chunk: typeof pendingFiles; batchId: string; uploads: Array<{ fileId: string; uploadUrl: string; imageId: string }> }) => {
+      const { chunk, batchId, uploads } = batchData
+
+      // Update store with upload URLs and mark as uploading
+      startUpload(batchId, uploads)
+
+      // Upload each file to its signed URL
+      const uploadPromises = chunk.map(async (file) => {
+        const uploadInfo = uploads.find((u) => u.fileId === file.id)
+        if (!uploadInfo) {
+          markFileFailed(file.id, 'No upload URL received')
+          return
         }
 
-        const { batchId, uploads } = await response.json()
+        if (!file.file) {
+          markFileFailed(file.id, 'File data not available')
+          return
+        }
 
-        // Step 2: Update store with upload URLs and mark as uploading
-        startUpload(batchId, uploads)
+        const result = await uploadFile(file.id, file.filename, file.file, uploadInfo.uploadUrl)
 
-        // Step 3: Upload each file to its signed URL
-        const uploadPromises = chunk.map(async (file) => {
-          const uploadInfo = uploads.find((u: { fileId: string }) => u.fileId === file.id)
-          if (!uploadInfo) {
-            markFileFailed(file.id, 'No upload URL received')
-            return
-          }
+        if (result.success) {
+          markFileCompleted(file.id)
+        } else {
+          failedUploadsRef.current.push({
+            fileId: file.id,
+            filename: file.filename,
+            file: file.file,
+            uploadUrl: uploadInfo.uploadUrl,
+            attempt: 1,
+          })
+        }
+      })
 
-          // File must exist for pending uploads
-          if (!file.file) {
-            markFileFailed(file.id, 'File data not available')
-            return
-          }
+      await Promise.all(uploadPromises)
 
-          const result = await uploadFile(file.id, file.filename, file.file, uploadInfo.uploadUrl)
-
-          if (result.success) {
-            markFileCompleted(file.id)
-          } else {
-            // Queue for retry instead of marking failed immediately
-            failedUploadsRef.current.push({
-              fileId: file.id,
-              filename: file.filename,
-              file: file.file,
-              uploadUrl: uploadInfo.uploadUrl,
-              attempt: 1,
-            })
-          }
-        })
-
-        await Promise.all(uploadPromises)
-
-        // Step 4: Trigger processing for this chunk immediately
-        await fetch('/api/photos/upload/complete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batchId, uploadedImageIds: uploads.map((u: { imageId: string }) => u.imageId) }),
-        })
-
-      } catch (err) {
-        console.error('Chunk upload failed:', err)
-      }
+      // Trigger processing for this chunk
+      await fetch('/api/photos/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchId, uploadedImageIds: uploads.map((u) => u.imageId) }),
+      })
     }
 
     setIsPreparing(true)
 
-    // Process chunks in parallel batches of PARALLEL_CHUNKS
-    for (let i = 0; i < chunks.length; i += PARALLEL_CHUNKS) {
-      const batch = chunks.slice(i, i + PARALLEL_CHUNKS)
-      await Promise.all(batch.map(processChunk))
+    // Pipeline: fetch signed URLs for next round while current round uploads
+    // This overlaps API latency with upload time
+    const rounds = chunkArray(chunks, PARALLEL_CHUNKS)
+
+    // Pre-fetch first round's signed URLs
+    let currentRoundPromises = rounds[0]?.map((chunk) =>
+      initializeBatch(chunk).catch((err) => {
+        console.error('Batch init failed:', err)
+        return null
+      })
+    ) ?? []
+
+    for (let i = 0; i < rounds.length; i++) {
+      // Wait for current round's init to complete
+      const batchDataList = await Promise.all(currentRoundPromises)
+
+      // Start pre-fetching NEXT round's signed URLs (overlaps with uploads below)
+      if (i + 1 < rounds.length) {
+        currentRoundPromises = rounds[i + 1]!.map((chunk) =>
+          initializeBatch(chunk).catch((err) => {
+            console.error('Batch init failed:', err)
+            return null
+          })
+        )
+      }
+
+      // Upload all chunks in current round (parallel uploads)
+      // While this runs, next round's API calls are in flight
+      await Promise.all(
+        batchDataList
+          .filter((data): data is NonNullable<typeof data> => data !== null)
+          .map((batchData) => uploadBatch(batchData))
+      )
     }
 
     // Step 5: Retry failed uploads at the end
