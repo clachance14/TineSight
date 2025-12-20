@@ -185,7 +185,6 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
       qualityStatus: 'all',
       sex: 'all',
       sizeClass: 'all',
-      uploadSessionId: undefined,
     })
   }
 
