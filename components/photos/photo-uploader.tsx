@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { useUploadStore } from '@/lib/stores/upload'
+import { useAdaptiveThrottle } from '@/lib/hooks/use-adaptive-throttle'
 import { extractMetadata } from '@/lib/image/exif'
 import { cn } from '@/lib/utils'
 
@@ -30,6 +31,9 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
   const [rejectionWarning, setRejectionWarning] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 })
+
+  // Initialize adaptive throttler for EXIF processing
+  const throttle = useAdaptiveThrottle('exif')
 
   // Calculate summary stats for pending files
   const pendingFiles = useMemo(
@@ -126,6 +130,9 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
         setIsProcessing(true)
         setProcessingProgress({ current: 0, total: acceptedFiles.length })
 
+        // Start the session timer
+        throttle.startSession()
+
         const processedFiles: Array<{
           file: File
           capturedAt: Date | null
@@ -136,46 +143,69 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
           exifData: Record<string, unknown>
         }> = []
 
-        // Process files in batches of 10 for better performance while showing progress
-        const BATCH_SIZE = 10
-        for (let i = 0; i < acceptedFiles.length; i += BATCH_SIZE) {
-          const batch = acceptedFiles.slice(i, i + BATCH_SIZE)
+        // Process in adaptive batches - re-fetch batch size after each iteration
+        let processedCount = 0
 
-          const batchResults = await Promise.all(
-            batch.map(async (file) => {
-              // Extract EXIF metadata
-              const metadata = await extractMetadata(file).catch((error) => {
-                console.error(`Failed to extract EXIF from ${file.name}:`, error)
+        while (processedCount < acceptedFiles.length) {
+          // Re-fetch batch size each iteration (adapts based on previous success/failure)
+          const batchSize = throttle.getChunkSize()
+          const batch = acceptedFiles.slice(processedCount, processedCount + batchSize)
+
+          console.log(`[Throttle] Processing batch of ${batch.length} (chunk size: ${batchSize}, processed: ${processedCount}/${acceptedFiles.length})`)
+
+          const batchStartTime = Date.now()
+
+          try {
+            const batchResults = await Promise.all(
+              batch.map(async (file) => {
+                // Extract EXIF metadata
+                const metadata = await extractMetadata(file).catch((error) => {
+                  console.error(`Failed to extract EXIF from ${file.name}:`, error)
+                  return {
+                    capturedAt: null,
+                    make: null,
+                    model: null,
+                    deviceIdentifier: null,
+                    exifSignature: null,
+                    rawExif: {},
+                  }
+                })
+
+                // Generate thumbnail (don't block on failure)
+                await generateThumbnail(file).catch((error) => {
+                  console.error(`Failed to generate thumbnail for ${file.name}:`, error)
+                })
+
                 return {
-                  capturedAt: null,
-                  make: null,
-                  model: null,
-                  deviceIdentifier: null,
-                  exifSignature: null,
-                  rawExif: {},
+                  file,
+                  capturedAt: metadata.capturedAt,
+                  make: metadata.make,
+                  model: metadata.model,
+                  deviceIdentifier: metadata.deviceIdentifier,
+                  exifSignature: metadata.exifSignature,
+                  exifData: metadata.rawExif,
                 }
               })
+            )
 
-              // Generate thumbnail (don't block on failure)
-              await generateThumbnail(file).catch((error) => {
-                console.error(`Failed to generate thumbnail for ${file.name}:`, error)
-              })
+            processedFiles.push(...batchResults)
+            processedCount += batch.length
+            setProcessingProgress({ current: processedCount, total: acceptedFiles.length })
 
-              return {
-                file,
-                capturedAt: metadata.capturedAt,
-                make: metadata.make,
-                model: metadata.model,
-                deviceIdentifier: metadata.deviceIdentifier,
-                exifSignature: metadata.exifSignature,
-                exifData: metadata.rawExif,
-              }
-            })
-          )
-
-          processedFiles.push(...batchResults)
-          setProcessingProgress({ current: Math.min(i + BATCH_SIZE, acceptedFiles.length), total: acceptedFiles.length })
+            // Record successful batch processing - this triggers AIMD to increase batch size
+            const batchDuration = Date.now() - batchStartTime
+            throttle.recordSuccess(batchDuration, batch.length)
+          } catch (error) {
+            console.error('Batch processing failed:', error)
+            // Record failure - this triggers AIMD to decrease batch size
+            throttle.recordFailure('unknown')
+            // Still advance to avoid infinite loop
+            processedCount += batch.length
+          }
         }
+
+        // Stop the session timer
+        throttle.stopSession()
 
         // Add files with metadata to upload queue
         addFiles(processedFiles)
@@ -188,7 +218,7 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
         }
       }
     },
-    [addFiles, generateThumbnail, onFilesReady]
+    [addFiles, generateThumbnail, onFilesReady, throttle]
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

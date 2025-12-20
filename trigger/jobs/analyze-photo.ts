@@ -47,8 +47,9 @@ export const analyzePhoto = task({
   id: "analyze-photo",
   // Limit concurrent Gemini API calls to manage rate limits
   // Gemini Flash has generous limits but we want controlled parallelism
+  // Configurable via TRIGGER_CONCURRENCY_LIMIT environment variable
   queue: {
-    concurrencyLimit: 50,
+    concurrencyLimit: parseInt(process.env.TRIGGER_CONCURRENCY_LIMIT || '50', 10),
   },
   retry: {
     maxAttempts: 3,

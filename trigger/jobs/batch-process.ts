@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { analyzePhoto } from "./analyze-photo";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import pLimit from "p-limit";
 
 /**
  * Batch Process Job
@@ -63,10 +64,38 @@ export const batchProcess = task({
         imageCount: imageIds.length,
       });
 
+      // Rate limit job triggering to avoid overwhelming the Trigger.dev API
+      // Configurable via TRIGGER_BATCH_RATE environment variable
+      const batchRate = parseInt(process.env.TRIGGER_BATCH_RATE || '20', 10);
+      const triggerLimit = pLimit(batchRate);
+
+      logger.info("Rate limiting batch triggers", {
+        batchId,
+        rateLimit: batchRate,
+        imageCount: imageIds.length,
+      });
+
       // Use batchTrigger (fire and forget) instead of batchTriggerAndWait
       // This is faster and more reliable - individual jobs update batch counters themselves
-      await analyzePhoto.batchTrigger(
-        imageIds.map(imageId => ({ payload: { imageId, batchId } }))
+      // Apply rate limiting by chunking the triggers
+      const chunks: string[][] = [];
+      for (let i = 0; i < imageIds.length; i += batchRate) {
+        chunks.push(imageIds.slice(i, i + batchRate));
+      }
+
+      await Promise.all(
+        chunks.map((chunk, index) =>
+          triggerLimit(async () => {
+            logger.info(`Triggering batch chunk ${index + 1}/${chunks.length}`, {
+              batchId,
+              chunkSize: chunk.length,
+            });
+
+            await analyzePhoto.batchTrigger(
+              chunk.map(imageId => ({ payload: { imageId, batchId } }))
+            );
+          })
+        )
       );
 
       logger.info("All analyze-photo jobs triggered", {

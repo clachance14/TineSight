@@ -8,12 +8,13 @@ import { UploadProgressPanel } from '@/components/photos/upload-progress-panel'
 import { LocationPickerModal, type LocationData } from '@/components/photos/location-picker-modal'
 import { useUploadStore, batchedUpdateProgress } from '@/lib/stores/upload'
 import { useLocations } from '@/lib/hooks/use-locations'
+import { useAdaptiveThrottle } from '@/lib/hooks/use-adaptive-throttle'
+import { classifyXHRError } from '@/lib/throttle'
+import { ThrottleMetricsPanel } from '@/components/debug/throttle-metrics-panel'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Image } from 'lucide-react'
 
-const CHUNK_SIZE = 25
-const PARALLEL_CHUNKS = 4
 const PROGRESS_THROTTLE_MS = 500 // Max 2 updates per second per file
 const MAX_RETRIES = 3
 const RETRY_DELAY_MS = 1000
@@ -40,6 +41,10 @@ export default function UploadPage() {
   const queryClient = useQueryClient()
   const progressThrottles = useRef<Map<string, number>>(new Map())
   const failedUploadsRef = useRef<FailedUpload[]>([])
+  const uploadStartTimes = useRef<Map<string, number>>(new Map())
+
+  // Initialize adaptive throttler for upload operations
+  const throttle = useAdaptiveThrottle('upload')
 
   // Reusable XHR upload function
   const uploadFile = useCallback((
@@ -50,6 +55,8 @@ export default function UploadPage() {
   ): Promise<{ success: true } | { success: false; error: string }> => {
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest()
+      const startTime = Date.now()
+      uploadStartTimes.current.set(fileId, startTime)
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
@@ -64,7 +71,12 @@ export default function UploadPage() {
       }
 
       xhr.onload = () => {
+        const duration = Date.now() - startTime
+        uploadStartTimes.current.delete(fileId)
+
         if (xhr.status >= 200 && xhr.status < 300) {
+          // Record success with duration
+          throttle.recordSuccess(duration)
           resolve({ success: true })
         } else {
           console.error(`[Upload Failed] ${filename}`, {
@@ -72,17 +84,25 @@ export default function UploadPage() {
             statusText: xhr.statusText,
             response: xhr.responseText?.slice(0, 500),
           })
+          // Record failure with classified error type
+          throttle.recordFailure(classifyXHRError(xhr))
           resolve({ success: false, error: `Upload failed: ${xhr.status} ${xhr.statusText}` })
         }
       }
 
       xhr.onerror = () => {
+        uploadStartTimes.current.delete(fileId)
         console.error(`[Network Error] ${filename}`, { readyState: xhr.readyState })
+        // Record network failure
+        throttle.recordFailure('network')
         resolve({ success: false, error: 'Network error - browser connection failed' })
       }
 
       xhr.ontimeout = () => {
+        uploadStartTimes.current.delete(fileId)
         console.error(`[Timeout] ${filename}`)
+        // Record network failure (timeout is a network issue)
+        throttle.recordFailure('network')
         resolve({ success: false, error: 'Upload timeout' })
       }
 
@@ -91,7 +111,7 @@ export default function UploadPage() {
       xhr.setRequestHeader('Content-Type', file.type)
       xhr.send(file)
     })
-  }, [])
+  }, [throttle])
 
   const {
     uploadQueue,
@@ -137,6 +157,16 @@ export default function UploadPage() {
     const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
     if (pendingFiles.length === 0) return
 
+    // Check if throttler allows proceeding
+    const proceedResult = throttle.shouldProceed()
+    if (!proceedResult.allowed) {
+      console.warn(`[Throttle] Not allowed to proceed: ${proceedResult.reason}`)
+      if (proceedResult.waitMs && proceedResult.waitMs > 0) {
+        console.log(`[Throttle] Waiting ${proceedResult.waitMs}ms before proceeding...`)
+        await throttle.waitForRecovery()
+      }
+    }
+
     // Clear failed uploads from previous runs
     failedUploadsRef.current = []
 
@@ -156,7 +186,13 @@ export default function UploadPage() {
       // Continue without session - backward compatible
     }
 
-    const chunks = chunkArray(pendingFiles, CHUNK_SIZE)
+    // Get dynamic values from throttler
+    const chunkSize = throttle.getChunkSize()
+    const parallelChunks = throttle.getConcurrency()
+
+    console.log(`[Throttle] Using chunk size: ${chunkSize}, concurrency: ${parallelChunks}`)
+
+    const chunks = chunkArray(pendingFiles, chunkSize)
 
     // Initialize a batch: get signed URLs from API
     const initializeBatch = async (chunk: typeof pendingFiles) => {
@@ -246,7 +282,7 @@ export default function UploadPage() {
 
     // Pipeline: fetch signed URLs for next round while current round uploads
     // This overlaps API latency with upload time
-    const rounds = chunkArray(chunks, PARALLEL_CHUNKS)
+    const rounds = chunkArray(chunks, parallelChunks)
 
     // Pre-fetch first round's signed URLs
     let currentRoundPromises = rounds[0]?.map((chunk) =>
@@ -326,7 +362,7 @@ export default function UploadPage() {
       setPendingLocation(null)
     }
     setIsPreparing(false)
-  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient, pendingLocation, setPendingLocation, uploadFile])
+  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient, pendingLocation, setPendingLocation, uploadFile, throttle])
 
   return (
     <div className="space-y-6">
@@ -368,6 +404,9 @@ export default function UploadPage() {
         onSkip={handleLocationSkip}
         existingLocations={existingLocations}
       />
+
+      {/* Debug Panel - Only visible in development */}
+      <ThrottleMetricsPanel />
     </div>
   )
 }
