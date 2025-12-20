@@ -250,6 +250,8 @@ function PhotosContent() {
           fetchNextPage,
         }}
         onPhotoClick={(id) => {
+          // Store photo ID for scroll restoration when returning
+          sessionStorage.setItem('photos:scrollToId', id)
           const queryString = buildFilterQueryString(filters)
           const url = queryString ? `/photos/${id}?${queryString}` : `/photos/${id}`
           router.push(url)

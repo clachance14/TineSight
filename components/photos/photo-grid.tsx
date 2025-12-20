@@ -11,8 +11,8 @@ import { cn } from '@/lib/utils'
 import { Loader2 } from 'lucide-react'
 
 // Constants for virtualization
-const ROW_HEIGHT = 200 // px - approximate height for aspect-square cards
 const GAP = 16 // gap-4 = 1rem = 16px
+const ESTIMATED_ROW_HEIGHT = 250 // Conservative estimate for initial render
 
 interface PhotoGridProps {
   filters?: Omit<PhotoFilters, 'offset'>
@@ -210,13 +210,36 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   // Calculate row count for virtualization
   const rowCount = Math.ceil(photos.length / columns)
 
-  // Virtualizer for rows
+  // Virtualizer for rows - uses dynamic measurement for accurate row heights
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT + GAP,
+    estimateSize: () => ESTIMATED_ROW_HEIGHT + GAP,
     overscan: 3, // Render 3 extra rows above/below viewport
   })
+
+  // Scroll restoration: when returning from photo detail, scroll to the photo's row
+  useEffect(() => {
+    if (photos.length === 0) return
+
+    const scrollToId = sessionStorage.getItem('photos:scrollToId')
+    if (!scrollToId) return
+
+    // Find the photo's index in the list
+    const photoIndex = photos.findIndex((p) => p.id === scrollToId)
+    if (photoIndex === -1) return
+
+    // Calculate which row this photo is in
+    const rowIndex = Math.floor(photoIndex / columns)
+
+    // Scroll to that row with a small delay to ensure virtualizer is ready
+    requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(rowIndex, { align: 'start' })
+    })
+
+    // Clear the stored ID so we don't scroll again on re-renders
+    sessionStorage.removeItem('photos:scrollToId')
+  }, [photos, columns, virtualizer])
 
   // Handle photo click
   const handlePhotoClick = useCallback(
@@ -365,18 +388,18 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
             return (
               <div
                 key={virtualRow.key}
+                ref={virtualizer.measureElement}
+                data-index={virtualRow.index}
                 className="absolute left-0 top-0 w-full"
                 style={{
-                  height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,
                   zIndex: 0,
                 }}
               >
                 <div
-                  className="grid gap-4"
+                  className="grid gap-4 pb-4"
                   style={{
                     gridTemplateColumns: `repeat(${columns}, 1fr)`,
-                    height: `${ROW_HEIGHT}px`,
                   }}
                 >
                   {rowPhotos.map((photo) => (
