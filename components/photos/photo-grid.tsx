@@ -230,17 +230,46 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   // Check if we're near the bottom to trigger infinite scroll
   useEffect(() => {
-    const virtualItems = virtualizer.getVirtualItems()
-    if (virtualItems.length === 0) return
+    const scrollElement = parentRef.current
+    if (!scrollElement) return
 
-    const lastItem = virtualItems[virtualItems.length - 1]
-    if (!lastItem) return
-
-    // If we're viewing the last few rows and there's more data, fetch it
-    if (lastItem.index >= rowCount - 3 && hasNextPage && !isFetchingNextPage) {
-      fetchNextPage()
+    const checkShouldLoadMore = () => {
+      const { scrollTop, scrollHeight, clientHeight } = scrollElement
+      // Load more when within 500px of bottom
+      if (scrollHeight - scrollTop - clientHeight < 500 && hasNextPage && !isFetchingNextPage) {
+        fetchNextPage()
+      }
     }
-  }, [virtualizer.getVirtualItems(), rowCount, hasNextPage, isFetchingNextPage, fetchNextPage])
+
+    scrollElement.addEventListener('scroll', checkShouldLoadMore, { passive: true })
+
+    // Check after layout completes - use RAF to ensure dimensions are calculated
+    const rafId = requestAnimationFrame(() => {
+      checkShouldLoadMore()
+    })
+
+    return () => {
+      scrollElement.removeEventListener('scroll', checkShouldLoadMore)
+      cancelAnimationFrame(rafId)
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
+
+  // Re-check when photos array changes (initial load or new data)
+  useEffect(() => {
+    if (!hasNextPage || isFetchingNextPage) return
+    const scrollElement = parentRef.current
+    if (!scrollElement) return
+
+    // Small delay to let virtualized content render
+    const timeoutId = setTimeout(() => {
+      const { scrollTop, scrollHeight, clientHeight } = scrollElement
+      if (scrollHeight - scrollTop - clientHeight < 500) {
+        fetchNextPage()
+      }
+    }, 100)
+
+    return () => clearTimeout(timeoutId)
+  }, [photos.length, hasNextPage, isFetchingNextPage, fetchNextPage])
 
   // Loading skeleton
   if (isLoading) {
@@ -327,11 +356,11 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   // Virtualized photo grid
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Virtualized scroll container */}
       <div
         ref={parentRef}
-        className="h-[calc(100vh-280px)] overflow-auto"
+        className="flex-1 min-h-0 overflow-auto"
         style={{ contain: 'strict' }}
       >
         <div
