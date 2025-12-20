@@ -178,7 +178,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col h-full overflow-y-auto space-y-6">
       {/* Header with back button and navigation */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
