@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { useQuery } from '@tanstack/react-query'
 import { PhotoGrid } from '@/components/photos/photo-grid'
 import { PhotoFilters, type PhotoFilters as PhotoFiltersType } from '@/components/photos/photo-filters'
 import { PhotoFilterDrawer } from '@/components/photos/photo-filter-drawer'
@@ -120,16 +121,45 @@ function PhotosContent() {
   // Show updating indicator when fetching new filter results (but not initial load)
   const isUpdatingFilters = !isLoading && isFetching && isPlaceholderData
 
+  // Fetch unfiltered total for stats display
+  const { data: statsData } = useQuery({
+    queryKey: ['photos', 'stats'],
+    queryFn: async () => {
+      const res = await fetch('/api/photos/stats')
+      if (!res.ok) return null
+      return res.json()
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Check if any filters are active
+  const hasActiveFilters =
+    filters.status !== 'all' ||
+    filters.hasDeer !== null ||
+    filters.hasDetections !== null ||
+    filters.qualityStatus !== 'all' ||
+    filters.sex !== 'all' ||
+    filters.sizeClass !== 'all' ||
+    filters.minConfidence !== undefined ||
+    filters.minPoints !== undefined ||
+    filters.maxPoints !== undefined ||
+    filters.dateFrom !== undefined ||
+    filters.dateTo !== undefined ||
+    filters.cameraId !== undefined ||
+    filters.deerId !== undefined
+
   // Flatten paginated data
   const photos = data?.pages?.flatMap(page => page.photos) ?? []
   const total = data?.pages?.[0]?.total ?? 0
+  const unfilteredTotal = statsData?.total_photos ?? total
 
   // Calculate stats from the same data that renders in the grid
   const stats = {
-    total,
+    filtered: total,
+    unfilteredTotal,
     processing: photos.filter(p => p.detection_status === 'processing').length,
-    completed: photos.filter(p => p.detection_status === 'completed').length,
     failed: photos.filter(p => p.detection_status === 'failed').length,
+    hasActiveFilters,
   }
 
   return (
@@ -151,16 +181,23 @@ function PhotosContent() {
           {/* Compact Stats Bar */}
           <div className="mt-1 flex items-center gap-4 text-sm">
             <span className="text-cream-dark">
-              <span className="font-semibold tabular-nums text-cream">{stats.total}</span> total
+              {stats.hasActiveFilters ? (
+                <>
+                  <span className="font-semibold tabular-nums text-cream">{stats.filtered}</span>
+                  {' of '}
+                  <span className="font-semibold tabular-nums text-cream">{stats.unfilteredTotal}</span>
+                  {' photos'}
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold tabular-nums text-cream">{stats.unfilteredTotal}</span>
+                  {' photos'}
+                </>
+              )}
             </span>
             {stats.processing > 0 && (
               <span className="text-blue-400">
                 <span className="font-semibold tabular-nums">{stats.processing}</span> processing
-              </span>
-            )}
-            {stats.completed > 0 && (
-              <span className="text-green-400">
-                <span className="font-semibold tabular-nums">{stats.completed}</span> completed
               </span>
             )}
             {stats.failed > 0 && (

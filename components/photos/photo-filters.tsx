@@ -112,14 +112,6 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     })
   }
 
-  const toggleHighQuality = () => {
-    const isActive = filters.qualityStatus === 'high_quality'
-    onFiltersChange({
-      ...filters,
-      qualityStatus: isActive ? 'all' : 'high_quality',
-    })
-  }
-
   const toggleProcessing = () => {
     const isActive = filters.status === 'processing'
     onFiltersChange({
@@ -193,7 +185,6 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
   const isBucksActive = filters.sex === 'buck' && filters.sizeClass !== 'trophy'
   const isDoesActive = filters.sex === 'doe'
   const isTrophyActive = filters.sex === 'buck' && filters.sizeClass === 'trophy'
-  const isHighQualityActive = filters.qualityStatus === 'high_quality'
   const isProcessingActive = filters.status === 'processing'
   const isFailedActive = filters.status === 'failed'
   const isWithDetectionsActive = filters.hasDetections === true
@@ -238,18 +229,6 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
           )}
         >
           Trophy
-        </Button>
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={toggleHighQuality}
-          className={cn(
-            "h-8 text-xs",
-            isHighQualityActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
-          )}
-        >
-          High Quality
         </Button>
 
         <Button
