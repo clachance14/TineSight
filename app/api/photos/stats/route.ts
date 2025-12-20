@@ -9,6 +9,8 @@ interface BatchStats {
   photos_with_deer: number
   empty_photos: number
   failed_photos: number
+  pending_photos: number
+  processing_photos: number
   buck_count: number
   doe_count: number
   unknown_count: number
@@ -27,6 +29,8 @@ interface RpcResult {
   photos_with_deer: number
   empty_photos: number
   failed_photos: number
+  pending_photos: number
+  processing_photos: number
   buck_count: number
   doe_count: number
   unknown_count: number
@@ -82,6 +86,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
         photos_with_deer: 0,
         empty_photos: 0,
         failed_photos: 0,
+        pending_photos: 0,
+        processing_photos: 0,
         buck_count: 0,
         doe_count: 0,
         unknown_count: 0,
@@ -101,6 +107,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
       photos_with_deer: result.photos_with_deer,
       empty_photos: result.empty_photos,
       failed_photos: result.failed_photos,
+      pending_photos: result.pending_photos,
+      processing_photos: result.processing_photos,
       buck_count: result.buck_count,
       doe_count: result.doe_count,
       unknown_count: result.unknown_count,

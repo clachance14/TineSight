@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { setActiveBatchId } from '@/lib/hooks/use-active-batch'
 
 export interface UploadFile {
   id: string
@@ -162,7 +163,10 @@ export const useUploadStore = create<UploadState>((set) => ({
 
   setIsPreparing: (isPreparing) => set({ isPreparing }),
 
-  startUpload: (batchId, uploadData) =>
+  startUpload: (batchId, uploadData) => {
+    // Store active batch ID for processing status tracking on photos page
+    setActiveBatchId(batchId)
+
     set((state) => {
       // Match upload data to files in queue and update their state
       // Note: We DON'T clear file here - it's still needed for the XHR upload
@@ -186,7 +190,8 @@ export const useUploadStore = create<UploadState>((set) => ({
         isPreparing: false,
         isUploading: true,
       }
-    }),
+    })
+  },
 
   updateFileProgress: (id, progress) =>
     set((state) => {

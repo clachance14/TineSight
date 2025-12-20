@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { PhotoGrid } from '@/components/photos/photo-grid'
 import { PhotoFilters, type PhotoFilters as PhotoFiltersType } from '@/components/photos/photo-filters'
 import { PhotoFilterDrawer } from '@/components/photos/photo-filter-drawer'
+import { ProcessingStatusBar } from '@/components/photos/processing-status-bar'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import { useDeerCatalog } from '@/lib/hooks/use-deer'
 import { useAreas } from '@/lib/hooks/use-areas'
@@ -244,6 +245,9 @@ function PhotosContent(): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      {/* Processing Status Bar - shows during active batch processing */}
+      <ProcessingStatusBar />
 
       {/* Filters Toolbar */}
       <PhotoFilters
