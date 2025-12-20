@@ -25,13 +25,13 @@
 
 **Purpose**: Install dependencies and configure environment for Mapbox integration
 
-- [ ] T001 [P] Install react-map-gl and mapbox-gl dependencies via `npm install react-map-gl mapbox-gl`
-- [ ] T002 [P] Install TypeScript types via `npm install -D @types/mapbox-gl`
-- [ ] T003 [P] Add NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN to `.env.example`
-- [ ] T004 Create database migration in `supabase/migrations/025_batch_location.sql`
-- [ ] T005 Run migration with `npx supabase db push`
-- [ ] T006 Regenerate TypeScript types with `npx supabase gen types typescript --linked > types/database.ts`
-- [ ] T007 Verify setup with `npm run type-check`
+- [X] T001 [P] Install react-map-gl and mapbox-gl dependencies via `npm install react-map-gl mapbox-gl`
+- [X] T002 [P] Install TypeScript types via `npm install -D @types/mapbox-gl`
+- [X] T003 [P] Add NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN to `.env.example`
+- [X] T004 Create database migration in `supabase/migrations/027_batch_location.sql` (updated: 027 not 025)
+- [X] T005 Run migration with `npx supabase db push`
+- [X] T006 Regenerate TypeScript types with `npx supabase gen types typescript --linked > types/database.ts`
+- [X] T007 Verify setup with `npm run type-check`
 
 **Checkpoint**: Dependencies installed, database schema updated, types regenerated
 
@@ -43,12 +43,12 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T008 Add LocationData interface to `lib/stores/upload.ts`
-- [ ] T009 Add pendingLocation and showLocationPicker state to UploadState interface in `lib/stores/upload.ts`
-- [ ] T010 Add setPendingLocation and setShowLocationPicker actions to upload store in `lib/stores/upload.ts`
-- [ ] T011 Update createBatch function signature to accept location data in `lib/services/batches.ts`
-- [ ] T012 Update UploadInitiationRequest interface to include location fields in `app/api/photos/upload/route.ts`
-- [ ] T013 Update createBatch call to pass location data in `app/api/photos/upload/route.ts`
+- [X] T008 Add LocationData interface to `lib/stores/upload.ts`
+- [X] T009 Add pendingLocation and showLocationPicker state to UploadState interface in `lib/stores/upload.ts`
+- [X] T010 Add setPendingLocation and setShowLocationPicker actions to upload store in `lib/stores/upload.ts`
+- [X] T011 Update createBatch function signature to accept location data in `lib/services/batches.ts`
+- [X] T012 Update UploadInitiationRequest interface to include location fields in `app/api/photos/upload/route.ts`
+- [X] T013 Update createBatch call to pass location data in `app/api/photos/upload/route.ts`
 
 **Checkpoint**: Foundation ready - location state and API updates in place, user story implementation can begin
 
@@ -62,11 +62,11 @@
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] Create location picker modal component in `components/photos/location-picker-modal.tsx`
-- [ ] T015 [US1] Implement Map component with satellite/topo toggle in `components/photos/location-picker-modal.tsx`
-- [ ] T016 [US1] Implement pin placement on map click in `components/photos/location-picker-modal.tsx`
-- [ ] T017 [US1] Implement area name input with validation in `components/photos/location-picker-modal.tsx`
-- [ ] T018 [US1] Implement coordinate display when pin is placed in `components/photos/location-picker-modal.tsx`
+- [X] T014 [US1] Create location picker modal component in `components/photos/location-picker-modal.tsx`
+- [X] T015 [US1] Implement Map component with satellite/topo toggle in `components/photos/location-picker-modal.tsx`
+- [X] T016 [US1] Implement pin placement on map click in `components/photos/location-picker-modal.tsx`
+- [X] T017 [US1] Implement area name input with autocomplete from existing areas and validation (require both pin placement AND area name before enabling Confirm button) in `components/photos/location-picker-modal.tsx`
+- [X] T018 [US1] Implement coordinate display when pin is placed in `components/photos/location-picker-modal.tsx`
 - [ ] T019 [US1] Add onFilesReady prop to PhotoUploader interface in `components/photos/photo-uploader.tsx`
 - [ ] T020 [US1] Call onFilesReady callback after file processing in `components/photos/photo-uploader.tsx`
 - [ ] T021 [US1] Import LocationPickerModal in `app/(dashboard)/upload/page.tsx`
@@ -105,16 +105,16 @@
 
 ### Implementation for User Story 3
 
-- [ ] T031 [P] [US3] Add getDistinctAreaNames function to `lib/services/batches.ts`
-- [ ] T032 [P] [US3] Create areas API endpoint in `app/api/photos/areas/route.ts`
-- [ ] T033 [P] [US3] Create useAreas hook in `lib/hooks/use-areas.ts`
+- [X] T031 [P] [US3] Add getDistinctAreaNames function to `lib/services/batches.ts`
+- [X] T032 [P] [US3] Create areas API endpoint in `app/api/photos/areas/route.ts`
+- [X] T033 [P] [US3] Create useAreas hook in `lib/hooks/use-areas.ts`
 - [ ] T034 [US3] Add areaName to PhotoFilters interface in `lib/services/photos.ts`
 - [ ] T035 [US3] Implement area filter logic in getPhotos function in `lib/services/photos.ts`
 - [ ] T036 [US3] Handle "__no_area__" special filter value in `lib/services/photos.ts`
 - [ ] T037 [US3] Add areaName to PhotoFilters interface in `components/photos/photo-filters.tsx`
 - [ ] T038 [US3] Update hasActiveFilters check to include areaName in `components/photos/photo-filters.tsx`
 - [ ] T039 [US3] Add areaList prop to PhotoFiltersProps in `components/photos/photo-filters.tsx`
-- [ ] T040 [US3] Add Area dropdown with All/No Area/named areas options in `components/photos/photo-filters.tsx`
+- [ ] T040 [US3] Add Area dropdown with All/No Area/named areas options in `components/photos/photo-filters.tsx` (render only when areaList is non-empty per FR-013)
 - [ ] T041 [US3] Import useAreas hook in `app/(dashboard)/photos/page.tsx`
 - [ ] T042 [US3] Pass areaList to PhotoFilters component in `app/(dashboard)/photos/page.tsx`
 - [ ] T043 [US3] Invalidate areas query on successful upload with location in `app/(dashboard)/upload/page.tsx`
@@ -131,11 +131,11 @@
 
 ### Implementation for User Story 4
 
-- [ ] T044 [US4] Add COMPASS_DIRECTIONS constant array in `components/photos/location-picker-modal.tsx`
-- [ ] T045 [US4] Add directionCompass state to location picker in `components/photos/location-picker-modal.tsx`
-- [ ] T046 [US4] Implement 8-button compass direction selector UI in `components/photos/location-picker-modal.tsx`
-- [ ] T047 [US4] Implement toggle behavior (click again to deselect) in `components/photos/location-picker-modal.tsx`
-- [ ] T048 [US4] Include directionCompass in onConfirm callback in `components/photos/location-picker-modal.tsx`
+- [X] T044 [US4] Add COMPASS_DIRECTIONS constant array in `components/photos/location-picker-modal.tsx`
+- [X] T045 [US4] Add directionCompass state to location picker in `components/photos/location-picker-modal.tsx`
+- [X] T046 [US4] Implement 8-button compass direction selector UI in `components/photos/location-picker-modal.tsx`
+- [X] T047 [US4] Implement toggle behavior (click again to deselect) in `components/photos/location-picker-modal.tsx`
+- [X] T048 [US4] Include directionCompass in onConfirm callback in `components/photos/location-picker-modal.tsx`
 
 **Checkpoint**: User Stories 1-4 complete - direction selection working
 

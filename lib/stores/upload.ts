@@ -34,6 +34,14 @@ export interface FileWithMetadata {
   exifData?: Record<string, unknown>
 }
 
+export interface LocationData {
+  lat: number
+  lng: number
+  areaName: string
+  directionCompass?: number  // 0-360
+  directionNotes?: string
+}
+
 interface UploadState {
   // State
   uploadQueue: UploadFile[]
@@ -44,6 +52,8 @@ interface UploadState {
   completedCount: number
   failedCount: number
   totalCount: number
+  pendingLocation: LocationData | null
+  showLocationPicker: boolean
 
   // Actions
   addFiles: (files: FileWithMetadata[]) => void
@@ -55,6 +65,8 @@ interface UploadState {
   updateFileProgress: (id: string, progress: number) => void
   markFileCompleted: (id: string) => void
   markFileFailed: (id: string, error: string) => void
+  setPendingLocation: (location: LocationData | null) => void
+  setShowLocationPicker: (show: boolean) => void
   reset: () => void
 }
 
@@ -67,6 +79,8 @@ const initialState = {
   completedCount: 0,
   failedCount: 0,
   totalCount: 0,
+  pendingLocation: null,
+  showLocationPicker: false,
 }
 
 export const useUploadStore = create<UploadState>((set) => ({
@@ -237,6 +251,10 @@ export const useUploadStore = create<UploadState>((set) => ({
         isUploading: !allComplete,
       }
     }),
+
+  setPendingLocation: (location) => set({ pendingLocation: location }),
+
+  setShowLocationPicker: (show) => set({ showLocationPicker: show }),
 
   reset: () => set(initialState),
 }))

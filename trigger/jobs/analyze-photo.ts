@@ -155,6 +155,7 @@ export const analyzePhoto = task({
 
       logger.info("Stage 1: Gemini detection completed", {
         imageId,
+        model: detectionMetrics.modelUsed,
         deerPresent: detectionResult.deer_present,
         detectionCount: detectionResult.detections.length,
         qualityScore: detectionResult.image_quality_score,
@@ -302,6 +303,7 @@ export const analyzePhoto = task({
           logger.info("Buck classification completed", {
             imageId,
             detectionId,
+            model: classifyMetrics.modelUsed,
             sex: classification.sex,
             sizeClass: classification.size_class,
             estimatedPointRange: classification.estimated_point_range,
@@ -328,7 +330,7 @@ export const analyzePhoto = task({
             distinguishing_features: null,
             gemini_confidence: detection.confidence,
             deer_id: null,
-            class: "animal",
+            class: "deer",
             confidence: detection.confidence / 100,
           };
         })
@@ -374,7 +376,7 @@ export const analyzePhoto = task({
             distinguishing_features: null,
             gemini_confidence: detection.confidence,
             deer_id: null,
-            class: "animal",
+            class: "deer",
             confidence: detection.confidence / 100,
           };
         })
@@ -422,8 +424,7 @@ export const analyzePhoto = task({
             gemini_confidence: detection.confidence,
             deer_id: null,
             detection_class: detection.detection_class,
-            class: detection.detection_class === 'vehicle' ? 'vehicle' :
-                   detection.detection_class === 'person' ? 'person' : 'animal',
+            class: detection.detection_class,
             confidence: detection.confidence / 100,
           };
         })
@@ -546,8 +547,9 @@ export const analyzePhoto = task({
           // Existing fields
           analysis_notes: detectionResult.analysis_notes,
           analyzed_at: new Date().toISOString(),
-          classification: detectionResult.deer_present ? "animal" : null,
-          confidence: detectionResult.deer_present
+          classification: detectionResult.deer_present ? "deer" : 
+                         (detectionResult.hogs_present || detectionResult.cows_present || detectionResult.goats_present) ? "other" : null,
+          confidence: (detectionResult.deer_present || detectionResult.hogs_present || detectionResult.cows_present || detectionResult.goats_present)
             ? Math.max(...detectionRecords.map((d) => d.confidence))
             : null,
           retry_count: 0, // Reset retry count on success

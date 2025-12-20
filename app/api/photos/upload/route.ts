@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createBatch } from '@/lib/services/batches'
+import { createBatch, type CreateBatchLocationData } from '@/lib/services/batches'
 import { getSignedUploadUrl } from '@/lib/services/photos'
 import { findOrCreateCamera } from '@/lib/services/cameras'
 import type { Json } from '@/types/database'
@@ -33,6 +33,11 @@ interface UploadFileRequest {
 interface UploadInitiationRequest {
   files: UploadFileRequest[]
   uploadSessionId?: string
+  locationLat?: number
+  locationLng?: number
+  areaName?: string
+  directionCompass?: number
+  directionNotes?: string
 }
 
 interface UploadResponse {
@@ -110,10 +115,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create processing batch
+    // Create processing batch with location data if provided
+    const locationData: CreateBatchLocationData | undefined =
+      body.locationLat !== undefined ||
+      body.locationLng !== undefined ||
+      body.areaName !== undefined ||
+      body.directionCompass !== undefined ||
+      body.directionNotes !== undefined
+        ? {
+            ...(body.locationLat !== undefined && { locationLat: body.locationLat }),
+            ...(body.locationLng !== undefined && { locationLng: body.locationLng }),
+            ...(body.areaName !== undefined && { areaName: body.areaName }),
+            ...(body.directionCompass !== undefined && { directionCompass: body.directionCompass }),
+            ...(body.directionNotes !== undefined && { directionNotes: body.directionNotes }),
+          }
+        : undefined
+
     const { data: batch, error: batchError } = await createBatch(
       user.id,
-      body.files.length
+      body.files.length,
+      locationData
     )
 
     if (batchError !== null || batch === null) {
@@ -126,10 +147,15 @@ export async function POST(request: NextRequest) {
 
     // Link batch to upload session if provided
     if (body.uploadSessionId) {
-      await supabase
+      const { error: linkError } = await supabase
         .from('processing_batches')
         .update({ upload_session_id: body.uploadSessionId })
         .eq('id', batch.id)
+
+      if (linkError) {
+        console.error('Failed to link batch to session:', linkError)
+        // Note: batch already created, continue with warning
+      }
     }
 
     // Single camera lookup - all files in a batch are assumed from the same camera

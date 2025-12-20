@@ -169,6 +169,8 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
       deer: { label: 'Deer', className: 'bg-copper/20 text-copper-light' },
       empty: { label: 'Empty', className: 'bg-slate text-cream-dark' },
       other: { label: 'Other Animal', className: 'bg-blue-500/20 text-blue-300' },
+      person: { label: 'Person', className: 'bg-red-500/20 text-red-300' },
+      vehicle: { label: 'Vehicle', className: 'bg-blue-500/20 text-blue-300' },
     }
     const badge = badges[classification as keyof typeof badges] || badges.other
     return (

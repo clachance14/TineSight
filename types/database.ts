@@ -641,11 +641,16 @@ export type Database = {
       }
       processing_batches: {
         Row: {
+          area_name: string | null
           completed_at: string | null
           created_at: string
+          direction_compass: number | null
+          direction_notes: string | null
           error_message: string | null
           failed_images: number
           id: string
+          location_lat: number | null
+          location_lng: number | null
           processed_images: number
           status: string
           successful_images: number
@@ -655,11 +660,16 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          area_name?: string | null
           completed_at?: string | null
           created_at?: string
+          direction_compass?: number | null
+          direction_notes?: string | null
           error_message?: string | null
           failed_images?: number
           id?: string
+          location_lat?: number | null
+          location_lng?: number | null
           processed_images?: number
           status?: string
           successful_images?: number
@@ -669,11 +679,16 @@ export type Database = {
           user_id: string
         }
         Update: {
+          area_name?: string | null
           completed_at?: string | null
           created_at?: string
+          direction_compass?: number | null
+          direction_notes?: string | null
           error_message?: string | null
           failed_images?: number
           id?: string
+          location_lat?: number | null
+          location_lng?: number | null
           processed_images?: number
           status?: string
           successful_images?: number
