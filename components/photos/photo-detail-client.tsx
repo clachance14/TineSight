@@ -10,6 +10,7 @@ import { CropLightbox } from "./crop-lightbox"
 import { useObjectContainBounds } from "@/lib/hooks/use-object-contain-bounds"
 import { useDetectionHover } from "@/lib/stores/detection-hover"
 import { useDetectionEdit } from "@/lib/stores/detection-edit"
+import { useUIStore } from "@/lib/stores/ui"
 import { useDetection } from "@/lib/hooks/use-detection"
 import { BLUR_DATA_URL } from "@/lib/constants/image"
 
@@ -91,8 +92,8 @@ export function PhotoDetailClient({
     naturalHeight: naturalDimensions.height,
   })
 
-  // State for UI controls
-  const [showBoundingBoxes, setShowBoundingBoxes] = useState(true)
+  // State for UI controls - bounding box visibility persists across sessions
+  const { showBoundingBoxes, toggleBoundingBoxes } = useUIStore()
   const [isLightboxOpen, setIsLightboxOpen] = useState(false)
 
   // Handle detection click - open edit panel
@@ -132,7 +133,8 @@ export function PhotoDetailClient({
               detections={detections}
               imageWidth={imageWidth}
               imageHeight={imageHeight}
-              visible={showDetections && showBoundingBoxes}
+              visible={showDetections}
+              showAll={showBoundingBoxes}
               hoveredDetectionId={hoveredDetectionId}
               onDetectionClick={handleDetectionClick}
               onDetectionHover={setHoveredDetectionId}
@@ -143,7 +145,7 @@ export function PhotoDetailClient({
             <div className="absolute top-3 right-3 z-50 flex gap-2">
               {detections.length > 0 && (
                 <button
-                  onClick={() => setShowBoundingBoxes(!showBoundingBoxes)}
+                  onClick={toggleBoundingBoxes}
                   className="px-3 py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
                 >
                   {showBoundingBoxes ? "Hide Boxes" : "Show Boxes"}

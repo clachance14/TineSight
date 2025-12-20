@@ -113,7 +113,12 @@ function PhotosContent() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isPlaceholderData, // True when showing previous data while loading new filter results
+    isFetching, // True when any fetch is in progress (including background)
   } = usePhotosInfinite(serviceFilters)
+
+  // Show updating indicator when fetching new filter results (but not initial load)
+  const isUpdatingFilters = !isLoading && isFetching && isPlaceholderData
 
   // Flatten paginated data
   const photos = data?.pages?.flatMap(page => page.photos) ?? []
@@ -132,9 +137,17 @@ function PhotosContent() {
       {/* Header with Stats */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-cream">
-            Photos
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight text-cream">
+              Photos
+            </h1>
+            {/* Subtle indicator when updating filter results */}
+            {isUpdatingFilters && (
+              <span className="text-xs text-copper animate-pulse">
+                updating...
+              </span>
+            )}
+          </div>
           {/* Compact Stats Bar */}
           <div className="mt-1 flex items-center gap-4 text-sm">
             <span className="text-cream-dark">

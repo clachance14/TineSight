@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef } from 'react'
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
+import { useQuery, useInfiniteQuery, keepPreviousData } from '@tanstack/react-query'
 import type { PhotoFilters } from '@/lib/services/photos'
 
 /**
@@ -103,6 +103,10 @@ export function usePhotos(filters?: PhotoFilters) {
 
   return useQuery({
     queryKey: ['photos', filters],
+    // Cache optimization for filter switching
+    staleTime: 5 * 60 * 1000, // 5 minutes - data stays fresh during browsing session
+    gcTime: 30 * 60 * 1000,   // 30 minutes - keep unused cache for filter switching
+    placeholderData: keepPreviousData, // Show previous photos instantly while loading new filter results
     queryFn: async (): Promise<PhotosResponse> => {
       const params = new URLSearchParams()
 
@@ -288,6 +292,11 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
+    // Cache optimization for filter switching
+    staleTime: 5 * 60 * 1000, // 5 minutes - data stays fresh during browsing session
+    gcTime: 30 * 60 * 1000,   // 30 minutes - keep unused cache for filter switching
+    placeholderData: keepPreviousData, // Show previous photos instantly while loading new filter results
+    maxPages: 10, // Limit memory usage - older pages can be re-fetched
     refetchInterval: (query) => {
       const pages = query.state.data?.pages
       if (!pages) return false
