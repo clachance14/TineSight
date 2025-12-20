@@ -14,18 +14,19 @@ import pLimit from "p-limit";
  * Analyze Photo Job
  *
  * Processes a single image through Gemini vision model using a two-stage pipeline:
- * Stage 1 (Detection): Identify deer bounding boxes in full image
- * Stage 2 (Classification): Classify each cropped deer for sex, antlers, age
+ * Stage 1 (Detection): Identify multi-class bounding boxes in full image (deer, hogs, cows, goats, vehicles, people)
+ * Stage 2 (Classification): Classify each cropped BUCK for sex, antlers, age (does/non-deer get crops only)
  *
  * Workflow:
  * 1. Fetch image record from database to get storage_path
  * 2. Generate signed URL and download image as base64
- * 3. Stage 1: Call detectDeer() to get bounding boxes only
+ * 3. Stage 1: Call detectDeer() to get bounding boxes for all classes
  * 4. For each detection:
- *    a. Crop deer region and upload to storage
- *    b. Stage 2: Call classifyDeerCrop() for sex, antlers, age
- *    c. Insert detection record with crop_file_path + classification
- * 5. Update images table with: has_deer, deer_count, analysis_notes, analyzed_at
+ *    a. Crop region and upload to storage
+ *    b. Stage 2: Call classifyDeerCrop() ONLY for bucks (has_antlers=true)
+ *    c. Does/non-deer get default classification (no Gemini call)
+ *    d. Insert detection record with crop_file_path + classification + detection_class
+ * 5. Update images table with: has_deer, deer_count, has_hogs, hog_count, etc.
  * 6. Update batch processed_images counter
  *
  * Error Handling:
@@ -197,19 +198,32 @@ export const analyzePhoto = task({
         threshold: MIN_CONFIDENCE,
       });
 
-      // Step 6: Stage 2 - PARALLEL processing with antler filtering
+      // Step 6: Stage 2 - PARALLEL processing with multi-class splitting
       // Keep imageBuffer for cropping operations
       const imageBufferForCrop = Buffer.from(imageBuffer);
 
-      // Split detections by antler presence
-      const buckDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.has_antlers);
-      const doeDetections = filteredDetections.filter((d: DetectionOnlyBox) => !d.has_antlers);
+      // Split detections by class
+      const deerDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'deer');
+      const hogDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'hog');
+      const cowDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'cow');
+      const goatDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'goat');
+      const vehicleDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'vehicle');
+      const personDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'person');
 
-      logger.info("Stage 2: Splitting detections by antler presence", {
+      // Within deer, split by antlers (for Stage 2 classification)
+      const buckDetections = deerDetections.filter((d: DetectionOnlyBox) => d.has_antlers);
+      const doeDetections = deerDetections.filter((d: DetectionOnlyBox) => !d.has_antlers);
+
+      logger.info("Stage 2: Splitting detections by class", {
         imageId,
+        deer: deerDetections.length,
         bucks: buckDetections.length,
         does: doeDetections.length,
-        total: filteredDetections.length,
+        hogs: hogDetections.length,
+        cows: cowDetections.length,
+        goats: goatDetections.length,
+        vehicles: vehicleDetections.length,
+        people: personDetections.length,
       });
 
       // Create concurrency limiter (10 parallel Gemini calls max)
@@ -366,17 +380,67 @@ export const analyzePhoto = task({
         })
       );
 
+      // Process NON-DEER detections (hogs, cows, goats, vehicles, people) - crop only, NO Gemini classification
+      const nonDeerDetections = [...hogDetections, ...cowDetections, ...goatDetections, ...vehicleDetections, ...personDetections];
+      const nonDeerPromises = nonDeerDetections.map((detection: DetectionOnlyBox, index: number) =>
+        limit(async () => {
+          const detectionId = crypto.randomUUID();
+
+          logger.info(`Stage 2: Processing non-deer ${index + 1}/${nonDeerDetections.length}`, {
+            imageId,
+            detectionId,
+            detectionClass: detection.detection_class,
+            confidence: detection.confidence,
+          });
+
+          // Crop to memory
+          const { buffer: cropBuffer } = await cropToMemory(
+            imageBufferForCrop,
+            detection.box_2d
+          );
+
+          // Upload crop for audit trail
+          const cropPath = await uploadCropBuffer(supabase, cropBuffer, detectionId);
+
+          const coords = computeBboxCoords(detection.box_2d);
+
+          return {
+            image_id: imageId,
+            bbox_x: coords.bboxX,
+            bbox_y: coords.bboxY,
+            bbox_width: coords.bboxWidth,
+            bbox_height: coords.bboxHeight,
+            crop_file_path: cropPath,
+            head_bbox: null,
+            species: null,
+            sex: null,
+            size_class: null,
+            estimated_point_range: null,
+            antler_description: null,
+            age_class: null,
+            distinguishing_features: null,
+            gemini_confidence: detection.confidence,
+            deer_id: null,
+            detection_class: detection.detection_class,
+            class: detection.detection_class === 'vehicle' ? 'vehicle' :
+                   detection.detection_class === 'person' ? 'person' : 'animal',
+            confidence: detection.confidence / 100,
+          };
+        })
+      );
+
       // Wait for all processing to complete
-      const [buckResults, doeResults] = await Promise.all([
+      const [buckResults, doeResults, nonDeerResults] = await Promise.all([
         Promise.allSettled(buckPromises),
         Promise.allSettled(doePromises),
+        Promise.allSettled(nonDeerPromises),
       ]);
 
       // End timing Stage 2
       const stage2Duration = Date.now() - stage2Start;
 
       // Combine and filter successful results
-      const allResults = [...buckResults, ...doeResults];
+      const allResults = [...buckResults, ...doeResults, ...nonDeerResults];
       const detectionRecords = allResults
         .filter((r): r is PromiseFulfilledResult<typeof buckPromises extends Promise<infer T>[] ? T : never> =>
           r.status === 'fulfilled'
@@ -403,6 +467,7 @@ export const analyzePhoto = task({
         durationMs: stage2Duration,
         bucksProcessed: buckResults.filter(r => r.status === 'fulfilled').length,
         doesProcessed: doeResults.filter(r => r.status === 'fulfilled').length,
+        nonDeerProcessed: nonDeerResults.filter(r => r.status === 'fulfilled').length,
         totalSuccess: detectionRecords.length,
         totalFailed: failedCount,
       });
@@ -464,13 +529,25 @@ export const analyzePhoto = task({
         .from("images")
         .update({
           detection_status: "completed",
-          has_deer: hasDeer,
-          deer_count: deerCount,
+          // Deer flags
+          has_deer: detectionResult.deer_present,
+          deer_count: deerDetections.length,
+          // Multi-class presence flags
+          has_hogs: detectionResult.hogs_present,
+          has_cows: detectionResult.cows_present,
+          has_goats: detectionResult.goats_present,
+          has_people: detectionResult.people_present,
+          has_vehicles: detectionResult.vehicles_present,
+          hog_count: hogDetections.length,
+          cow_count: cowDetections.length,
+          goat_count: goatDetections.length,
+          people_count: personDetections.length,
+          vehicle_count: vehicleDetections.length,
+          // Existing fields
           analysis_notes: detectionResult.analysis_notes,
           analyzed_at: new Date().toISOString(),
-          // Legacy fields for backward compatibility
-          classification: hasDeer ? "animal" : null,
-          confidence: hasDeer
+          classification: detectionResult.deer_present ? "animal" : null,
+          confidence: detectionResult.deer_present
             ? Math.max(...detectionRecords.map((d) => d.confidence))
             : null,
           retry_count: 0, // Reset retry count on success
@@ -513,8 +590,14 @@ export const analyzePhoto = task({
         imageId,
         batchId,
         detectionCount: detectionRecords.length,
-        hasDeer,
-        deerCount,
+        deer: deerDetections.length,
+        bucks: buckDetections.length,
+        does: doeDetections.length,
+        hogs: hogDetections.length,
+        cows: cowDetections.length,
+        goats: goatDetections.length,
+        vehicles: vehicleDetections.length,
+        people: personDetections.length,
         qualityScore: detectionResult.image_quality_score,
       });
 
@@ -523,8 +606,13 @@ export const analyzePhoto = task({
         imageId,
         batchId,
         detectionCount: detectionRecords.length,
-        hasDeer,
-        deerCount,
+        hasDeer: detectionResult.deer_present,
+        deerCount: deerDetections.length,
+        hogCount: hogDetections.length,
+        cowCount: cowDetections.length,
+        goatCount: goatDetections.length,
+        vehicleCount: vehicleDetections.length,
+        peopleCount: personDetections.length,
         qualityScore: detectionResult.image_quality_score,
       };
     } catch (error) {

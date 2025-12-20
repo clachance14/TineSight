@@ -1,14 +1,23 @@
 import { z } from "zod";
 
+// Detection class types for multi-class detection
+export type DetectionClass = 'deer' | 'hog' | 'cow' | 'goat' | 'vehicle' | 'person';
+
 // Schema for detection-only result (Stage 1: localization only)
 export const detectionOnlyBoxSchema = z.object({
   box_2d: z.tuple([z.number(), z.number(), z.number(), z.number()]).describe("[ymin, xmin, ymax, xmax] normalized 0-1000"),
+  detection_class: z.enum(['deer', 'hog', 'cow', 'goat', 'vehicle', 'person']).describe("Classification of detected object"),
   confidence: z.number().min(0).max(100).describe("Confidence score 0-100"),
-  has_antlers: z.boolean().describe("True if deer has visible antlers")
+  has_antlers: z.boolean().describe("True ONLY for deer with visible antlers")
 });
 
 export const detectionOnlySchema = z.object({
   deer_present: z.boolean(),
+  hogs_present: z.boolean(),
+  cows_present: z.boolean(),
+  goats_present: z.boolean(),
+  vehicles_present: z.boolean(),
+  people_present: z.boolean(),
   detections: z.array(detectionOnlyBoxSchema),
   image_quality_score: z.number().min(0).max(100)
 });

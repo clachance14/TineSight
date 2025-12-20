@@ -331,6 +331,7 @@ export type Database = {
           crop_file_path: string | null
           deer_id: string | null
           deleted_at: string | null
+          detection_class: string | null
           distinguishing_features: string | null
           estimated_point_range: string | null
           gemini_confidence: number | null
@@ -361,6 +362,7 @@ export type Database = {
           crop_file_path?: string | null
           deer_id?: string | null
           deleted_at?: string | null
+          detection_class?: string | null
           distinguishing_features?: string | null
           estimated_point_range?: string | null
           gemini_confidence?: number | null
@@ -391,6 +393,7 @@ export type Database = {
           crop_file_path?: string | null
           deer_id?: string | null
           deleted_at?: string | null
+          detection_class?: string | null
           distinguishing_features?: string | null
           estimated_point_range?: string | null
           gemini_confidence?: number | null
@@ -470,6 +473,7 @@ export type Database = {
           captured_at: string | null
           classification: string | null
           confidence: number | null
+          cow_count: number | null
           created_at: string
           deer_count: number | null
           detection_status: string
@@ -477,13 +481,22 @@ export type Database = {
           exif_data: Json | null
           file_path: string
           file_size_bytes: number | null
+          goat_count: number | null
+          has_cows: boolean | null
           has_deer: boolean | null
+          has_goats: boolean | null
+          has_hogs: boolean | null
+          has_people: boolean | null
+          has_vehicles: boolean | null
+          hog_count: number | null
           id: string
           imported_at: string
           is_archived: boolean
+          people_count: number | null
           retry_count: number
           thumbnail_path: string | null
           user_id: string
+          vehicle_count: number | null
         }
         Insert: {
           analysis_notes?: string | null
@@ -493,6 +506,7 @@ export type Database = {
           captured_at?: string | null
           classification?: string | null
           confidence?: number | null
+          cow_count?: number | null
           created_at?: string
           deer_count?: number | null
           detection_status?: string
@@ -500,13 +514,22 @@ export type Database = {
           exif_data?: Json | null
           file_path: string
           file_size_bytes?: number | null
+          goat_count?: number | null
+          has_cows?: boolean | null
           has_deer?: boolean | null
+          has_goats?: boolean | null
+          has_hogs?: boolean | null
+          has_people?: boolean | null
+          has_vehicles?: boolean | null
+          hog_count?: number | null
           id?: string
           imported_at?: string
           is_archived?: boolean
+          people_count?: number | null
           retry_count?: number
           thumbnail_path?: string | null
           user_id: string
+          vehicle_count?: number | null
         }
         Update: {
           analysis_notes?: string | null
@@ -516,6 +539,7 @@ export type Database = {
           captured_at?: string | null
           classification?: string | null
           confidence?: number | null
+          cow_count?: number | null
           created_at?: string
           deer_count?: number | null
           detection_status?: string
@@ -523,13 +547,22 @@ export type Database = {
           exif_data?: Json | null
           file_path?: string
           file_size_bytes?: number | null
+          goat_count?: number | null
+          has_cows?: boolean | null
           has_deer?: boolean | null
+          has_goats?: boolean | null
+          has_hogs?: boolean | null
+          has_people?: boolean | null
+          has_vehicles?: boolean | null
+          hog_count?: number | null
           id?: string
           imported_at?: string
           is_archived?: boolean
+          people_count?: number | null
           retry_count?: number
           thumbnail_path?: string | null
           user_id?: string
+          vehicle_count?: number | null
         }
         Relationships: [
           {
@@ -1076,3 +1109,41 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+// ============================================================================
+// Convenience Type Exports
+// ============================================================================
+
+// Table Row Types
+export type Image = Tables<'images'>
+export type Detection = Tables<'detections'>
+export type Profile = Tables<'profiles'>
+export type Camera = Tables<'cameras'>
+export type Deer = Tables<'deer'>
+export type DeerEmbedding = Tables<'deer_embeddings'>
+export type ProcessingBatch = Tables<'processing_batches'>
+export type FilterPreset = Tables<'filter_presets'>
+export type RoiFeedback = Tables<'roi_feedback'>
+export type BatchMetric = Tables<'batch_metrics'>
+export type UploadSession = Tables<'upload_sessions'>
+
+// Table Insert Types
+export type ImageInsert = TablesInsert<'images'>
+export type DetectionInsert = TablesInsert<'detections'>
+export type ProfileInsert = TablesInsert<'profiles'>
+export type CameraInsert = TablesInsert<'cameras'>
+export type DeerInsert = TablesInsert<'deer'>
+export type DeerEmbeddingInsert = TablesInsert<'deer_embeddings'>
+export type ProcessingBatchInsert = TablesInsert<'processing_batches'>
+export type FilterPresetInsert = TablesInsert<'filter_presets'>
+export type UploadSessionInsert = TablesInsert<'upload_sessions'>
+
+// Table Update Types
+export type ImageUpdate = TablesUpdate<'images'>
+export type DetectionUpdate = TablesUpdate<'detections'>
+export type ProfileUpdate = TablesUpdate<'profiles'>
+export type CameraUpdate = TablesUpdate<'cameras'>
+export type DeerUpdate = TablesUpdate<'deer'>
+export type ProcessingBatchUpdate = TablesUpdate<'processing_batches'>
+export type FilterPresetUpdate = TablesUpdate<'filter_presets'>
+export type UploadSessionUpdate = TablesUpdate<'upload_sessions'>
