@@ -246,9 +246,12 @@ export async function getPhotos(
       if (cursorTimestamp && cursorId) {
         // Use the same field we're sorting by
         const cursorField = sortField
+        // Escape cursor values for PostgREST (wrap in double quotes to handle special chars)
+        const escapedTimestamp = `"${cursorTimestamp.replace(/"/g, '\\"')}"`
+        const escapedId = `"${cursorId.replace(/"/g, '\\"')}"`
         // Filter for photos that come after the cursor (descending order)
         query = query.or(
-          `${cursorField}.lt.${cursorTimestamp},and(${cursorField}.eq.${cursorTimestamp},id.lt.${cursorId})`
+          `${cursorField}.lt.${escapedTimestamp},and(${cursorField}.eq.${escapedTimestamp},id.lt.${escapedId})`
         )
       }
     }
@@ -341,9 +344,12 @@ export async function getPhotos(
     if (cursorTimestamp && cursorId) {
       // Use the same field we're sorting by
       const cursorField = sortField
+      // Escape cursor values for PostgREST (wrap in double quotes to handle special chars)
+      const escapedTimestamp = `"${cursorTimestamp.replace(/"/g, '\\"')}"`
+      const escapedId = `"${cursorId.replace(/"/g, '\\"')}"`
       // Filter for photos that come after the cursor (descending order)
       query = query.or(
-        `${cursorField}.lt.${cursorTimestamp},and(${cursorField}.eq.${cursorTimestamp},id.lt.${cursorId})`
+        `${cursorField}.lt.${escapedTimestamp},and(${cursorField}.eq.${escapedTimestamp},id.lt.${escapedId})`
       )
     }
   }

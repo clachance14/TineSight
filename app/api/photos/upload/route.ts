@@ -126,10 +126,15 @@ export async function POST(request: NextRequest) {
 
     // Link batch to upload session if provided
     if (body.uploadSessionId) {
-      await supabase
+      const { error: linkError } = await supabase
         .from('processing_batches')
         .update({ upload_session_id: body.uploadSessionId })
         .eq('id', batch.id)
+
+      if (linkError) {
+        console.error('Failed to link batch to session:', linkError)
+        // Note: batch already created, continue with warning
+      }
     }
 
     // Single camera lookup - all files in a batch are assumed from the same camera

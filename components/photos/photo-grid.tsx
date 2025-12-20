@@ -239,7 +239,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
     // Clear the stored ID so we don't scroll again on re-renders
     sessionStorage.removeItem('photos:scrollToId')
-  }, [photos, columns, virtualizer])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos, columns])
 
   // Handle photo click
   const handlePhotoClick = useCallback(
