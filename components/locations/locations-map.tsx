@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { APIProvider, Map, AdvancedMarker, InfoWindow, useMap, type MapMouseEvent } from '@vis.gl/react-google-maps'
 import { MapPinIcon, MapIcon, PlusIcon, XIcon, ImageIcon, PencilIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -43,6 +43,47 @@ function MapContent({
   mapType: MapTypeId
 }) {
   const map = useMap()
+  const hasFittedBoundsRef = useRef(false)
+
+  // Auto-fit map bounds to show all location pins
+  useEffect(() => {
+    // Skip if already fitted, no map, or no locations
+    if (!map || locations.length === 0 || hasFittedBoundsRef.current) return
+
+    hasFittedBoundsRef.current = true
+
+    // Single location: center with reasonable zoom
+    if (locations.length === 1) {
+      const singleLocation = locations[0]
+      if (singleLocation) {
+        map.setCenter({ lat: singleLocation.lat, lng: singleLocation.lng })
+        map.setZoom(12)
+        return
+      }
+    }
+
+    // Build bounding box from all pins
+    const bounds = new google.maps.LatLngBounds()
+    locations.forEach(location => {
+      bounds.extend({ lat: location.lat, lng: location.lng })
+    })
+
+    // All pins at same location: treat like single pin
+    if (bounds.getNorthEast().equals(bounds.getSouthWest())) {
+      map.setCenter(bounds.getCenter())
+      map.setZoom(12)
+      return
+    }
+
+    // Fit bounds with padding (50px on each side)
+    map.fitBounds(bounds, { top: 50, right: 50, bottom: 50, left: 50 })
+
+    // Cap max zoom if pins are very close together
+    setTimeout(() => {
+      const zoom = map.getZoom()
+      if (zoom && zoom > 15) map.setZoom(15)
+    }, 100)
+  }, [map, locations])
 
   const handleMapClick = useCallback(
     (event: MapMouseEvent) => {
