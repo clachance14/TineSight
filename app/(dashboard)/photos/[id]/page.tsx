@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { PhotoDetailClient } from '@/components/photos/photo-detail-client'
 import { DetectionCardWithFeedback } from '@/components/photos/detection-card-with-feedback'
+import { PhotoDeleteButton } from '@/components/photos/photo-delete-button'
 import type { Detection } from '@/types/database'
 
 interface PhotoDetailPageProps {
@@ -197,7 +198,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
           </div>
         </div>
 
-        {/* Prev/Next navigation */}
+        {/* Prev/Next navigation and actions */}
         <div className="flex items-center gap-2">
           {prevId ? (
             <Button variant="outline" size="icon" asChild>
@@ -221,6 +222,10 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
               <ChevronRight className="h-4 w-4" />
             </Button>
           )}
+          <PhotoDeleteButton
+            photoId={id}
+            returnUrl={filterQueryString ? `/photos?${filterQueryString}` : '/photos'}
+          />
         </div>
       </div>
 

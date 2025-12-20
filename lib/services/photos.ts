@@ -582,7 +582,8 @@ export async function updatePhoto(
 }
 
 /**
- * Delete a photo (soft delete by archiving or hard delete)
+ * Delete a photo permanently including storage files
+ * Database cascade will handle detection records, but we need to clean up storage
  */
 export async function deletePhoto(
   userId: string,
@@ -592,14 +593,65 @@ export async function deletePhoto(
 }> {
   const supabase = await createClient()
 
-  // Hard delete - will cascade to detections via database constraints
-  const { error } = await supabase
+  // First, get the photo to retrieve file paths
+  const { data: photo, error: fetchError } = await supabase
+    .from('images')
+    .select('file_path, thumbnail_path')
+    .eq('id', photoId)
+    .eq('user_id', userId)
+    .single()
+
+  if (fetchError !== null) {
+    return { error: fetchError }
+  }
+
+  // Get detection crop paths before deletion
+  const { data: detections } = await supabase
+    .from('detections')
+    .select('crop_file_path')
+    .eq('image_id', photoId)
+
+  // Collect all storage paths to delete
+  const storagePaths: string[] = []
+
+  if (photo.file_path) {
+    storagePaths.push(photo.file_path)
+  }
+  if (photo.thumbnail_path) {
+    storagePaths.push(photo.thumbnail_path)
+  }
+  if (detections) {
+    for (const d of detections) {
+      if (d.crop_file_path) {
+        storagePaths.push(d.crop_file_path)
+      }
+    }
+  }
+
+  // Delete database record first (cascades to detections)
+  const { error: deleteError } = await supabase
     .from('images')
     .delete()
     .eq('id', photoId)
     .eq('user_id', userId)
 
-  return { error }
+  if (deleteError !== null) {
+    return { error: deleteError }
+  }
+
+  // Delete storage files (non-blocking, log errors but don't fail)
+  if (storagePaths.length > 0) {
+    const { error: storageError } = await supabase.storage
+      .from('photos')
+      .remove(storagePaths)
+
+    if (storageError !== null) {
+      console.error('Failed to delete storage files:', storageError)
+      // Don't return error - DB deletion was successful
+    }
+  }
+
+  return { error: null }
 }
 
 /**
