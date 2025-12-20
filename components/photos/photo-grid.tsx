@@ -70,7 +70,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
     <div
       className={cn(
         'group relative aspect-square cursor-pointer overflow-hidden rounded-lg bg-slate',
-        'transition-all duration-200 hover:ring-2 hover:ring-copper'
+        'hover:ring-2 hover:ring-copper'
       )}
       onClick={() => onClick(photo.id)}
     >
@@ -81,7 +81,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
             alt="Trail camera photo"
             fill
             priority={priority}
-            className="object-cover transition-transform duration-200 group-hover:scale-105"
+            className="object-cover"
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
             {...(!priority && {
               placeholder: "blur" as const,
@@ -94,7 +94,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
             alt="Trail camera photo"
             fill
             priority={priority}
-            className="object-cover transition-transform duration-200 group-hover:scale-105"
+            className="object-cover"
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
             {...(!priority && {
               placeholder: "blur" as const,
@@ -148,7 +148,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
         )}
 
         {/* Hover overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-deep/60 via-transparent to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-deep/60 via-transparent to-transparent opacity-0 group-hover:opacity-100" />
       </div>
     </div>
   )
@@ -254,23 +254,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
-  // Re-check when photos array changes (initial load or new data)
-  useEffect(() => {
-    if (!hasNextPage || isFetchingNextPage) return
-    const scrollElement = parentRef.current
-    if (!scrollElement) return
-
-    // Small delay to let virtualized content render
-    const timeoutId = setTimeout(() => {
-      const { scrollTop, scrollHeight, clientHeight } = scrollElement
-      if (scrollHeight - scrollTop - clientHeight < 500) {
-        fetchNextPage()
-      }
-    }, 100)
-
-    return () => clearTimeout(timeoutId)
-  }, [photos.length, hasNextPage, isFetchingNextPage, fetchNextPage])
-
   // Loading skeleton
   if (isLoading) {
     return (
@@ -361,7 +344,10 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
       <div
         ref={parentRef}
         className="flex-1 min-h-0 overflow-auto"
-        style={{ contain: 'strict' }}
+        style={{
+          contain: 'layout',
+          transform: 'translateZ(0)',
+        }}
       >
         <div
           style={{
@@ -383,6 +369,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                 style={{
                   height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,
+                  zIndex: 0,
                 }}
               >
                 <div

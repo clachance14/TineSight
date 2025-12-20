@@ -151,7 +151,7 @@ function PhotosContent() {
   // Flatten paginated data
   const photos = data?.pages?.flatMap(page => page.photos) ?? []
   const total = data?.pages?.[0]?.total ?? 0
-  const unfilteredTotal = statsData?.total_photos ?? total
+  const unfilteredTotal = statsData?.total_photos ?? 0
 
   // Calculate stats from the same data that renders in the grid
   const stats = {
@@ -181,7 +181,7 @@ function PhotosContent() {
           {/* Compact Stats Bar */}
           <div className="mt-1 flex items-center gap-4 text-sm">
             <span className="text-cream-dark">
-              {stats.hasActiveFilters ? (
+              {stats.hasActiveFilters && stats.unfilteredTotal > 0 ? (
                 <>
                   <span className="font-semibold tabular-nums text-cream">{stats.filtered}</span>
                   {' of '}
@@ -190,7 +190,7 @@ function PhotosContent() {
                 </>
               ) : (
                 <>
-                  <span className="font-semibold tabular-nums text-cream">{stats.unfilteredTotal}</span>
+                  <span className="font-semibold tabular-nums text-cream">{stats.unfilteredTotal || stats.filtered}</span>
                   {' photos'}
                 </>
               )}
