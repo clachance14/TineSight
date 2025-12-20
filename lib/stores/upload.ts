@@ -118,16 +118,29 @@ export const useUploadStore = create<UploadState>((set) => ({
       const newQueue = state.uploadQueue.filter((f) => f.id !== id)
       const newTotalCount = state.totalCount - 1
 
-      // Recalculate overall progress if upload is in progress
+      // Adjust completed/failed counts if removing a completed/failed file
+      let newCompletedCount = state.completedCount
+      let newFailedCount = state.failedCount
+      if (fileToRemove.status === 'completed') {
+        newCompletedCount = state.completedCount - 1
+      } else if (fileToRemove.status === 'failed') {
+        newFailedCount = state.failedCount - 1
+      }
+
+      // Recalculate overall progress based on completion counts
       let newOverallProgress = state.overallProgress
-      if (state.isUploading && newQueue.length > 0) {
-        const totalProgress = newQueue.reduce((sum, f) => sum + f.progress, 0)
-        newOverallProgress = Math.round(totalProgress / newQueue.length)
+      if (state.isUploading && newTotalCount > 0) {
+        const completedProgress = (newCompletedCount + newFailedCount) * 100
+        const uploadingFiles = newQueue.filter((f) => f.status === 'uploading')
+        const uploadingProgress = uploadingFiles.reduce((sum, f) => sum + f.progress, 0)
+        newOverallProgress = Math.round((completedProgress + uploadingProgress) / newTotalCount)
       }
 
       return {
         uploadQueue: newQueue,
         totalCount: newTotalCount,
+        completedCount: newCompletedCount,
+        failedCount: newFailedCount,
         overallProgress: newOverallProgress,
       }
     }),
@@ -180,10 +193,12 @@ export const useUploadStore = create<UploadState>((set) => ({
         file.id === id ? { ...file, progress } : file
       )
 
-      // Calculate overall progress
-      const totalProgress = updatedQueue.reduce((sum, f) => sum + f.progress, 0)
-      const overallProgress = updatedQueue.length > 0
-        ? Math.round(totalProgress / updatedQueue.length)
+      // Calculate overall progress based on completion counts (not queue average)
+      const completedProgress = state.completedCount * 100
+      const uploadingFiles = updatedQueue.filter((f) => f.status === 'uploading')
+      const uploadingProgress = uploadingFiles.reduce((sum, f) => sum + f.progress, 0)
+      const overallProgress = state.totalCount > 0
+        ? Math.round((completedProgress + uploadingProgress) / state.totalCount)
         : 0
 
       return {
@@ -204,9 +219,13 @@ export const useUploadStore = create<UploadState>((set) => ({
       })
 
       const newCompletedCount = state.completedCount + 1
-      const totalProgress = updatedQueue.reduce((sum, f) => sum + f.progress, 0)
-      const overallProgress = updatedQueue.length > 0
-        ? Math.round(totalProgress / updatedQueue.length)
+
+      // Calculate overall progress based on completion counts (not queue average)
+      const completedProgress = newCompletedCount * 100
+      const uploadingFiles = updatedQueue.filter((f) => f.status === 'uploading')
+      const uploadingProgress = uploadingFiles.reduce((sum, f) => sum + f.progress, 0)
+      const overallProgress = state.totalCount > 0
+        ? Math.round((completedProgress + uploadingProgress) / state.totalCount)
         : 0
 
       // Check if all uploads are complete
@@ -234,9 +253,14 @@ export const useUploadStore = create<UploadState>((set) => ({
       })
 
       const newFailedCount = state.failedCount + 1
-      const totalProgress = updatedQueue.reduce((sum, f) => sum + f.progress, 0)
-      const overallProgress = updatedQueue.length > 0
-        ? Math.round(totalProgress / updatedQueue.length)
+
+      // Calculate overall progress based on completion counts (not queue average)
+      // Failed files count toward progress completion (they're done, just failed)
+      const completedProgress = (state.completedCount + newFailedCount) * 100
+      const uploadingFiles = updatedQueue.filter((f) => f.status === 'uploading')
+      const uploadingProgress = uploadingFiles.reduce((sum, f) => sum + f.progress, 0)
+      const overallProgress = state.totalCount > 0
+        ? Math.round((completedProgress + uploadingProgress) / state.totalCount)
         : 0
 
       // Check if all uploads are complete
@@ -276,9 +300,12 @@ const flushProgressUpdates = () => {
       return newProgress !== undefined ? { ...file, progress: newProgress } : file
     })
 
-    const totalProgress = updatedQueue.reduce((sum, f) => sum + f.progress, 0)
-    const overallProgress = updatedQueue.length > 0
-      ? Math.round(totalProgress / updatedQueue.length)
+    // Calculate overall progress based on completion counts (not queue average)
+    const completedProgress = (state.completedCount + state.failedCount) * 100
+    const uploadingFiles = updatedQueue.filter((f) => f.status === 'uploading')
+    const uploadingProgress = uploadingFiles.reduce((sum, f) => sum + f.progress, 0)
+    const overallProgress = state.totalCount > 0
+      ? Math.round((completedProgress + uploadingProgress) / state.totalCount)
       : 0
 
     return { uploadQueue: updatedQueue, overallProgress }

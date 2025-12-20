@@ -221,6 +221,23 @@ export async function completeBatch(
 }
 
 /**
+ * Link a batch to an upload session
+ */
+export async function linkBatchToSession(
+  batchId: string,
+  uploadSessionId: string
+): Promise<{ error: Error | null }> {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('processing_batches')
+    .update({ upload_session_id: uploadSessionId })
+    .eq('id', batchId)
+
+  return { error }
+}
+
+/**
  * Get distinct area names for a user (for autocomplete/filter dropdown)
  */
 export async function getDistinctAreaNames(

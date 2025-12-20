@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createBatch, type CreateBatchLocationData } from '@/lib/services/batches'
+import { createBatch, linkBatchToSession, type CreateBatchLocationData } from '@/lib/services/batches'
 import { getSignedUploadUrl } from '@/lib/services/photos'
 import { findOrCreateCamera } from '@/lib/services/cameras'
 import type { Json } from '@/types/database'
@@ -147,10 +147,7 @@ export async function POST(request: NextRequest) {
 
     // Link batch to upload session if provided
     if (body.uploadSessionId) {
-      const { error: linkError } = await supabase
-        .from('processing_batches')
-        .update({ upload_session_id: body.uploadSessionId })
-        .eq('id', batch.id)
+      const { error: linkError } = await linkBatchToSession(batch.id, body.uploadSessionId)
 
       if (linkError) {
         console.error('Failed to link batch to session:', linkError)

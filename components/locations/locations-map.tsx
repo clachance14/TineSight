@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { APIProvider, Map, AdvancedMarker, InfoWindow, useMap, type MapMouseEvent } from '@vis.gl/react-google-maps'
 import { MapPinIcon, MapIcon, PlusIcon, XIcon, ImageIcon, PencilIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -55,9 +55,11 @@ function MapContent({
   )
 
   // Update map type when it changes
-  if (map) {
-    map.setMapTypeId(mapType)
-  }
+  useEffect(() => {
+    if (map) {
+      map.setMapTypeId(mapType)
+    }
+  }, [map, mapType])
 
   return (
     <Map

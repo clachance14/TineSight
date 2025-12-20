@@ -4,6 +4,49 @@ import type { Image, ImageInsert, ImageUpdate, Detection, Json } from '@/types/d
 // Sort field options
 export type PhotoSortField = 'captured_at' | 'imported_at'
 
+// Result type for area filter helper
+interface AreaFilterResult {
+  batchIds: string[] | null  // null means no filter needed, [] means no matches
+  includeNullBatchId: boolean  // Whether to also include batch_id IS NULL
+}
+
+/**
+ * Helper to get batch IDs for area filtering
+ * Returns batch IDs to filter by, or indicates if no filter is needed
+ */
+async function getAreaFilterBatchIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  areaName: string
+): Promise<AreaFilterResult> {
+  if (areaName === '__no_area__') {
+    // Get batches without area_name (null)
+    const { data: noAreaBatches } = await supabase
+      .from('processing_batches')
+      .select('id')
+      .eq('user_id', userId)
+      .is('area_name', null)
+
+    const batchIds = noAreaBatches?.map(b => b.id) ?? []
+    // Include both: batches with null area AND images with null batch_id
+    return { batchIds, includeNullBatchId: true }
+  } else {
+    // Get batches with the specified area_name
+    const { data: areaBatches } = await supabase
+      .from('processing_batches')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('area_name', areaName)
+
+    if (areaBatches && areaBatches.length > 0) {
+      return { batchIds: areaBatches.map(b => b.id), includeNullBatchId: false }
+    } else {
+      // No batches found for this area - return empty to indicate no matches
+      return { batchIds: [], includeNullBatchId: false }
+    }
+  }
+}
+
 // Filter types for querying photos
 export interface PhotoFilters {
   status?: string
@@ -225,35 +268,21 @@ export async function getPhotos(
 
     // Filter by area name (via processing_batches)
     if (filters?.areaName !== undefined) {
-      if (filters.areaName === '__no_area__') {
-        // Get batches without area_name (null or empty)
-        const { data: noAreaBatches } = await supabase
-          .from('processing_batches')
-          .select('id')
-          .eq('user_id', userId)
-          .is('area_name', null)
-
-        if (noAreaBatches && noAreaBatches.length > 0) {
-          const batchIds = noAreaBatches.map(b => b.id)
-          query = query.in('batch_id', batchIds)
-        } else {
-          // Also check for images with null batch_id (no area)
-          query = query.is('batch_id', null)
-        }
-      } else {
-        // Get batches with the specified area_name
-        const { data: areaBatches } = await supabase
-          .from('processing_batches')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('area_name', filters.areaName)
-
-        if (areaBatches && areaBatches.length > 0) {
-          const batchIds = areaBatches.map(b => b.id)
-          query = query.in('batch_id', batchIds)
-        } else {
-          // No batches found for this area, return empty
+      const areaResult = await getAreaFilterBatchIds(supabase, userId, filters.areaName)
+      if (areaResult.batchIds !== null) {
+        if (areaResult.batchIds.length === 0 && !areaResult.includeNullBatchId) {
+          // No matches found
           return { data: [], error: null, count: 0 }
+        }
+        if (areaResult.includeNullBatchId) {
+          // Include both batches with null area AND images with null batch_id
+          if (areaResult.batchIds.length > 0) {
+            query = query.or(`batch_id.in.(${areaResult.batchIds.join(',')}),batch_id.is.null`)
+          } else {
+            query = query.is('batch_id', null)
+          }
+        } else {
+          query = query.in('batch_id', areaResult.batchIds)
         }
       }
     }
@@ -355,35 +384,21 @@ export async function getPhotos(
 
   // Filter by area name (via processing_batches)
   if (filters?.areaName !== undefined) {
-    if (filters.areaName === '__no_area__') {
-      // Get batches without area_name (null or empty)
-      const { data: noAreaBatches } = await supabase
-        .from('processing_batches')
-        .select('id')
-        .eq('user_id', userId)
-        .is('area_name', null)
-
-      if (noAreaBatches && noAreaBatches.length > 0) {
-        const batchIds = noAreaBatches.map(b => b.id)
-        query = query.in('batch_id', batchIds)
-      } else {
-        // Also check for images with null batch_id (no area)
-        query = query.is('batch_id', null)
-      }
-    } else {
-      // Get batches with the specified area_name
-      const { data: areaBatches } = await supabase
-        .from('processing_batches')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('area_name', filters.areaName)
-
-      if (areaBatches && areaBatches.length > 0) {
-        const batchIds = areaBatches.map(b => b.id)
-        query = query.in('batch_id', batchIds)
-      } else {
-        // No batches found for this area, return empty
+    const areaResult = await getAreaFilterBatchIds(supabase, userId, filters.areaName)
+    if (areaResult.batchIds !== null) {
+      if (areaResult.batchIds.length === 0 && !areaResult.includeNullBatchId) {
+        // No matches found
         return { data: [], error: null, count: 0 }
+      }
+      if (areaResult.includeNullBatchId) {
+        // Include both batches with null area AND images with null batch_id
+        if (areaResult.batchIds.length > 0) {
+          query = query.or(`batch_id.in.(${areaResult.batchIds.join(',')}),batch_id.is.null`)
+        } else {
+          query = query.is('batch_id', null)
+        }
+      } else {
+        query = query.in('batch_id', areaResult.batchIds)
       }
     }
   }

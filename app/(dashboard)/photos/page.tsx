@@ -10,7 +10,7 @@ import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import { useDeerCatalog } from '@/lib/hooks/use-deer'
 import { useAreas } from '@/lib/hooks/use-areas'
 import { useRealtimePhotos } from '@/lib/hooks/use-realtime-photos'
-import { createClient } from '@/lib/supabase/client'
+import { useCurrentUser } from '@/lib/hooks/use-current-user'
 import type { PhotoFilters as ServicePhotoFilters } from '@/lib/services/photos'
 
 function PhotosContent(): React.JSX.Element {
@@ -18,16 +18,7 @@ function PhotosContent(): React.JSX.Element {
   const router = useRouter()
 
   // Get current user for realtime subscription
-  const [userId, setUserId] = useState<string>('')
-
-  useEffect(() => {
-    const supabase = createClient()
-    void supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user !== null) {
-        setUserId(user.id)
-      }
-    })
-  }, [])
+  const { userId } = useCurrentUser()
 
   // Subscribe to realtime photo updates
   const { isConnected } = useRealtimePhotos({
@@ -185,10 +176,12 @@ function PhotosContent(): React.JSX.Element {
     filters.maxPoints !== undefined ||
     filters.dateFrom !== undefined ||
     filters.dateTo !== undefined ||
+    filters.datePreset !== undefined ||
     filters.cameraId !== undefined ||
     filters.deerId !== undefined ||
     filters.batchId !== undefined ||
     filters.uploadSessionId !== undefined ||
+    filters.areaName !== undefined ||
     filters.sortBy === 'captured_at' // Only count as active if non-default
 
   // Flatten paginated data

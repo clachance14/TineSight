@@ -6,15 +6,21 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Get all metrics
+// Get metrics with limit to prevent unbounded query
+const QUERY_LIMIT = 10000;
 const { data, error } = await supabase
   .from('batch_metrics')
   .select('*')
-  .order('created_at', { ascending: false });
+  .order('created_at', { ascending: false })
+  .limit(QUERY_LIMIT);
 
 if (error) {
   console.error('Error:', error.message);
   process.exit(1);
+}
+
+if (data.length === QUERY_LIMIT) {
+  console.warn('Warning: Result limit reached. Metrics may be incomplete.');
 }
 
 // Aggregate by call type

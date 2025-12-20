@@ -54,10 +54,18 @@ function omitProperties<T, K extends keyof T>(
   return result as Omit<T, K>
 }
 
+// Get user's preferred locale with fallback
+function getUserLocale(): string {
+  if (typeof navigator !== 'undefined' && navigator.language) {
+    return navigator.language
+  }
+  return 'en-US'
+}
+
 // Format upload session for dropdown display
 function formatSessionOption(session: UploadSessionForDropdown): string {
   const date = new Date(session.created_at)
-  const dateStr = date.toLocaleDateString('en-US', {
+  const dateStr = date.toLocaleDateString(getUserLocale(), {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',

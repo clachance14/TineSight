@@ -51,7 +51,6 @@ export function PhotoDeleteButton({ photoId, returnUrl = '/photos' }: PhotoDelet
       })
 
       router.push(returnUrl)
-      router.refresh()
     } catch (error) {
       toast({
         title: 'Error',

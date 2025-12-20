@@ -169,8 +169,8 @@ export default function UploadPage() {
             locationLat: pendingLocation.lat,
             locationLng: pendingLocation.lng,
             areaName: pendingLocation.areaName,
-            directionCompass: pendingLocation.directionCompass,
-            directionNotes: pendingLocation.directionNotes,
+            ...(pendingLocation.directionCompass !== undefined && { directionCompass: pendingLocation.directionCompass }),
+            ...(pendingLocation.directionNotes !== undefined && { directionNotes: pendingLocation.directionNotes }),
           }),
           files: chunk.map((f) => ({
             id: f.id,
