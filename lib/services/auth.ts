@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/client'
-import { type ProfileInsert } from '@/types/database'
 
 export async function signUp(email: string, password: string, fullName?: string): Promise<{
   data: { user: { id: string; email?: string } | null } | null
@@ -7,7 +6,7 @@ export async function signUp(email: string, password: string, fullName?: string)
 }> {
   const supabase = createClient()
 
-  // Sign up the user
+  // Sign up the user - profile is automatically created by handle_new_user() trigger
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -20,24 +19,6 @@ export async function signUp(email: string, password: string, fullName?: string)
 
   if (error !== null) {
     return { data: null, error }
-  }
-
-  // Create profile after successful signup
-  if (data.user !== null) {
-    const profileData: ProfileInsert = {
-      id: data.user.id,
-      email: data.user.email ?? email,
-      full_name: fullName ?? null,
-    }
-
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .insert(profileData as never)
-
-    if (profileError !== null) {
-      // Log but don't fail - profile might already exist or will be created on confirm
-      console.error('Profile creation error:', profileError)
-    }
   }
 
   return { data, error: null }
