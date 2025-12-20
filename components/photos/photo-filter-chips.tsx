@@ -227,7 +227,6 @@ export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsP
       qualityStatus: 'all',
       sex: 'all',
       sizeClass: 'all',
-      uploadSessionId: undefined,
     })
   }
 

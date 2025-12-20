@@ -22,6 +22,7 @@ export interface PhotoFilters {
   dateFrom?: string  // ISO date string
   dateTo?: string  // ISO date string
   deerId?: string  // Filter by named deer
+  areaName?: string  // Filter by area name, or '__no_area__' for photos without area
   sortBy?: PhotoSortField  // Sort by capture time or upload time (default: imported_at)
   limit?: number
   offset?: number
@@ -222,6 +223,41 @@ export async function getPhotos(
       }
     }
 
+    // Filter by area name (via processing_batches)
+    if (filters?.areaName !== undefined) {
+      if (filters.areaName === '__no_area__') {
+        // Get batches without area_name (null or empty)
+        const { data: noAreaBatches } = await supabase
+          .from('processing_batches')
+          .select('id')
+          .eq('user_id', userId)
+          .is('area_name', null)
+
+        if (noAreaBatches && noAreaBatches.length > 0) {
+          const batchIds = noAreaBatches.map(b => b.id)
+          query = query.in('batch_id', batchIds)
+        } else {
+          // Also check for images with null batch_id (no area)
+          query = query.is('batch_id', null)
+        }
+      } else {
+        // Get batches with the specified area_name
+        const { data: areaBatches } = await supabase
+          .from('processing_batches')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('area_name', filters.areaName)
+
+        if (areaBatches && areaBatches.length > 0) {
+          const batchIds = areaBatches.map(b => b.id)
+          query = query.in('batch_id', batchIds)
+        } else {
+          // No batches found for this area, return empty
+          return { data: [], error: null, count: 0 }
+        }
+      }
+    }
+
     if (filters?.cameraId !== undefined) {
       query = query.eq('camera_id', filters.cameraId)
     }
@@ -314,6 +350,41 @@ export async function getPhotos(
     } else {
       // No batches found for this session, return empty
       return { data: [], error: null, count: 0 }
+    }
+  }
+
+  // Filter by area name (via processing_batches)
+  if (filters?.areaName !== undefined) {
+    if (filters.areaName === '__no_area__') {
+      // Get batches without area_name (null or empty)
+      const { data: noAreaBatches } = await supabase
+        .from('processing_batches')
+        .select('id')
+        .eq('user_id', userId)
+        .is('area_name', null)
+
+      if (noAreaBatches && noAreaBatches.length > 0) {
+        const batchIds = noAreaBatches.map(b => b.id)
+        query = query.in('batch_id', batchIds)
+      } else {
+        // Also check for images with null batch_id (no area)
+        query = query.is('batch_id', null)
+      }
+    } else {
+      // Get batches with the specified area_name
+      const { data: areaBatches } = await supabase
+        .from('processing_batches')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('area_name', filters.areaName)
+
+      if (areaBatches && areaBatches.length > 0) {
+        const batchIds = areaBatches.map(b => b.id)
+        query = query.in('batch_id', batchIds)
+      } else {
+        // No batches found for this area, return empty
+        return { data: [], error: null, count: 0 }
+      }
     }
   }
 

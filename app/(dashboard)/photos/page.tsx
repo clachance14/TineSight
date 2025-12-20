@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState, useEffect } from 'react'
+import React, { Suspense, useState, useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { PhotoGrid } from '@/components/photos/photo-grid'
@@ -8,11 +8,32 @@ import { PhotoFilters, type PhotoFilters as PhotoFiltersType } from '@/component
 import { PhotoFilterDrawer } from '@/components/photos/photo-filter-drawer'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import { useDeerCatalog } from '@/lib/hooks/use-deer'
+import { useAreas } from '@/lib/hooks/use-areas'
+import { useRealtimePhotos } from '@/lib/hooks/use-realtime-photos'
+import { createClient } from '@/lib/supabase/client'
 import type { PhotoFilters as ServicePhotoFilters } from '@/lib/services/photos'
 
-function PhotosContent() {
+function PhotosContent(): React.JSX.Element {
   const searchParams = useSearchParams()
   const router = useRouter()
+
+  // Get current user for realtime subscription
+  const [userId, setUserId] = useState<string>('')
+
+  useEffect(() => {
+    const supabase = createClient()
+    void supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user !== null) {
+        setUserId(user.id)
+      }
+    })
+  }, [])
+
+  // Subscribe to realtime photo updates
+  const { isConnected } = useRealtimePhotos({
+    userId,
+    enabled: userId.length > 0
+  })
 
   // Initialize filters from URL params
   const getInitialFilters = (): PhotoFiltersType => {
@@ -32,6 +53,7 @@ function PhotosContent() {
     const deerIdParam = searchParams.get('deerId')
     const batchIdParam = searchParams.get('batchId')
     const uploadSessionIdParam = searchParams.get('uploadSessionId')
+    const areaNameParam = searchParams.get('areaName')
     const sortByParam = searchParams.get('sortBy') as PhotoFiltersType['sortBy'] | null
 
     return {
@@ -51,6 +73,7 @@ function PhotosContent() {
       ...(deerIdParam ? { deerId: deerIdParam } : {}),
       ...(batchIdParam ? { batchId: batchIdParam } : {}),
       ...(uploadSessionIdParam ? { uploadSessionId: uploadSessionIdParam } : {}),
+      ...(areaNameParam ? { areaName: areaNameParam } : {}),
       ...(sortByParam ? { sortBy: sortByParam } : {}),
     }
   }
@@ -64,6 +87,10 @@ function PhotosContent() {
   // Fetch deer catalog for filter dropdown
   const { data: deerData } = useDeerCatalog()
   const deerList = deerData?.deer ?? []
+
+  // Fetch areas for filter dropdown
+  const { data: areasData } = useAreas()
+  const areaList = areasData?.areas ?? []
 
   // Build filter query string from current filters
   const buildFilterQueryString = (currentFilters: PhotoFiltersType): string => {
@@ -85,6 +112,7 @@ function PhotosContent() {
     if (currentFilters.deerId) params.set('deerId', currentFilters.deerId)
     if (currentFilters.batchId) params.set('batchId', currentFilters.batchId)
     if (currentFilters.uploadSessionId) params.set('uploadSessionId', currentFilters.uploadSessionId)
+    if (currentFilters.areaName) params.set('areaName', currentFilters.areaName)
     if (currentFilters.sortBy && currentFilters.sortBy !== 'imported_at') params.set('sortBy', currentFilters.sortBy)
 
     return params.toString()
@@ -114,6 +142,7 @@ function PhotosContent() {
     ...(filters.cameraId !== undefined ? { cameraId: filters.cameraId } : {}),
     ...(filters.deerId !== undefined ? { deerId: filters.deerId } : {}),
     ...(filters.uploadSessionId !== undefined ? { uploadSessionId: filters.uploadSessionId } : {}),
+    ...(filters.areaName !== undefined ? { areaName: filters.areaName } : {}),
     ...(filters.sortBy !== undefined ? { sortBy: filters.sortBy } : {}),
     limit: 50,
   }
@@ -127,7 +156,7 @@ function PhotosContent() {
     isFetchingNextPage,
     isPlaceholderData, // True when showing previous data while loading new filter results
     isFetching, // True when any fetch is in progress (including background)
-  } = usePhotosInfinite(serviceFilters)
+  } = usePhotosInfinite(serviceFilters, { realtimeActive: isConnected })
 
   // Show updating indicator when fetching new filter results (but not initial load)
   const isUpdatingFilters = !isLoading && isFetching && isPlaceholderData
@@ -229,6 +258,7 @@ function PhotosContent() {
         onFiltersChange={setFilters}
         onOpenDrawer={() => setDrawerOpen(true)}
         deerList={deerList}
+        areaList={areaList}
       />
 
       {/* Filter Drawer */}

@@ -588,6 +588,53 @@ export type Database = {
           },
         ]
       }
+      locations: {
+        Row: {
+          created_at: string
+          direction_compass: number | null
+          direction_notes: string | null
+          id: string
+          lat: number
+          lng: number
+          name: string
+          notes: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          direction_compass?: number | null
+          direction_notes?: string | null
+          id?: string
+          lat: number
+          lng: number
+          name: string
+          notes?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          direction_compass?: number | null
+          direction_notes?: string | null
+          id?: string
+          lat?: number
+          lng?: number
+          name?: string
+          notes?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "locations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       match_candidates: {
         Row: {
           candidate_deer_id: string
@@ -649,6 +696,7 @@ export type Database = {
           error_message: string | null
           failed_images: number
           id: string
+          location_id: string | null
           location_lat: number | null
           location_lng: number | null
           processed_images: number
@@ -668,6 +716,7 @@ export type Database = {
           error_message?: string | null
           failed_images?: number
           id?: string
+          location_id?: string | null
           location_lat?: number | null
           location_lng?: number | null
           processed_images?: number
@@ -687,6 +736,7 @@ export type Database = {
           error_message?: string | null
           failed_images?: number
           id?: string
+          location_id?: string | null
           location_lat?: number | null
           location_lng?: number | null
           processed_images?: number
@@ -698,6 +748,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "processing_batches_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "processing_batches_upload_session_id_fkey"
             columns: ["upload_session_id"]
@@ -1141,6 +1198,7 @@ export type FilterPreset = Tables<'filter_presets'>
 export type RoiFeedback = Tables<'roi_feedback'>
 export type BatchMetric = Tables<'batch_metrics'>
 export type UploadSession = Tables<'upload_sessions'>
+export type Location = Tables<'locations'>
 
 // Table Insert Types
 export type ImageInsert = TablesInsert<'images'>
@@ -1152,6 +1210,7 @@ export type DeerEmbeddingInsert = TablesInsert<'deer_embeddings'>
 export type ProcessingBatchInsert = TablesInsert<'processing_batches'>
 export type FilterPresetInsert = TablesInsert<'filter_presets'>
 export type UploadSessionInsert = TablesInsert<'upload_sessions'>
+export type LocationInsert = TablesInsert<'locations'>
 
 // Table Update Types
 export type ImageUpdate = TablesUpdate<'images'>
@@ -1162,3 +1221,4 @@ export type DeerUpdate = TablesUpdate<'deer'>
 export type ProcessingBatchUpdate = TablesUpdate<'processing_batches'>
 export type FilterPresetUpdate = TablesUpdate<'filter_presets'>
 export type UploadSessionUpdate = TablesUpdate<'upload_sessions'>
+export type LocationUpdate = TablesUpdate<'locations'>

@@ -67,13 +67,13 @@
 - [X] T016 [US1] Implement pin placement on map click in `components/photos/location-picker-modal.tsx`
 - [X] T017 [US1] Implement area name input with autocomplete from existing areas and validation (require both pin placement AND area name before enabling Confirm button) in `components/photos/location-picker-modal.tsx`
 - [X] T018 [US1] Implement coordinate display when pin is placed in `components/photos/location-picker-modal.tsx`
-- [ ] T019 [US1] Add onFilesReady prop to PhotoUploader interface in `components/photos/photo-uploader.tsx`
-- [ ] T020 [US1] Call onFilesReady callback after file processing in `components/photos/photo-uploader.tsx`
-- [ ] T021 [US1] Import LocationPickerModal in `app/(dashboard)/upload/page.tsx`
-- [ ] T022 [US1] Add handleFilesReady callback to trigger location picker in `app/(dashboard)/upload/page.tsx`
-- [ ] T023 [US1] Add handleLocationConfirm callback to store location in `app/(dashboard)/upload/page.tsx`
-- [ ] T024 [US1] Integrate LocationPickerModal component in `app/(dashboard)/upload/page.tsx`
-- [ ] T025 [US1] Update handleStartUpload to include pendingLocation in API request in `app/(dashboard)/upload/page.tsx`
+- [X] T019 [US1] Add onFilesReady prop to PhotoUploader interface in `components/photos/photo-uploader.tsx`
+- [X] T020 [US1] Call onFilesReady callback after file processing in `components/photos/photo-uploader.tsx`
+- [X] T021 [US1] Import LocationPickerModal in `app/(dashboard)/upload/page.tsx`
+- [X] T022 [US1] Add handleFilesReady callback to trigger location picker in `app/(dashboard)/upload/page.tsx`
+- [X] T023 [US1] Add handleLocationConfirm callback to store location in `app/(dashboard)/upload/page.tsx`
+- [X] T024 [US1] Integrate LocationPickerModal component in `app/(dashboard)/upload/page.tsx`
+- [X] T025 [US1] Update handleStartUpload to include pendingLocation in API request in `app/(dashboard)/upload/page.tsx`
 
 **Checkpoint**: User Story 1 complete - can upload photos with location data
 
@@ -87,11 +87,11 @@
 
 ### Implementation for User Story 2
 
-- [ ] T026 [US2] Implement Skip button in location picker modal in `components/photos/location-picker-modal.tsx`
-- [ ] T027 [US2] Implement handleSkip callback in location picker in `components/photos/location-picker-modal.tsx`
-- [ ] T028 [US2] Handle modal close on outside click (same as skip) in `components/photos/location-picker-modal.tsx`
-- [ ] T029 [US2] Add handleLocationSkip callback in `app/(dashboard)/upload/page.tsx`
-- [ ] T030 [US2] Ensure upload proceeds when pendingLocation is null in `app/(dashboard)/upload/page.tsx`
+- [X] T026 [US2] Implement Skip button in location picker modal in `components/photos/location-picker-modal.tsx`
+- [X] T027 [US2] Implement handleSkip callback in location picker in `components/photos/location-picker-modal.tsx`
+- [X] T028 [US2] Handle modal close on outside click (same as skip) in `components/photos/location-picker-modal.tsx`
+- [X] T029 [US2] Add handleLocationSkip callback in `app/(dashboard)/upload/page.tsx`
+- [X] T030 [US2] Ensure upload proceeds when pendingLocation is null in `app/(dashboard)/upload/page.tsx`
 
 **Checkpoint**: User Stories 1 AND 2 complete - can upload with or without location
 
@@ -108,16 +108,16 @@
 - [X] T031 [P] [US3] Add getDistinctAreaNames function to `lib/services/batches.ts`
 - [X] T032 [P] [US3] Create areas API endpoint in `app/api/photos/areas/route.ts`
 - [X] T033 [P] [US3] Create useAreas hook in `lib/hooks/use-areas.ts`
-- [ ] T034 [US3] Add areaName to PhotoFilters interface in `lib/services/photos.ts`
-- [ ] T035 [US3] Implement area filter logic in getPhotos function in `lib/services/photos.ts`
-- [ ] T036 [US3] Handle "__no_area__" special filter value in `lib/services/photos.ts`
-- [ ] T037 [US3] Add areaName to PhotoFilters interface in `components/photos/photo-filters.tsx`
-- [ ] T038 [US3] Update hasActiveFilters check to include areaName in `components/photos/photo-filters.tsx`
-- [ ] T039 [US3] Add areaList prop to PhotoFiltersProps in `components/photos/photo-filters.tsx`
-- [ ] T040 [US3] Add Area dropdown with All/No Area/named areas options in `components/photos/photo-filters.tsx` (render only when areaList is non-empty per FR-013)
-- [ ] T041 [US3] Import useAreas hook in `app/(dashboard)/photos/page.tsx`
-- [ ] T042 [US3] Pass areaList to PhotoFilters component in `app/(dashboard)/photos/page.tsx`
-- [ ] T043 [US3] Invalidate areas query on successful upload with location in `app/(dashboard)/upload/page.tsx`
+- [X] T034 [US3] Add areaName to PhotoFilters interface in `lib/services/photos.ts`
+- [X] T035 [US3] Implement area filter logic in getPhotos function in `lib/services/photos.ts`
+- [X] T036 [US3] Handle "__no_area__" special filter value in `lib/services/photos.ts`
+- [X] T037 [US3] Add areaName to PhotoFilters interface in `components/photos/photo-filters.tsx`
+- [X] T038 [US3] Update hasActiveFilters check to include areaName in `components/photos/photo-filters.tsx`
+- [X] T039 [US3] Add areaList prop to PhotoFiltersProps in `components/photos/photo-filters.tsx`
+- [X] T040 [US3] Add Area dropdown with All/No Area/named areas options in `components/photos/photo-filters.tsx` (render only when areaList is non-empty per FR-013)
+- [X] T041 [US3] Import useAreas hook in `app/(dashboard)/photos/page.tsx`
+- [X] T042 [US3] Pass areaList to PhotoFilters component in `app/(dashboard)/photos/page.tsx`
+- [X] T043 [US3] Invalidate areas query on successful upload with location in `app/(dashboard)/upload/page.tsx`
 
 **Checkpoint**: User Stories 1, 2, AND 3 complete - can upload and filter by area
 
@@ -149,9 +149,9 @@
 
 ### Implementation for User Story 5
 
-- [ ] T049 [US5] Add directionNotes state to location picker in `components/photos/location-picker-modal.tsx`
-- [ ] T050 [US5] Add Textarea for direction notes in `components/photos/location-picker-modal.tsx`
-- [ ] T051 [US5] Include directionNotes in onConfirm callback in `components/photos/location-picker-modal.tsx`
+- [X] T049 [US5] Add directionNotes state to location picker in `components/photos/location-picker-modal.tsx`
+- [X] T050 [US5] Add Textarea for direction notes in `components/photos/location-picker-modal.tsx`
+- [X] T051 [US5] Include directionNotes in onConfirm callback in `components/photos/location-picker-modal.tsx`
 
 **Checkpoint**: All user stories (1-5) complete
 
@@ -170,8 +170,8 @@
 ### Polish
 
 - [ ] T055 Run quickstart.md manual validation checklist
-- [ ] T056 Verify type-check passes with `npm run type-check`
-- [ ] T057 Verify lint passes with `npm run lint`
+- [X] T056 Verify type-check passes with `npm run type-check`
+- [X] T057 Verify lint passes with `npm run lint`
 
 ---
 

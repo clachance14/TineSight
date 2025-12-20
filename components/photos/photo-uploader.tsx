@@ -21,10 +21,11 @@ const MAX_THUMBNAIL_SIZE = 300
 
 interface PhotoUploaderProps {
   onStartUpload?: () => void
+  onFilesReady?: () => void
   className?: string
 }
 
-export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) {
+export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoUploaderProps) {
   const { uploadQueue, addFiles, clearQueue, isUploading } = useUploadStore()
   const [rejectionWarning, setRejectionWarning] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -180,9 +181,14 @@ export function PhotoUploader({ onStartUpload, className }: PhotoUploaderProps) 
         addFiles(processedFiles)
         setIsProcessing(false)
         setProcessingProgress({ current: 0, total: 0 })
+
+        // Notify parent that files are ready (for location picker flow)
+        if (onFilesReady) {
+          onFilesReady()
+        }
       }
     },
-    [addFiles, generateThumbnail]
+    [addFiles, generateThumbnail, onFilesReady]
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

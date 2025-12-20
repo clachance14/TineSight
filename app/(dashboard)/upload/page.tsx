@@ -5,7 +5,9 @@ import Link from 'next/link'
 import { useQueryClient } from '@tanstack/react-query'
 import { PhotoUploader } from '@/components/photos/photo-uploader'
 import { UploadProgressPanel } from '@/components/photos/upload-progress-panel'
+import { LocationPickerModal, type LocationData } from '@/components/photos/location-picker-modal'
 import { useUploadStore, batchedUpdateProgress } from '@/lib/stores/upload'
+import { useAreas } from '@/lib/hooks/use-areas'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Image } from 'lucide-react'
@@ -30,7 +32,39 @@ export default function UploadPage() {
     startUpload,
     markFileCompleted,
     markFileFailed,
+    pendingLocation,
+    showLocationPicker,
+    setPendingLocation,
+    setShowLocationPicker,
   } = useUploadStore()
+
+  // Fetch existing areas for autocomplete in location picker
+  const { data: areasData } = useAreas()
+  const existingAreas = areasData?.areas ?? []
+
+  // Handle files ready - show location picker
+  const handleFilesReady = useCallback(() => {
+    setShowLocationPicker(true)
+  }, [setShowLocationPicker])
+
+  // Handle location confirmed - convert modal LocationData to store LocationData
+  const handleLocationConfirm = useCallback((location: LocationData) => {
+    // Map modal LocationData to store LocationData (handling optional properties)
+    setPendingLocation({
+      lat: location.lat,
+      lng: location.lng,
+      areaName: location.areaName,
+      ...(location.directionCompass !== undefined && { directionCompass: location.directionCompass }),
+      ...(location.directionNotes !== undefined && { directionNotes: location.directionNotes }),
+    })
+    setShowLocationPicker(false)
+  }, [setPendingLocation, setShowLocationPicker])
+
+  // Handle location skipped
+  const handleLocationSkip = useCallback(() => {
+    setPendingLocation(null)
+    setShowLocationPicker(false)
+  }, [setPendingLocation, setShowLocationPicker])
 
   const handleStartUpload = useCallback(async () => {
     const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
@@ -63,6 +97,14 @@ export default function UploadPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             uploadSessionId: sessionId,
+            // Include location data if set
+            ...(pendingLocation && {
+              locationLat: pendingLocation.lat,
+              locationLng: pendingLocation.lng,
+              areaName: pendingLocation.areaName,
+              directionCompass: pendingLocation.directionCompass,
+              directionNotes: pendingLocation.directionNotes,
+            }),
             files: chunk.map((f) => ({
               id: f.id,
               filename: f.filename,
@@ -180,8 +222,14 @@ export default function UploadPage() {
     // Step 5: Refresh photo list after all chunks
     await queryClient.invalidateQueries({ queryKey: ['photos'] })
     await queryClient.invalidateQueries({ queryKey: ['upload-sessions'] })
+    // Invalidate areas query if location was set (new area may have been added)
+    if (pendingLocation) {
+      await queryClient.invalidateQueries({ queryKey: ['areas'] })
+      // Clear the pending location after successful upload
+      setPendingLocation(null)
+    }
     setIsPreparing(false)
-  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient])
+  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient, pendingLocation, setPendingLocation])
 
   return (
     <div className="space-y-6">
@@ -206,12 +254,23 @@ export default function UploadPage() {
       {/* Upload Section */}
       <Card>
         <CardContent className="pt-6">
-          <PhotoUploader onStartUpload={handleStartUpload} />
+          <PhotoUploader
+            onStartUpload={handleStartUpload}
+            onFilesReady={handleFilesReady}
+          />
         </CardContent>
       </Card>
 
       {/* Progress Panel */}
       <UploadProgressPanel />
+
+      {/* Location Picker Modal */}
+      <LocationPickerModal
+        isOpen={showLocationPicker}
+        onConfirm={handleLocationConfirm}
+        onSkip={handleLocationSkip}
+        existingAreas={existingAreas}
+      />
     </div>
   )
 }

@@ -16,6 +16,12 @@ const BACKOFF_CONFIG = {
 }
 
 /**
+ * Realtime fallback poll interval (1 minute)
+ * Used when realtime is active but as a fallback safety mechanism
+ */
+const REALTIME_ACTIVE_POLL_INTERVAL = 60000
+
+/**
  * Calculate next poll interval with exponential backoff
  */
 function calculateBackoff(pollCount: number): number {
@@ -217,7 +223,10 @@ export function usePhotos(filters?: PhotoFilters) {
  * Hook to fetch photos with infinite scroll pagination
  * Uses cursor-based pagination with exponential backoff for polling
  */
-export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
+export function usePhotosInfinite(
+  filters?: Omit<PhotoFilters, 'offset'>,
+  options?: { realtimeActive?: boolean }
+) {
   // Track poll count and previous processing IDs for backoff
   const pollCountRef = useRef(0)
   const prevProcessingIdsRef = useRef<string>('')
@@ -336,6 +345,11 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
       } else {
         // No change, increment backoff
         pollCountRef.current += 1
+      }
+
+      // If realtime is active, use slow fallback polling instead of backoff
+      if (options?.realtimeActive === true) {
+        return REALTIME_ACTIVE_POLL_INTERVAL
       }
 
       return calculateBackoff(pollCountRef.current)

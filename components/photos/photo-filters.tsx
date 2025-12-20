@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { X, Link2, SlidersHorizontal, ArrowUpDown, Package } from "lucide-react"
+import { X, Link2, SlidersHorizontal, ArrowUpDown, Package, MapPin } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PhotoFilterChips } from "./photo-filter-chips"
 import { useUploadSessions, type UploadSessionForDropdown } from "@/lib/hooks/use-upload-sessions"
@@ -25,6 +25,7 @@ export interface PhotoFilters {
   cameraId?: string
   sizeClass?: 'trophy' | 'standard' | 'basket' | 'spike' | 'unknown' | 'all'
   deerId?: string
+  areaName?: string  // Filter by area, '__no_area__' for unassigned
   sortBy?: PhotoSortField
 }
 
@@ -38,6 +39,7 @@ interface PhotoFiltersProps {
   onFiltersChange: (filters: PhotoFilters) => void
   onOpenDrawer: () => void
   deerList?: DeerOption[]
+  areaList?: string[]
 }
 
 // Helper to remove properties from filters object
@@ -64,7 +66,7 @@ function formatSessionOption(session: UploadSessionForDropdown): string {
   return `${dateStr} (${session.total_images} photos)`
 }
 
-export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList = [] }: PhotoFiltersProps) {
+export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList = [], areaList = [] }: PhotoFiltersProps) {
   // Fetch upload sessions for dropdown
   const { data: sessionsData } = useUploadSessions()
   const sessions = sessionsData?.sessions ?? []
@@ -99,6 +101,7 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     filters.datePreset ||
     filters.cameraId ||
     filters.deerId ||
+    filters.areaName !== undefined ||
     filters.sortBy === 'captured_at' // Only count as active if non-default
 
   // Count drawer-only filters (those not available as quick filters)
@@ -185,7 +188,6 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
       qualityStatus: 'all',
       sex: 'all',
       sizeClass: 'all',
-      uploadSessionId: undefined,
     })
   }
 
@@ -207,6 +209,7 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     if (filters.batchId) params.set('batchId', filters.batchId)  // Keep for backward compatibility
     if (filters.uploadSessionId) params.set('uploadSessionId', filters.uploadSessionId)
     if (filters.deerId) params.set('deerId', filters.deerId)
+    if (filters.areaName) params.set('areaName', filters.areaName)
     if (filters.sortBy && filters.sortBy !== 'imported_at') params.set('sortBy', filters.sortBy)
 
     const url = `${window.location.origin}/photos${params.toString() ? `?${params.toString()}` : ''}`
@@ -382,6 +385,37 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
               {sessions.map((session) => (
                 <SelectItem key={session.id} value={session.id}>
                   {formatSessionOption(session)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {/* Area Filter Dropdown - only show when areas exist (FR-013) */}
+        {areaList.length > 0 && (
+          <Select
+            value={filters.areaName ?? "all"}
+            onValueChange={(value) => {
+              if (value === "all") {
+                onFiltersChange(omitProperties(filters, 'areaName'))
+              } else {
+                onFiltersChange({ ...filters, areaName: value })
+              }
+            }}
+          >
+            <SelectTrigger size="sm" className={cn(
+              "h-8 text-xs min-w-[120px]",
+              filters.areaName && "bg-copper text-white border-copper"
+            )}>
+              <MapPin className="size-3 mr-1" />
+              <SelectValue placeholder="Area" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Areas</SelectItem>
+              <SelectItem value="__no_area__">No Area</SelectItem>
+              {areaList.map((area) => (
+                <SelectItem key={area} value={area}>
+                  {area}
                 </SelectItem>
               ))}
             </SelectContent>
