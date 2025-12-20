@@ -2,17 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Upload, Image, Crosshair, Camera, Settings } from 'lucide-react'
+import { Upload, Image, Crosshair, Camera, Settings } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { useUIStore } from '@/lib/stores/ui'
 import { cn } from '@/lib/utils'
 
 const navigationItems = [
-  {
-    name: 'Dashboard',
-    href: '/dashboard',
-    icon: LayoutDashboard,
-  },
   {
     name: 'Upload',
     href: '/upload',
