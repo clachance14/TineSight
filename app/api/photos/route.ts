@@ -51,6 +51,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const cameraIdParam = searchParams.get('cameraId')
     const deerIdParam = searchParams.get('deerId')
     const uploadSessionId = searchParams.get('uploadSessionId') ?? undefined
+    const areaNameParam = searchParams.get('areaName')
 
     // Validate and parse limit (default 50, max 100)
     let limit = 50
@@ -231,6 +232,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       cameraId?: string
       deerId?: string
       uploadSessionId?: string
+      areaName?: string
       sortBy?: PhotoSortField
       cursor?: string
       limit: number
@@ -298,6 +300,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
 
     if (uploadSessionId !== undefined) {
       filters.uploadSessionId = uploadSessionId
+    }
+
+    if (areaNameParam !== null && areaNameParam.trim() !== '') {
+      filters.areaName = areaNameParam
     }
 
     if (sortBy !== undefined) {

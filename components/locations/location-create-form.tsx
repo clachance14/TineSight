@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { useCreateLocation } from '@/lib/hooks/use-locations'
+import { ColorPicker } from './color-picker'
+import { DEFAULT_LOCATION_COLOR } from '@/lib/constants/location-colors'
 import { Loader2Icon } from 'lucide-react'
 
 const COMPASS_DIRECTIONS = [
@@ -36,6 +38,7 @@ export function LocationCreateForm({
   const [selectedDirection, setSelectedDirection] = useState<number | undefined>(undefined)
   const [directionNotes, setDirectionNotes] = useState('')
   const [notes, setNotes] = useState('')
+  const [color, setColor] = useState(DEFAULT_LOCATION_COLOR)
   const [error, setError] = useState<string | null>(null)
 
   const createLocation = useCreateLocation()
@@ -63,6 +66,9 @@ export function LocationCreateForm({
       }
       if (notes.trim()) {
         data.notes = notes.trim()
+      }
+      if (color) {
+        data.color = color
       }
       await createLocation.mutateAsync(data)
       onSuccess()
@@ -93,6 +99,16 @@ export function LocationCreateForm({
         {/* Coordinates (read-only) */}
         <div className="text-xs text-cream-dark">
           Coordinates: {lat.toFixed(6)}, {lng.toFixed(6)}
+        </div>
+
+        {/* Pin Color */}
+        <div className="space-y-2">
+          <Label className="text-cream">Pin Color</Label>
+          <ColorPicker
+            value={color}
+            onChange={setColor}
+            disabled={createLocation.isPending}
+          />
         </div>
 
         {/* Compass Direction */}

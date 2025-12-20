@@ -165,6 +165,9 @@ export function usePhotos(filters?: PhotoFilters) {
       if (filters?.deerId !== undefined) {
         params.append('deerId', filters.deerId)
       }
+      if (filters?.areaName !== undefined) {
+        params.append('areaName', filters.areaName)
+      }
       if (filters?.sortBy !== undefined) {
         params.append('sortBy', filters.sortBy)
       }
@@ -284,6 +287,9 @@ export function usePhotosInfinite(
       }
       if (filters?.deerId !== undefined) {
         params.append('deerId', filters.deerId)
+      }
+      if (filters?.areaName !== undefined) {
+        params.append('areaName', filters.areaName)
       }
       if (filters?.sortBy !== undefined) {
         params.append('sortBy', filters.sortBy)

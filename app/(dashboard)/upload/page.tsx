@@ -7,7 +7,7 @@ import { PhotoUploader } from '@/components/photos/photo-uploader'
 import { UploadProgressPanel } from '@/components/photos/upload-progress-panel'
 import { LocationPickerModal, type LocationData } from '@/components/photos/location-picker-modal'
 import { useUploadStore, batchedUpdateProgress } from '@/lib/stores/upload'
-import { useAreas } from '@/lib/hooks/use-areas'
+import { useLocations } from '@/lib/hooks/use-locations'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Image } from 'lucide-react'
@@ -38,9 +38,9 @@ export default function UploadPage() {
     setShowLocationPicker,
   } = useUploadStore()
 
-  // Fetch existing areas for autocomplete in location picker
-  const { data: areasData } = useAreas()
-  const existingAreas = areasData?.areas ?? []
+  // Fetch existing locations for dropdown in location picker
+  const { data: locationsData } = useLocations()
+  const existingLocations = locationsData?.locations ?? []
 
   // Handle files ready - show location picker
   const handleFilesReady = useCallback(() => {
@@ -269,7 +269,7 @@ export default function UploadPage() {
         isOpen={showLocationPicker}
         onConfirm={handleLocationConfirm}
         onSkip={handleLocationSkip}
-        existingAreas={existingAreas}
+        existingLocations={existingLocations}
       />
     </div>
   )

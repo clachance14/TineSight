@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import type { LocationWithPhotoCount, CreateLocationData } from '@/lib/services/locations'
+import type { LocationWithPhotoCount, CreateLocationData, Location } from '@/lib/services/locations'
 
 interface LocationsResponse {
   locations: LocationWithPhotoCount[]
@@ -76,6 +76,56 @@ export function useDeleteLocation() {
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to delete location' }))
         throw new Error(error.error || 'Failed to delete location')
+      }
+
+      return res.json()
+    },
+    onSuccess: () => {
+      // Invalidate locations query to refetch
+      void queryClient.invalidateQueries({ queryKey: ['locations'] })
+      // Also invalidate areas
+      void queryClient.invalidateQueries({ queryKey: ['areas'] })
+    },
+  })
+}
+
+export interface UpdateLocationData {
+  name?: string
+  lat?: number
+  lng?: number
+  directionCompass?: number | null
+  directionNotes?: string | null
+  notes?: string | null
+  color?: string | null
+}
+
+interface UpdateLocationResponse {
+  location: Location
+}
+
+/**
+ * Hook to update a location
+ */
+export function useUpdateLocation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      locationId,
+      data,
+    }: {
+      locationId: string
+      data: UpdateLocationData
+    }): Promise<UpdateLocationResponse> => {
+      const res = await fetch(`/api/locations/${locationId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: 'Failed to update location' }))
+        throw new Error(error.error || 'Failed to update location')
       }
 
       return res.json()

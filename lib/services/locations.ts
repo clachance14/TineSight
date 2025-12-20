@@ -16,6 +16,7 @@ export interface CreateLocationData {
   directionCompass?: number
   directionNotes?: string
   notes?: string
+  color?: string
 }
 
 /**
@@ -128,6 +129,7 @@ export async function createLocation(
       direction_compass: locationData.directionCompass ?? null,
       direction_notes: locationData.directionNotes ?? null,
       notes: locationData.notes ?? null,
+      color: locationData.color ?? null,
     })
     .select()
     .single()
@@ -158,6 +160,7 @@ export async function updateLocation(
   if (updates.directionCompass !== undefined) updateData['direction_compass'] = updates.directionCompass
   if (updates.directionNotes !== undefined) updateData['direction_notes'] = updates.directionNotes
   if (updates.notes !== undefined) updateData['notes'] = updates.notes
+  if (updates.color !== undefined) updateData['color'] = updates.color
 
   const { data, error } = await supabase
     .from('locations')

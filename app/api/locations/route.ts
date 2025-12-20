@@ -19,6 +19,7 @@ interface CreateLocationRequest {
   directionCompass?: number
   directionNotes?: string
   notes?: string
+  color?: string
 }
 
 /**
@@ -97,6 +98,7 @@ export async function POST(
       ...(body.directionCompass !== undefined && { directionCompass: body.directionCompass }),
       ...(body.directionNotes !== undefined && { directionNotes: body.directionNotes }),
       ...(body.notes !== undefined && { notes: body.notes }),
+      ...(body.color !== undefined && { color: body.color }),
     }
 
     const { data: location, error } = await createLocation(user.id, locationData)

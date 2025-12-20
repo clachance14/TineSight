@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { APIProvider, Map, AdvancedMarker, InfoWindow, useMap } from '@vis.gl/react-google-maps'
-import { MapPinIcon, MapIcon, PlusIcon, XIcon, ImageIcon } from 'lucide-react'
+import { APIProvider, Map, AdvancedMarker, InfoWindow, useMap, type MapMouseEvent } from '@vis.gl/react-google-maps'
+import { MapPinIcon, MapIcon, PlusIcon, XIcon, ImageIcon, PencilIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useLocations } from '@/lib/hooks/use-locations'
 import { LocationCreateForm } from './location-create-form'
+import { LocationEditDialog } from './location-edit-dialog'
+import { DEFAULT_LOCATION_COLOR } from '@/lib/constants/location-colors'
 import type { LocationWithPhotoCount } from '@/lib/services/locations'
 import Link from 'next/link'
 
@@ -28,6 +30,7 @@ function MapContent({
   setNewPinLocation,
   selectedLocation,
   setSelectedLocation,
+  onEditLocation,
   mapType,
 }: {
   locations: LocationWithPhotoCount[]
@@ -36,14 +39,15 @@ function MapContent({
   setNewPinLocation: (loc: { lat: number; lng: number } | null) => void
   selectedLocation: LocationWithPhotoCount | null
   setSelectedLocation: (loc: LocationWithPhotoCount | null) => void
+  onEditLocation: (location: LocationWithPhotoCount) => void
   mapType: MapTypeId
 }) {
   const map = useMap()
 
   const handleMapClick = useCallback(
-    (event: google.maps.MapMouseEvent) => {
-      if (isCreating && event.latLng) {
-        setNewPinLocation({ lat: event.latLng.lat(), lng: event.latLng.lng() })
+    (event: MapMouseEvent) => {
+      if (isCreating && event.detail.latLng) {
+        setNewPinLocation({ lat: event.detail.latLng.lat, lng: event.detail.latLng.lng })
         setSelectedLocation(null)
       }
     },
@@ -83,7 +87,13 @@ function MapContent({
           }}
         >
           <div className="cursor-pointer group">
-            <MapPinIcon className="w-8 h-8 text-copper fill-copper drop-shadow-lg transition-transform group-hover:scale-110" />
+            <MapPinIcon
+              className="w-8 h-8 drop-shadow-lg transition-transform group-hover:scale-110"
+              style={{
+                color: location.color || DEFAULT_LOCATION_COLOR,
+                fill: location.color || DEFAULT_LOCATION_COLOR,
+              }}
+            />
           </div>
         </AdvancedMarker>
       ))}
@@ -130,17 +140,31 @@ function MapContent({
               </p>
             )}
 
-            <Link
-              href={`/photos?areaName=${encodeURIComponent(selectedLocation.name)}`}
-              className="block w-full"
-            >
+            <div className="flex gap-2">
               <Button
                 size="sm"
-                className="w-full bg-copper hover:bg-copper-light text-slate-deep"
+                variant="outline"
+                onClick={() => {
+                  onEditLocation(selectedLocation)
+                  setSelectedLocation(null)
+                }}
+                className="flex-1 bg-slate hover:bg-slate-600 border-slate-600 text-cream"
               >
-                View Photos
+                <PencilIcon className="w-4 h-4 mr-1" />
+                Edit
               </Button>
-            </Link>
+              <Link
+                href={`/photos?areaName=${encodeURIComponent(selectedLocation.name)}`}
+                className="flex-1"
+              >
+                <Button
+                  size="sm"
+                  className="w-full bg-copper hover:bg-copper-light text-slate-deep"
+                >
+                  View Photos
+                </Button>
+              </Link>
+            </div>
           </div>
         </InfoWindow>
       )}
@@ -156,6 +180,7 @@ export function LocationsMap() {
   const [isCreating, setIsCreating] = useState(false)
   const [newPinLocation, setNewPinLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [selectedLocation, setSelectedLocation] = useState<LocationWithPhotoCount | null>(null)
+  const [editingLocation, setEditingLocation] = useState<LocationWithPhotoCount | null>(null)
 
   const toggleMapType = () => {
     setMapType((prev) => (prev === 'hybrid' ? 'terrain' : 'hybrid'))
@@ -194,6 +219,7 @@ export function LocationsMap() {
           setNewPinLocation={setNewPinLocation}
           selectedLocation={selectedLocation}
           setSelectedLocation={setSelectedLocation}
+          onEditLocation={setEditingLocation}
           mapType={mapType}
         />
       </APIProvider>
@@ -254,6 +280,15 @@ export function LocationsMap() {
         <div className="absolute inset-0 bg-slate-deep/50 flex items-center justify-center">
           <div className="text-cream">Loading locations...</div>
         </div>
+      )}
+
+      {/* Edit Dialog */}
+      {editingLocation && (
+        <LocationEditDialog
+          location={editingLocation}
+          open={!!editingLocation}
+          onOpenChange={(open) => !open && setEditingLocation(null)}
+        />
       )}
     </div>
   )

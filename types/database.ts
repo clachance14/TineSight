@@ -590,6 +590,7 @@ export type Database = {
       }
       locations: {
         Row: {
+          color: string | null
           created_at: string
           direction_compass: number | null
           direction_notes: string | null
@@ -602,6 +603,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          color?: string | null
           created_at?: string
           direction_compass?: number | null
           direction_notes?: string | null
@@ -614,6 +616,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          color?: string | null
           created_at?: string
           direction_compass?: number | null
           direction_notes?: string | null
@@ -1182,43 +1185,55 @@ export const Constants = {
   },
 } as const
 
-// ============================================================================
-// Convenience Type Exports
-// ============================================================================
-
-// Table Row Types
-export type Image = Tables<'images'>
-export type Detection = Tables<'detections'>
-export type Profile = Tables<'profiles'>
+// Convenience type aliases for common tables
 export type Camera = Tables<'cameras'>
-export type Deer = Tables<'deer'>
-export type DeerEmbedding = Tables<'deer_embeddings'>
-export type ProcessingBatch = Tables<'processing_batches'>
-export type FilterPreset = Tables<'filter_presets'>
-export type RoiFeedback = Tables<'roi_feedback'>
-export type BatchMetric = Tables<'batch_metrics'>
-export type UploadSession = Tables<'upload_sessions'>
-export type Location = Tables<'locations'>
-
-// Table Insert Types
-export type ImageInsert = TablesInsert<'images'>
-export type DetectionInsert = TablesInsert<'detections'>
-export type ProfileInsert = TablesInsert<'profiles'>
 export type CameraInsert = TablesInsert<'cameras'>
-export type DeerInsert = TablesInsert<'deer'>
-export type DeerEmbeddingInsert = TablesInsert<'deer_embeddings'>
-export type ProcessingBatchInsert = TablesInsert<'processing_batches'>
-export type FilterPresetInsert = TablesInsert<'filter_presets'>
-export type UploadSessionInsert = TablesInsert<'upload_sessions'>
-export type LocationInsert = TablesInsert<'locations'>
-
-// Table Update Types
-export type ImageUpdate = TablesUpdate<'images'>
-export type DetectionUpdate = TablesUpdate<'detections'>
-export type ProfileUpdate = TablesUpdate<'profiles'>
 export type CameraUpdate = TablesUpdate<'cameras'>
+
+export type Deer = Tables<'deer'>
+export type DeerInsert = TablesInsert<'deer'>
 export type DeerUpdate = TablesUpdate<'deer'>
-export type ProcessingBatchUpdate = TablesUpdate<'processing_batches'>
-export type FilterPresetUpdate = TablesUpdate<'filter_presets'>
-export type UploadSessionUpdate = TablesUpdate<'upload_sessions'>
+
+export type DeerEmbedding = Tables<'deer_embeddings'>
+export type DeerEmbeddingInsert = TablesInsert<'deer_embeddings'>
+
+export type Detection = Tables<'detections'>
+export type DetectionInsert = TablesInsert<'detections'>
+export type DetectionUpdate = TablesUpdate<'detections'>
+
+export type DetectionRoi = Tables<'detection_rois'>
+export type DetectionRoiInsert = TablesInsert<'detection_rois'>
+
+export type Image = Tables<'images'>
+export type ImageInsert = TablesInsert<'images'>
+export type ImageUpdate = TablesUpdate<'images'>
+
+export type Location = Tables<'locations'>
+export type LocationInsert = TablesInsert<'locations'>
 export type LocationUpdate = TablesUpdate<'locations'>
+
+export type MatchCandidate = Tables<'match_candidates'>
+export type MatchCandidateInsert = TablesInsert<'match_candidates'>
+
+export type ProcessingBatch = Tables<'processing_batches'>
+export type ProcessingBatchInsert = TablesInsert<'processing_batches'>
+export type ProcessingBatchUpdate = TablesUpdate<'processing_batches'>
+
+export type Profile = Tables<'profiles'>
+export type ProfileInsert = TablesInsert<'profiles'>
+export type ProfileUpdate = TablesUpdate<'profiles'>
+
+export type RoiFeedback = Tables<'roi_feedback'>
+export type RoiFeedbackInsert = TablesInsert<'roi_feedback'>
+
+export type TeamMember = Tables<'team_members'>
+export type TeamMemberInsert = TablesInsert<'team_members'>
+
+export type UploadSession = Tables<'upload_sessions'>
+export type UploadSessionInsert = TablesInsert<'upload_sessions'>
+
+export type FilterPreset = Tables<'filter_presets'>
+export type FilterPresetInsert = TablesInsert<'filter_presets'>
+
+export type BatchMetrics = Tables<'batch_metrics'>
+export type BatchMetricsInsert = TablesInsert<'batch_metrics'>
