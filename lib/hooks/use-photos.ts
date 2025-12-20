@@ -123,6 +123,9 @@ export function usePhotos(filters?: PhotoFilters) {
       if (filters?.batchId !== undefined) {
         params.append('batchId', filters.batchId)
       }
+      if (filters?.uploadSessionId !== undefined) {
+        params.append('uploadSessionId', filters.uploadSessionId)
+      }
       if (filters?.cameraId !== undefined) {
         params.append('cameraId', filters.cameraId)
       }
@@ -155,6 +158,9 @@ export function usePhotos(filters?: PhotoFilters) {
       }
       if (filters?.deerId !== undefined) {
         params.append('deerId', filters.deerId)
+      }
+      if (filters?.sortBy !== undefined) {
+        params.append('sortBy', filters.sortBy)
       }
       if (filters?.limit !== undefined) {
         params.append('limit', String(filters.limit))
@@ -234,6 +240,9 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
       if (filters?.batchId !== undefined) {
         params.append('batchId', filters.batchId)
       }
+      if (filters?.uploadSessionId !== undefined) {
+        params.append('uploadSessionId', filters.uploadSessionId)
+      }
       if (filters?.cameraId !== undefined) {
         params.append('cameraId', filters.cameraId)
       }
@@ -266,6 +275,9 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
       }
       if (filters?.deerId !== undefined) {
         params.append('deerId', filters.deerId)
+      }
+      if (filters?.sortBy !== undefined) {
+        params.append('sortBy', filters.sortBy)
       }
       if (filters?.limit !== undefined) {
         params.append('limit', String(filters.limit))

@@ -617,6 +617,7 @@ export type Database = {
           status: string
           successful_images: number
           total_images: number
+          upload_session_id: string | null
           uploaded_images: number
           user_id: string
         }
@@ -630,6 +631,7 @@ export type Database = {
           status?: string
           successful_images?: number
           total_images?: number
+          upload_session_id?: string | null
           uploaded_images?: number
           user_id: string
         }
@@ -643,10 +645,18 @@ export type Database = {
           status?: string
           successful_images?: number
           total_images?: number
+          upload_session_id?: string | null
           uploaded_images?: number
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "processing_batches_upload_session_id_fkey"
+            columns: ["upload_session_id"]
+            isOneToOne: false
+            referencedRelation: "upload_sessions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "processing_batches_user_id_fkey"
             columns: ["user_id"]
@@ -773,6 +783,44 @@ export type Database = {
           },
         ]
       }
+      upload_sessions: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          id: string
+          status: string
+          total_batches: number
+          total_images: number
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          total_batches?: number
+          total_images?: number
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          total_batches?: number
+          total_images?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "upload_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -783,6 +831,37 @@ export type Database = {
         Returns: number
       }
       count_reference_rois: { Args: { query_user_id: string }; Returns: number }
+      filter_detections_with_images: {
+        Args: {
+          p_batch_id?: string
+          p_has_deer_id?: boolean
+          p_limit?: number
+          p_offset?: number
+          p_point_range?: string
+          p_quality_status?: string
+          p_sex?: string
+          p_size_class?: string
+          p_user_id: string
+        }
+        Returns: {
+          age_class: string
+          captured_at: string
+          crop_file_path: string
+          deer_id: string
+          deer_name: string
+          detection_id: string
+          estimated_point_range: string
+          file_path: string
+          gemini_confidence: number
+          image_id: string
+          quality_score: number
+          quality_status: string
+          sex: string
+          size_class: string
+          species: string
+          thumbnail_path: string
+        }[]
+      }
       find_similar_deer: {
         Args: {
           match_count?: number
@@ -797,6 +876,56 @@ export type Database = {
           image_id: string
           image_path: string
           similarity: number
+        }[]
+      }
+      get_deer_catalog: {
+        Args: {
+          p_cursor_created_at?: string
+          p_cursor_id?: string
+          p_limit?: number
+          p_search?: string
+          p_user_id: string
+        }
+        Returns: {
+          created_at: string
+          first_seen: string
+          id: string
+          last_seen: string
+          name: string
+          notes: string
+          reference_detection_id: string
+          representative_file_path: string
+          representative_image_id: string
+          sighting_count: number
+          status: string
+        }[]
+      }
+      get_deer_sightings: {
+        Args: {
+          p_deer_id: string
+          p_limit?: number
+          p_offset?: number
+          p_user_id: string
+        }
+        Returns: {
+          captured_at: string
+          detection_id: string
+          estimated_point_range: string
+          file_path: string
+          image_id: string
+          size_class: string
+          total_count: number
+        }[]
+      }
+      get_pending_matches_summary: {
+        Args: { p_user_id: string }
+        Returns: {
+          captured_at: string
+          detection_id: string
+          file_path: string
+          image_id: string
+          pending_count: number
+          thumbnail_path: string
         }[]
       }
       has_account_access: {
@@ -947,18 +1076,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
-// Convenience type aliases for common tables
-export type Camera = Tables<'cameras'>
-export type Deer = Tables<'deer'>
-export type DeerEmbedding = Tables<'deer_embeddings'>
-export type Detection = Tables<'detections'>
-export type DetectionInsert = TablesInsert<'detections'>
-export type Image = Tables<'images'>
-export type ImageInsert = TablesInsert<'images'>
-export type ImageUpdate = TablesUpdate<'images'>
-export type ProcessingBatch = Tables<'processing_batches'>
-export type ProcessingBatchInsert = TablesInsert<'processing_batches'>
-export type ProcessingBatchUpdate = TablesUpdate<'processing_batches'>
-export type Profile = Tables<'profiles'>
-export type ProfileInsert = TablesInsert<'profiles'>

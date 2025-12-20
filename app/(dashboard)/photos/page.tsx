@@ -30,6 +30,9 @@ function PhotosContent() {
     const sizeClass = searchParams.get('sizeClass') as PhotoFiltersType['sizeClass'] | null
     const cameraIdParam = searchParams.get('cameraId')
     const deerIdParam = searchParams.get('deerId')
+    const batchIdParam = searchParams.get('batchId')
+    const uploadSessionIdParam = searchParams.get('uploadSessionId')
+    const sortByParam = searchParams.get('sortBy') as PhotoFiltersType['sortBy'] | null
 
     return {
       status: status || 'all',
@@ -46,6 +49,9 @@ function PhotosContent() {
       ...(datePreset ? { datePreset } : {}),
       ...(cameraIdParam ? { cameraId: cameraIdParam } : {}),
       ...(deerIdParam ? { deerId: deerIdParam } : {}),
+      ...(batchIdParam ? { batchId: batchIdParam } : {}),
+      ...(uploadSessionIdParam ? { uploadSessionId: uploadSessionIdParam } : {}),
+      ...(sortByParam ? { sortBy: sortByParam } : {}),
     }
   }
 
@@ -77,6 +83,9 @@ function PhotosContent() {
     if (currentFilters.sizeClass && currentFilters.sizeClass !== 'all') params.set('sizeClass', currentFilters.sizeClass)
     if (currentFilters.cameraId) params.set('cameraId', currentFilters.cameraId)
     if (currentFilters.deerId) params.set('deerId', currentFilters.deerId)
+    if (currentFilters.batchId) params.set('batchId', currentFilters.batchId)
+    if (currentFilters.uploadSessionId) params.set('uploadSessionId', currentFilters.uploadSessionId)
+    if (currentFilters.sortBy && currentFilters.sortBy !== 'imported_at') params.set('sortBy', currentFilters.sortBy)
 
     return params.toString()
   }
@@ -104,6 +113,8 @@ function PhotosContent() {
     ...(filters.sizeClass !== 'all' && filters.sizeClass !== undefined ? { sizeClass: filters.sizeClass } : {}),
     ...(filters.cameraId !== undefined ? { cameraId: filters.cameraId } : {}),
     ...(filters.deerId !== undefined ? { deerId: filters.deerId } : {}),
+    ...(filters.uploadSessionId !== undefined ? { uploadSessionId: filters.uploadSessionId } : {}),
+    ...(filters.sortBy !== undefined ? { sortBy: filters.sortBy } : {}),
     limit: 50,
   }
 
@@ -146,7 +157,10 @@ function PhotosContent() {
     filters.dateFrom !== undefined ||
     filters.dateTo !== undefined ||
     filters.cameraId !== undefined ||
-    filters.deerId !== undefined
+    filters.deerId !== undefined ||
+    filters.batchId !== undefined ||
+    filters.uploadSessionId !== undefined ||
+    filters.sortBy === 'captured_at' // Only count as active if non-default
 
   // Flatten paginated data
   const photos = data?.pages?.flatMap(page => page.photos) ?? []

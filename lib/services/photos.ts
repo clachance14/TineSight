@@ -1,12 +1,16 @@
 import { createClient } from '@/lib/supabase/server'
 import type { Image, ImageInsert, ImageUpdate, Detection, Json } from '@/types/database'
 
+// Sort field options
+export type PhotoSortField = 'captured_at' | 'imported_at'
+
 // Filter types for querying photos
 export interface PhotoFilters {
   status?: string
   hasDeer?: boolean
   hasDetections?: boolean  // true = with detections, false = without, undefined = all
   batchId?: string
+  uploadSessionId?: string
   cameraId?: string
   isArchived?: boolean
   qualityStatus?: string
@@ -18,9 +22,10 @@ export interface PhotoFilters {
   dateFrom?: string  // ISO date string
   dateTo?: string  // ISO date string
   deerId?: string  // Filter by named deer
+  sortBy?: PhotoSortField  // Sort by capture time or upload time (default: imported_at)
   limit?: number
   offset?: number
-  cursor?: string  // Photo ID to start after (for cursor-based pagination)
+  cursor?: string  // Format: timestamp::id for cursor-based pagination
 }
 
 // Data types for creating and updating photos
@@ -174,9 +179,18 @@ export async function getPhotos(
       query = query.in('id', filteredImageIds)
     }
 
-    query = query
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
+    // Apply dynamic ordering based on sortBy (default: imported_at)
+    const sortField = filters?.sortBy ?? 'imported_at'
+    if (sortField === 'captured_at') {
+      // Photos without captured_at (null) should appear last
+      query = query
+        .order('captured_at', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: false })
+    } else {
+      query = query
+        .order('imported_at', { ascending: false })
+        .order('id', { ascending: false })
+    }
 
     // Apply other filters
     if (filters?.status !== undefined) {
@@ -188,6 +202,23 @@ export async function getPhotos(
         query = query.not('classification', 'is', null)
       } else {
         query = query.is('classification', null)
+      }
+    }
+
+    // Filter by upload session (batches linked to session)
+    if (filters?.uploadSessionId !== undefined) {
+      // Subquery to get batch IDs that belong to this session
+      const { data: sessionBatches } = await supabase
+        .from('processing_batches')
+        .select('id')
+        .eq('upload_session_id', filters.uploadSessionId)
+
+      if (sessionBatches && sessionBatches.length > 0) {
+        const batchIds = sessionBatches.map(b => b.id)
+        query = query.in('batch_id', batchIds)
+      } else {
+        // No batches found for this session, return empty
+        return { data: [], error: null, count: 0 }
       }
     }
 
@@ -208,14 +239,16 @@ export async function getPhotos(
       query = query.lte('captured_at', filters.dateTo)
     }
 
-    // Apply cursor-based pagination
-    // Cursor format: created_at::id (no DB lookup needed)
+    // Apply cursor-based pagination using the active sort field
+    // Cursor format: timestamp::id (no DB lookup needed)
     if (filters?.cursor !== undefined) {
-      const [cursorCreatedAt, cursorId] = filters.cursor.split('::')
-      if (cursorCreatedAt && cursorId) {
-        // Filter for photos that come after the cursor
+      const [cursorTimestamp, cursorId] = filters.cursor.split('::')
+      if (cursorTimestamp && cursorId) {
+        // Use the same field we're sorting by
+        const cursorField = sortField
+        // Filter for photos that come after the cursor (descending order)
         query = query.or(
-          `created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`
+          `${cursorField}.lt.${cursorTimestamp},and(${cursorField}.eq.${cursorTimestamp},id.lt.${cursorId})`
         )
       }
     }
@@ -235,12 +268,24 @@ export async function getPhotos(
   }
 
   // Standard query without detection-based filters
+  // Apply dynamic ordering based on sortBy (default: imported_at)
+  const sortField = filters?.sortBy ?? 'imported_at'
+
   let query = supabase
     .from('images')
     .select('*', { count: 'exact' })
     .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
+
+  if (sortField === 'captured_at') {
+    // Photos without captured_at (null) should appear last
+    query = query
+      .order('captured_at', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: false })
+  } else {
+    query = query
+      .order('imported_at', { ascending: false })
+      .order('id', { ascending: false })
+  }
 
   // Apply filters
   if (filters?.status !== undefined) {
@@ -252,6 +297,23 @@ export async function getPhotos(
       query = query.not('classification', 'is', null)
     } else {
       query = query.is('classification', null)
+    }
+  }
+
+  // Filter by upload session (batches linked to session)
+  if (filters?.uploadSessionId !== undefined) {
+    // Subquery to get batch IDs that belong to this session
+    const { data: sessionBatches } = await supabase
+      .from('processing_batches')
+      .select('id')
+      .eq('upload_session_id', filters.uploadSessionId)
+
+    if (sessionBatches && sessionBatches.length > 0) {
+      const batchIds = sessionBatches.map(b => b.id)
+      query = query.in('batch_id', batchIds)
+    } else {
+      // No batches found for this session, return empty
+      return { data: [], error: null, count: 0 }
     }
   }
 
@@ -272,14 +334,16 @@ export async function getPhotos(
     query = query.lte('captured_at', filters.dateTo)
   }
 
-  // Apply cursor-based pagination
-  // Cursor format: created_at::id (no DB lookup needed)
+  // Apply cursor-based pagination using the active sort field
+  // Cursor format: timestamp::id (no DB lookup needed)
   if (filters?.cursor !== undefined) {
-    const [cursorCreatedAt, cursorId] = filters.cursor.split('::')
-    if (cursorCreatedAt && cursorId) {
-      // Filter for photos that come after the cursor
+    const [cursorTimestamp, cursorId] = filters.cursor.split('::')
+    if (cursorTimestamp && cursorId) {
+      // Use the same field we're sorting by
+      const cursorField = sortField
+      // Filter for photos that come after the cursor (descending order)
       query = query.or(
-        `created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`
+        `${cursorField}.lt.${cursorTimestamp},and(${cursorField}.eq.${cursorTimestamp},id.lt.${cursorId})`
       )
     }
   }

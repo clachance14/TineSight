@@ -32,6 +32,7 @@ interface UploadFileRequest {
 
 interface UploadInitiationRequest {
   files: UploadFileRequest[]
+  uploadSessionId?: string
 }
 
 interface UploadResponse {
@@ -121,6 +122,14 @@ export async function POST(request: NextRequest) {
         { error: 'Failed to create upload batch' },
         { status: 500 }
       )
+    }
+
+    // Link batch to upload session if provided
+    if (body.uploadSessionId) {
+      await supabase
+        .from('processing_batches')
+        .update({ upload_session_id: body.uploadSessionId })
+        .eq('id', batch.id)
     }
 
     // Single camera lookup - all files in a batch are assumed from the same camera

@@ -154,6 +154,33 @@ export async function incrementBatchCounters(
 }
 
 /**
+ * Get batches with photo counts for dropdown display
+ * Returns batches ordered by creation date (newest first)
+ */
+export async function getBatchesWithCounts(
+  userId: string,
+  limit: number = 50
+): Promise<{
+  data: Array<{
+    id: string
+    created_at: string
+    total_images: number
+  }> | null
+  error: Error | null
+}> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('processing_batches')
+    .select('id, created_at, total_images')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  return { data, error }
+}
+
+/**
  * Mark batch as completed
  */
 export async function completeBatch(

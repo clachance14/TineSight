@@ -36,6 +36,22 @@ export default function UploadPage() {
     const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
     if (pendingFiles.length === 0) return
 
+    // Create upload session before chunking
+    let sessionId: string | null = null
+    try {
+      const sessionRes = await fetch('/api/upload-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (sessionRes.ok) {
+        const sessionData = await sessionRes.json()
+        sessionId = sessionData.sessionId
+      }
+    } catch (err) {
+      console.error('Failed to create upload session:', err)
+      // Continue without session - backward compatible
+    }
+
     const chunks = chunkArray(pendingFiles, CHUNK_SIZE)
 
     // Process a single chunk
@@ -46,6 +62,7 @@ export default function UploadPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            uploadSessionId: sessionId,
             files: chunk.map((f) => ({
               id: f.id,
               filename: f.filename,
@@ -162,6 +179,7 @@ export default function UploadPage() {
 
     // Step 5: Refresh photo list after all chunks
     await queryClient.invalidateQueries({ queryKey: ['photos'] })
+    await queryClient.invalidateQueries({ queryKey: ['upload-sessions'] })
     setIsPreparing(false)
   }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient])
 

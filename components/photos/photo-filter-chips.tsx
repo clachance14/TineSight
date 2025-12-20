@@ -4,6 +4,8 @@ import { X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useCameras } from "@/lib/hooks/use-cameras"
+import { useBatches } from "@/lib/hooks/use-batches"
+import { useUploadSessions } from "@/lib/hooks/use-upload-sessions"
 import type { PhotoFilters } from "./photo-filters"
 
 interface PhotoFilterChipsProps {
@@ -25,6 +27,8 @@ function omitProperties<T, K extends keyof T>(
 
 export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsProps) {
   const { data: camerasData } = useCameras()
+  const { data: batchesData } = useBatches()
+  const { data: sessionsData } = useUploadSessions()
   const chips: { label: string; onRemove: () => void }[] = []
 
   // Status filter
@@ -175,10 +179,42 @@ export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsP
 
   // Batch filter
   if (filters.batchId) {
+    const batch = batchesData?.batches.find(b => b.id === filters.batchId)
+    let batchLabel = `Batch: ${filters.batchId.slice(0, 8)}...`
+    if (batch) {
+      const date = new Date(batch.created_at)
+      batchLabel = `Batch: ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    }
     chips.push({
-      label: `Batch: ${filters.batchId.slice(0, 8)}...`,
+      label: batchLabel,
       onRemove: () => {
         onFiltersChange(omitProperties(filters, 'batchId') as PhotoFilters)
+      }
+    })
+  }
+
+  // Upload Session filter
+  if (filters.uploadSessionId) {
+    const session = sessionsData?.sessions.find(s => s.id === filters.uploadSessionId)
+    let sessionLabel = `Upload: ${filters.uploadSessionId.slice(0, 8)}...`
+    if (session) {
+      const date = new Date(session.created_at)
+      sessionLabel = `Upload: ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (${session.total_images})`
+    }
+    chips.push({
+      label: sessionLabel,
+      onRemove: () => {
+        onFiltersChange(omitProperties(filters, 'uploadSessionId') as PhotoFilters)
+      }
+    })
+  }
+
+  // Sort filter (only show chip if non-default)
+  if (filters.sortBy === 'captured_at') {
+    chips.push({
+      label: 'Sort: Captured',
+      onRemove: () => {
+        onFiltersChange(omitProperties(filters, 'sortBy') as PhotoFilters)
       }
     })
   }
@@ -191,6 +227,7 @@ export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsP
       qualityStatus: 'all',
       sex: 'all',
       sizeClass: 'all',
+      uploadSessionId: undefined,
     })
   }
 

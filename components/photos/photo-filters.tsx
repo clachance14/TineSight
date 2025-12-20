@@ -2,15 +2,18 @@
 
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { X, Link2, SlidersHorizontal } from "lucide-react"
+import { X, Link2, SlidersHorizontal, ArrowUpDown, Package } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PhotoFilterChips } from "./photo-filter-chips"
+import { useUploadSessions, type UploadSessionForDropdown } from "@/lib/hooks/use-upload-sessions"
+import type { PhotoSortField } from "@/lib/services/photos"
 
 export interface PhotoFilters {
   status?: 'all' | 'processing' | 'completed' | 'failed'
   hasDeer?: boolean | null
   hasDetections?: boolean | null  // true = with detections, false = without, null = all
-  batchId?: string
+  batchId?: string  // Keep for backward compatibility
+  uploadSessionId?: string
   qualityStatus?: 'all' | 'high_quality' | 'low_quality' | 'manual_review' | 'pending'
   minConfidence?: number
   sex?: 'buck' | 'doe' | 'fawn' | 'unknown' | 'all'
@@ -22,6 +25,7 @@ export interface PhotoFilters {
   cameraId?: string
   sizeClass?: 'trophy' | 'standard' | 'basket' | 'spike' | 'unknown' | 'all'
   deerId?: string
+  sortBy?: PhotoSortField
 }
 
 interface DeerOption {
@@ -48,13 +52,42 @@ function omitProperties<T, K extends keyof T>(
   return result as Omit<T, K>
 }
 
+// Format upload session for dropdown display
+function formatSessionOption(session: UploadSessionForDropdown): string {
+  const date = new Date(session.created_at)
+  const dateStr = date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+  return `${dateStr} (${session.total_images} photos)`
+}
+
 export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList = [] }: PhotoFiltersProps) {
+  // Fetch upload sessions for dropdown
+  const { data: sessionsData } = useUploadSessions()
+  const sessions = sessionsData?.sessions ?? []
+
+  // Sort toggle handler
+  const toggleSortBy = () => {
+    const current = filters.sortBy ?? 'imported_at'
+    onFiltersChange({
+      ...filters,
+      sortBy: current === 'imported_at' ? 'captured_at' : 'imported_at',
+    })
+  }
+
+  // Get current sort label
+  const sortLabel = filters.sortBy === 'captured_at' ? 'Captured' : 'Uploaded'
+
   // Check if any filters are active
   const hasActiveFilters =
     (filters.status && filters.status !== 'all') ||
     filters.hasDeer !== null ||
     filters.hasDetections !== null ||
     filters.batchId ||
+    filters.uploadSessionId ||
     (filters.qualityStatus && filters.qualityStatus !== 'all') ||
     filters.minConfidence !== undefined ||
     (filters.sex && filters.sex !== 'all') ||
@@ -65,7 +98,8 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     filters.dateTo ||
     filters.datePreset ||
     filters.cameraId ||
-    filters.deerId
+    filters.deerId ||
+    filters.sortBy === 'captured_at' // Only count as active if non-default
 
   // Count drawer-only filters (those not available as quick filters)
   const drawerFilterCount = [
@@ -76,7 +110,6 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     filters.dateTo !== undefined,
     filters.datePreset !== undefined,
     filters.cameraId !== undefined,
-    filters.batchId !== undefined,
   ].filter(Boolean).length
 
   // Quick filter toggle handlers
@@ -152,6 +185,7 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
       qualityStatus: 'all',
       sex: 'all',
       sizeClass: 'all',
+      uploadSessionId: undefined,
     })
   }
 
@@ -170,8 +204,10 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     if (filters.dateTo) params.set('dateTo', filters.dateTo)
     if (filters.datePreset) params.set('datePreset', filters.datePreset)
     if (filters.cameraId) params.set('cameraId', filters.cameraId)
-    if (filters.batchId) params.set('batchId', filters.batchId)
+    if (filters.batchId) params.set('batchId', filters.batchId)  // Keep for backward compatibility
+    if (filters.uploadSessionId) params.set('uploadSessionId', filters.uploadSessionId)
     if (filters.deerId) params.set('deerId', filters.deerId)
+    if (filters.sortBy && filters.sortBy !== 'imported_at') params.set('sortBy', filters.sortBy)
 
     const url = `${window.location.origin}/photos${params.toString() ? `?${params.toString()}` : ''}`
     try {
@@ -302,6 +338,50 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
               {deerList.map((deer) => (
                 <SelectItem key={deer.id} value={deer.id}>
                   {deer.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {/* Sort Toggle */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleSortBy}
+          className={cn(
+            "h-8 text-xs gap-1.5",
+            filters.sortBy === 'captured_at' && "bg-copper/10 border-copper text-copper"
+          )}
+        >
+          <ArrowUpDown className="size-3" />
+          {sortLabel}
+        </Button>
+
+        {/* Upload Session Filter Dropdown */}
+        {sessions.length > 0 && (
+          <Select
+            value={filters.uploadSessionId ?? "all"}
+            onValueChange={(value) => {
+              if (value === "all") {
+                onFiltersChange(omitProperties(filters, 'uploadSessionId'))
+              } else {
+                onFiltersChange({ ...filters, uploadSessionId: value })
+              }
+            }}
+          >
+            <SelectTrigger size="sm" className={cn(
+              "h-8 text-xs min-w-[140px]",
+              filters.uploadSessionId && "bg-copper text-white border-copper"
+            )}>
+              <Package className="size-3 mr-1" />
+              <SelectValue placeholder="Upload" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Uploads</SelectItem>
+              {sessions.map((session) => (
+                <SelectItem key={session.id} value={session.id}>
+                  {formatSessionOption(session)}
                 </SelectItem>
               ))}
             </SelectContent>
