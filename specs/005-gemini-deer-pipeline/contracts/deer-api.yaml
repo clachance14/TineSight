@@ -1,0 +1,533 @@
+openapi: 3.0.3
+info:
+  title: TineSight Deer Catalog API
+  description: API endpoints for deer catalog management, matching, and review
+  version: 1.0.0
+
+servers:
+  - url: /api
+    description: Next.js API Routes
+
+paths:
+  /deer:
+    get:
+      summary: List deer catalog
+      description: Returns all deer profiles in user's catalog
+      tags:
+        - Deer Catalog
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search by deer name
+      responses:
+        '200':
+          description: List of deer profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deer:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeerProfile'
+
+    post:
+      summary: Create deer profile
+      description: Create a new deer profile from a detection
+      tags:
+        - Deer Catalog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - detection_id
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: Name for the deer (e.g., "Big 12")
+                notes:
+                  type: string
+                  maxLength: 500
+                  description: Optional notes about the deer
+                detection_id:
+                  type: string
+                  format: uuid
+                  description: Detection to use as reference photo
+      responses:
+        '201':
+          description: Deer profile created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeerProfile'
+        '400':
+          description: Validation error (e.g., duplicate name)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        '404':
+          description: Detection not found
+
+  /deer/{id}:
+    get:
+      summary: Get deer profile
+      description: Returns deer profile with sighting history
+      tags:
+        - Deer Catalog
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Deer profile with sightings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeerWithSightings'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update deer profile
+      description: Update deer name or notes
+      tags:
+        - Deer Catalog
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                notes:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Deer profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeerProfile'
+
+    delete:
+      summary: Delete deer profile
+      description: Delete deer profile (detections remain but become unassigned)
+      tags:
+        - Deer Catalog
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deer profile deleted
+
+  /deer/match:
+    post:
+      summary: Trigger matching
+      description: Compare unassigned buck detections against catalog
+      tags:
+        - Matching
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                detection_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Specific detections to match (optional, defaults to all unassigned bucks)
+      responses:
+        '202':
+          description: Matching job queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  job_id:
+                    type: string
+                  detection_count:
+                    type: integer
+                    description: Number of detections being matched
+        '400':
+          description: No catalog deer or detections to match
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+  /deer/matches:
+    get:
+      summary: List pending matches
+      description: Returns all pending match candidates for review
+      tags:
+        - Matching
+      parameters:
+        - name: detection_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by specific detection
+      responses:
+        '200':
+          description: List of pending match candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MatchReview'
+                  total_pending:
+                    type: integer
+
+  /deer/matches/{id}/confirm:
+    post:
+      summary: Confirm match
+      description: Confirm AI match suggestion, linking detection to deer
+      tags:
+        - Matching
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Match candidate ID
+      responses:
+        '200':
+          description: Match confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  detection_id:
+                    type: string
+                    format: uuid
+                  deer_id:
+                    type: string
+                    format: uuid
+
+  /deer/matches/{id}/correct:
+    post:
+      summary: Correct match
+      description: Override AI suggestion with different deer
+      tags:
+        - Matching
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Match candidate ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - deer_id
+              properties:
+                deer_id:
+                  type: string
+                  format: uuid
+                  description: Correct deer to assign
+      responses:
+        '200':
+          description: Match corrected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  detection_id:
+                    type: string
+                    format: uuid
+                  deer_id:
+                    type: string
+                    format: uuid
+
+  /deer/matches/{id}/reject:
+    post:
+      summary: Reject match
+      description: Reject all match candidates for a detection
+      tags:
+        - Matching
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Match candidate ID
+      responses:
+        '200':
+          description: Match rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /deer/matches/{id}/skip:
+    post:
+      summary: Skip match review
+      description: Leave match pending for later review
+      tags:
+        - Matching
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Match candidate ID
+      responses:
+        '200':
+          description: Match skipped
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /deer/matches/{id}/create-new:
+    post:
+      summary: Create new deer from match
+      description: Create a new deer profile from a detection during match review
+      tags:
+        - Matching
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Match candidate ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                notes:
+                  type: string
+                  maxLength: 500
+      responses:
+        '201':
+          description: New deer created and detection assigned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deer:
+                    $ref: '#/components/schemas/DeerProfile'
+                  detection_id:
+                    type: string
+                    format: uuid
+
+components:
+  schemas:
+    DeerProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        reference_detection_id:
+          type: string
+          format: uuid
+          nullable: true
+        reference_image_url:
+          type: string
+          description: Signed URL for reference photo thumbnail
+        sighting_count:
+          type: integer
+          description: Number of confirmed sightings
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DeerWithSightings:
+      allOf:
+        - $ref: '#/components/schemas/DeerProfile'
+        - type: object
+          properties:
+            sightings:
+              type: array
+              items:
+                type: object
+                properties:
+                  detection_id:
+                    type: string
+                    format: uuid
+                  image_id:
+                    type: string
+                    format: uuid
+                  thumbnail_url:
+                    type: string
+                  captured_at:
+                    type: string
+                    format: date-time
+                  antler_points:
+                    type: integer
+                    nullable: true
+
+    MatchReview:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Match candidate ID
+        detection:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            image_url:
+              type: string
+            thumbnail_url:
+              type: string
+            head_crop_url:
+              type: string
+              description: Cropped head image URL
+            species:
+              type: string
+            sex:
+              type: string
+            antler_points:
+              type: integer
+              nullable: true
+            age_class:
+              type: string
+            captured_at:
+              type: string
+              format: date-time
+        suggested_deer:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            reference_image_url:
+              type: string
+        gemini_confidence:
+          type: integer
+          minimum: 0
+          maximum: 100
+        gemini_reasoning:
+          type: string
+          description: AI explanation for the match
+        other_possibilities:
+          type: array
+          items:
+            type: object
+            properties:
+              deer_id:
+                type: string
+                format: uuid
+              deer_name:
+                type: string
+              confidence:
+                type: integer
+        is_likely_new_deer:
+          type: boolean
+          description: AI suggests this might be a new deer
+        catalog_deer:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeerProfile'
+          description: All catalog deer for quick assign
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Not found

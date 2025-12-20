@@ -164,9 +164,9 @@
 
 - [x] T043 Apply database migration: run `npx supabase db push` (if linked) OR paste supabase/migrations/001_initial_schema.sql into Supabase Dashboard SQL Editor
 - [x] T044 Generate TypeScript types: npx supabase gen types typescript --local > types/database.ts (requires local Supabase) OR use Supabase Dashboard > API Docs > TypeScript types
-- [ ] T045 Run quickstart.md validation checklist manually
-- [ ] T046 Verify all RLS policies working correctly
-- [ ] T047 Test complete user flow: signup → confirm → login → navigate → settings → logout
+- [x] T045 Run quickstart.md validation checklist manually
+- [x] T046 Verify all RLS policies working correctly
+- [x] T047 Test complete user flow: signup → confirm → login → navigate → settings → logout
 
 ---
 

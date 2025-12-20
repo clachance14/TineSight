@@ -5,38 +5,33 @@
 
 ## Summary
 
-Implement the foundational SaaS infrastructure for TineSight including user authentication (signup, login, password reset), database schema with Row-Level Security, and a protected dashboard layout with navigation. Uses Next.js 14 App Router with Supabase for auth and database.
+Implement the foundational SaaS infrastructure for TineSight including authentication (signup, login, logout, password reset), database schema with RLS policies, and dashboard navigation shell. Uses Next.js 14 App Router with Supabase for auth and database, following the serverless-first architecture principle.
 
 ## Technical Context
 
 **Language/Version**: TypeScript 5.x with Next.js 14 (App Router)
-**Primary Dependencies**: @supabase/supabase-js, @supabase/ssr, shadcn/ui, TailwindCSS, lucide-react
-**Data & State**: @tanstack/react-query (server state), zustand (client state)
-**Forms**: react-hook-form, zod, @hookform/resolvers
-**Storage**: PostgreSQL via Supabase (managed) with pgvector extension
-**Testing**: Manual integration testing via checklist (unit tests deferred per constitution)
-**Target Platform**: Web (Vercel deployment), responsive but desktop-primary
-**Project Type**: Web application (single Next.js project with API routes)
-**Performance Goals**: Login/signup < 10 seconds, page navigation < 200ms
-**Constraints**: Serverless-only (Vercel + Supabase), RLS required on all tables
-**Scale/Scope**: Single user testing, ~10 tables, 15 pages/components
-**Architecture Design**: See `docs/plans/2025-12-01-technical-architecture-design.md` for complete decisions
+**Primary Dependencies**: @supabase/ssr, @supabase/supabase-js, TailwindCSS, shadcn/ui, Zustand, TanStack Query, React Hook Form, Zod
+**Storage**: PostgreSQL via Supabase with pgvector extension
+**Testing**: Manual integration testing via quickstart.md (Playwright E2E deferred to Phase 2)
+**Target Platform**: Web (Vercel serverless deployment)
+**Project Type**: Web application (Next.js App Router)
+**Performance Goals**: Dashboard load <10 seconds, auth flows <3 minutes end-to-end
+**Constraints**: Serverless-only (no self-managed infrastructure per Constitution I)
+**Scale/Scope**: Single-tenant MVP, 5 dashboard pages, 4 auth flows
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+*GATE: Passed - All principles verified*
 
 | Principle | Status | Implementation |
 |-----------|--------|----------------|
-| I. Serverless-First | ✅ Pass | Vercel (compute) + Supabase (DB/Auth) - no self-managed infra |
-| II. Human-in-the-Loop AI | ✅ N/A | No AI in this feature (foundation only) |
-| III. Multi-Tenant Data Isolation | ✅ Pass | RLS policies on all tables with `auth.uid()` checks |
-| IV. Role-Based Access Control | ✅ Pass | Schema includes team_members with owner/viewer roles |
-| V. Integration Testing | ✅ Pass | Manual checklist for user flows; unit tests deferred |
-| VI. Phased Delivery | ✅ Pass | 5 user stories prioritized P1-P3, independently testable |
-| VII. Design System Compliance | ✅ Pass | shadcn/ui + TailwindCSS with TineSight color palette |
-
-**Gate Status**: ✅ All principles satisfied. Proceed to Phase 0.
+| I. Serverless-First | ✅ | Vercel (hosting), Supabase (DB/Auth/Storage) |
+| II. Human-in-the-Loop AI | ✅ N/A | No AI in this feature |
+| III. Multi-Tenant Data Isolation | ✅ | RLS on all tables, `auth.uid()` checks |
+| IV. Role-Based Access Control | ✅ | team_members table with owner/viewer roles |
+| V. Integration Testing | ✅ | Manual quickstart.md validation; automated E2E deferred |
+| VI. Phased Delivery | ✅ | 5 user stories (P1-P3), independently testable |
+| VII. Design System Compliance | ✅ | TineSight palette in Tailwind, shadcn/ui components |
 
 ## Project Structure
 
@@ -46,75 +41,71 @@ Implement the foundational SaaS infrastructure for TineSight including user auth
 specs/001-saas-foundation/
 ├── plan.md              # This file
 ├── spec.md              # Feature specification
-├── research.md          # Phase 0 output
-├── data-model.md        # Phase 1 output
-├── quickstart.md        # Phase 1 output
-├── contracts/           # Phase 1 output (API contracts)
+├── research.md          # Technical decisions
+├── data-model.md        # Database schema
+├── quickstart.md        # Setup and validation guide
+├── contracts/           # API contracts
 │   └── auth-api.yaml
-├── checklists/
-│   └── requirements.md  # Spec validation checklist
-└── tasks.md             # Phase 2 output (via /speckit.tasks)
+└── tasks.md             # Implementation tasks
 ```
 
 ### Source Code (repository root)
 
 ```text
 app/
-├── (auth)/                      # Auth route group (public)
-│   ├── layout.tsx               # Centered auth layout
-│   ├── login/page.tsx           # Login page
-│   ├── signup/page.tsx          # Signup page
-│   └── forgot-password/page.tsx # Password reset request
-├── (dashboard)/                 # Dashboard route group (protected)
-│   ├── layout.tsx               # Dashboard layout with sidebar/header
-│   ├── dashboard/page.tsx       # Main dashboard
-│   ├── photos/page.tsx          # Placeholder
-│   ├── deer/page.tsx            # Placeholder
-│   ├── cameras/page.tsx         # Placeholder
-│   └── settings/page.tsx        # User settings
-├── auth/
-│   └── callback/route.ts        # OAuth/magic link callback
-├── globals.css                  # Global styles with design system
-├── layout.tsx                   # Root layout
-└── page.tsx                     # Landing page (redirects)
+├── (auth)/              # Public auth pages
+│   ├── layout.tsx
+│   ├── login/page.tsx
+│   ├── signup/page.tsx
+│   ├── forgot-password/page.tsx
+│   └── reset-password/page.tsx
+├── (dashboard)/         # Protected dashboard pages
+│   ├── layout.tsx
+│   ├── dashboard/page.tsx
+│   ├── photos/page.tsx
+│   ├── deer/page.tsx
+│   ├── cameras/page.tsx
+│   └── settings/page.tsx
+├── auth/callback/route.ts
+├── globals.css
+├── layout.tsx
+└── page.tsx
 
 components/
-├── auth/
-│   ├── login-form.tsx           # Login form component
-│   ├── signup-form.tsx          # Signup form component
-│   └── forgot-password-form.tsx # Password reset form
-├── dashboard/
-│   ├── sidebar.tsx              # Navigation sidebar
-│   └── header.tsx               # Top header with user menu
-└── ui/                          # shadcn/ui components
+├── auth/                # Auth form components
+├── dashboard/           # Sidebar, header
+└── ui/                  # shadcn/ui components
 
 lib/
 ├── supabase/
-│   ├── client.ts                # Browser client
-│   ├── server.ts                # Server component client
-│   └── middleware.ts            # Auth middleware helper
-└── utils.ts                     # Utility functions
+│   ├── client.ts        # Browser client
+│   ├── server.ts        # Server component client
+│   └── middleware.ts    # Auth helper
+├── services/            # Data access layer
+│   ├── auth.ts
+│   └── profile.ts
+├── stores/              # Zustand stores
+│   └── ui.ts
+├── query-client.ts
+└── utils.ts
 
 types/
-├── database.ts                  # Generated Supabase types
-└── index.ts                     # Type exports
+├── database.ts          # Supabase generated types
+└── index.ts
 
 supabase/
 └── migrations/
-    └── 001_initial_schema.sql   # Complete schema + RLS
+    └── 001_initial_schema.sql
 
-middleware.ts                    # Next.js middleware (route protection)
-tailwind.config.ts               # TineSight design system colors
+middleware.ts            # Route protection
 ```
 
-**Structure Decision**: Single Next.js project using App Router route groups. `(auth)` for public authentication pages, `(dashboard)` for protected application pages. Supabase handles all backend concerns (auth, database, storage).
+**Structure Decision**: Next.js 14 App Router with route groups `(auth)` and `(dashboard)` for layout separation. Service layer pattern for data access. Supabase SSR pattern with cookie-based sessions.
 
 ## Complexity Tracking
 
-> No constitution violations. All design choices follow principles.
+> No constitution violations requiring justification.
 
-| Decision | Rationale | Alternative Considered |
-|----------|-----------|------------------------|
-| Single Next.js project | Simplest for MVP, serverless-compatible | Separate frontend/backend - unnecessary complexity |
-| Supabase SSR pattern | Official recommended approach for Next.js 14 | Auth helpers deprecated, custom JWT - more work |
-| Route groups for auth/dashboard | Clean URL structure, shared layouts | Separate auth app - overkill |
+| Violation | Why Needed | Simpler Alternative Rejected Because |
+|-----------|------------|-------------------------------------|
+| *None* | — | — |

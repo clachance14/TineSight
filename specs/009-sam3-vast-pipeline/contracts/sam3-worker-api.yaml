@@ -1,0 +1,364 @@
+openapi: 3.0.3
+info:
+  title: SAM3 GPU Worker API
+  description: |
+    FastAPI worker running on Vast.ai GPU instance for SAM3-powered deer and antler detection.
+    This worker loads the facebook/sam3 model from Hugging Face and provides inference endpoints.
+  version: 1.0.0
+  contact:
+    name: TineSight Team
+
+servers:
+  - url: '{workerUrl}'
+    description: Vast.ai GPU Worker
+    variables:
+      workerUrl:
+        default: http://localhost:8000
+        description: SAM3_WORKER_URL environment variable
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      description: |
+        Returns current worker status and model loading state.
+        Used by Trigger.dev jobs to determine readiness before dispatching work.
+      operationId: getHealth
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Worker status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                cold:
+                  summary: Worker just started, model not loaded
+                  value:
+                    status: cold
+                    model_loaded: false
+                    model_name: null
+                    uptime_seconds: 5
+                warming:
+                  summary: Model download/loading in progress
+                  value:
+                    status: warming
+                    model_loaded: false
+                    model_name: facebook/sam3
+                    uptime_seconds: 120
+                    progress_percent: 45
+                ready:
+                  summary: Worker ready to process requests
+                  value:
+                    status: ready
+                    model_loaded: true
+                    model_name: facebook/sam3
+                    uptime_seconds: 300
+        '503':
+          description: Worker in error state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: error
+                model_loaded: false
+                error_message: "Failed to load model: CUDA out of memory"
+
+  /ws/status:
+    get:
+      summary: WebSocket status stream
+      description: |
+        WebSocket endpoint for real-time status updates during cold start.
+        Clients connect and receive status events until worker reaches 'ready' state.
+
+        **Message Format (JSON)**:
+        ```json
+        {
+          "type": "status",
+          "data": {
+            "status": "warming",
+            "model_loaded": false,
+            "progress_percent": 45
+          }
+        }
+        ```
+
+        **Status Transitions**:
+        - cold → warming (model download started)
+        - warming → ready (model loaded successfully)
+        - warming → error (model load failed)
+        - error → warming (retry initiated)
+      operationId: wsStatus
+      tags:
+        - Health
+      responses:
+        '101':
+          description: WebSocket upgrade successful
+
+  /v1/analyze-image:
+    post:
+      summary: Analyze image for deer and antlers
+      description: |
+        Main inference endpoint. Downloads image from signed URL, runs SAM3 with
+        text prompts "deer" and "antlers", returns bounding boxes and confidence scores.
+
+        **Processing Steps**:
+        1. Fetch image from provided URL
+        2. Run SAM3 with prompt "deer" → deer instances
+        3. Run SAM3 with prompt "antlers" → antler regions
+        4. Match antler boxes to nearest deer boxes
+        5. Return combined results
+      operationId: analyzeImage
+      tags:
+        - Inference
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeImageRequest'
+            example:
+              imageUrl: "https://supabase.storage/photos/user123/batch456/IMG_001.jpg?token=xxx"
+              thresholds:
+                deer: 0.3
+                antlers: 0.3
+              maxInstances: 20
+      responses:
+        '200':
+          description: Analysis complete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeImageResponse'
+              examples:
+                with_deer:
+                  summary: Photo with deer detected
+                  value:
+                    deer_present: true
+                    detections:
+                      - deer_box_xyxy: [120, 200, 450, 680]
+                        deer_score: 0.92
+                        antler_box_xyxy: [180, 200, 350, 320]
+                        antler_score: 0.85
+                      - deer_box_xyxy: [500, 150, 780, 600]
+                        deer_score: 0.88
+                        antler_box_xyxy: null
+                        antler_score: null
+                    model:
+                      name: facebook/sam3
+                      revision: main
+                    processing_time_ms: 1250
+                empty:
+                  summary: No deer in photo
+                  value:
+                    deer_present: false
+                    detections: []
+                    model:
+                      name: facebook/sam3
+                      revision: main
+                    processing_time_ms: 850
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Invalid image URL"
+                detail: "URL must be HTTPS"
+        '408':
+          description: Request timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Request timeout"
+                detail: "Image download exceeded 30 seconds"
+        '422':
+          description: Image processing error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Image processing failed"
+                detail: "Unsupported image format"
+        '503':
+          description: Worker not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Service unavailable"
+                detail: "Model not loaded. Current status: warming"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - model_loaded
+      properties:
+        status:
+          type: string
+          enum: [cold, warming, ready, error]
+          description: Current worker state
+        model_loaded:
+          type: boolean
+          description: Whether SAM3 model is loaded and ready
+        model_name:
+          type: string
+          nullable: true
+          description: Hugging Face model identifier
+          example: facebook/sam3
+        uptime_seconds:
+          type: integer
+          description: Seconds since worker started
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Model loading progress (only during warming)
+        error_message:
+          type: string
+          nullable: true
+          description: Error details if status is 'error'
+
+    AnalyzeImageRequest:
+      type: object
+      required:
+        - imageUrl
+      properties:
+        imageUrl:
+          type: string
+          format: uri
+          description: Signed URL to fetch the image (HTTPS required)
+        thresholds:
+          type: object
+          description: Minimum confidence thresholds for detection
+          properties:
+            deer:
+              type: number
+              minimum: 0
+              maximum: 1
+              default: 0.3
+              description: Deer detection threshold
+            antlers:
+              type: number
+              minimum: 0
+              maximum: 1
+              default: 0.3
+              description: Antler detection threshold
+        maxInstances:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+          description: Maximum number of deer instances to return
+
+    AnalyzeImageResponse:
+      type: object
+      required:
+        - deer_present
+        - detections
+        - model
+      properties:
+        deer_present:
+          type: boolean
+          description: Whether any deer were detected
+        detections:
+          type: array
+          description: List of detected deer with optional antler regions
+          items:
+            $ref: '#/components/schemas/Detection'
+        model:
+          type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+              description: Model identifier
+              example: facebook/sam3
+            revision:
+              type: string
+              description: Model revision/commit hash
+              example: main
+        processing_time_ms:
+          type: integer
+          description: Total processing time in milliseconds
+
+    Detection:
+      type: object
+      required:
+        - deer_box_xyxy
+        - deer_score
+      properties:
+        deer_box_xyxy:
+          type: array
+          items:
+            type: integer
+          minItems: 4
+          maxItems: 4
+          description: |
+            Deer bounding box as [xmin, ymin, xmax, ymax] in pixels.
+            Coordinates are relative to original image dimensions.
+          example: [120, 200, 450, 680]
+        deer_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: SAM3 confidence score for deer detection
+          example: 0.92
+        antler_box_xyxy:
+          type: array
+          items:
+            type: integer
+          minItems: 4
+          maxItems: 4
+          nullable: true
+          description: |
+            Antler region bounding box as [xmin, ymin, xmax, ymax] in pixels.
+            Null if no antlers detected for this deer.
+          example: [180, 200, 350, 320]
+        antler_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: SAM3 confidence score for antler detection
+          example: 0.85
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error type/category
+        detail:
+          type: string
+          description: Detailed error message
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Optional API key for worker authentication.
+        Set via WORKER_API_KEY environment variable on both client and server.
+
+security: []  # No auth required for initial implementation
+
+tags:
+  - name: Health
+    description: Worker health and status endpoints
+  - name: Inference
+    description: Image analysis endpoints

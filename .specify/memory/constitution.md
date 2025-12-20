@@ -1,6 +1,16 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 1.0.0 → 1.1.0
+Modified principles:
+  - I. Serverless-First: Added Gemini API to approved ML inference services
+Modified sections:
+  - Technology Stack: Added Gemini API alongside Replicate for ML Inference
+Removed sections: N/A
+Templates requiring updates: None
+Follow-up TODOs: None
+
+Previous Sync (1.0.0):
 Version change: 0.0.0 → 1.0.0
 Modified principles: N/A (initial creation)
 Added sections:
@@ -8,12 +18,6 @@ Added sections:
   - Technology Stack
   - Development Workflow
   - Governance
-Removed sections: N/A
-Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ (no changes needed - generic)
-  - .specify/templates/spec-template.md ✅ (no changes needed - generic)
-  - .specify/templates/tasks-template.md ✅ (no changes needed - generic)
-Follow-up TODOs: None
 -->
 
 # TineSight Constitution
@@ -35,7 +39,7 @@ All infrastructure MUST use managed, serverless, or platform-as-a-service soluti
 **Requirements:**
 - Compute MUST use serverless functions (Vercel API Routes, Trigger.dev jobs)
 - Database MUST use managed PostgreSQL (Supabase)
-- ML inference MUST use API-based services (Replicate)
+- ML inference MUST use API-based services (Replicate, Gemini API)
 - File storage MUST use managed object storage (Supabase Storage)
 - New infrastructure additions MUST justify why a managed alternative is insufficient
 
@@ -131,7 +135,7 @@ All UI MUST follow the TineSight Design System (color palette, typography, spaci
 | Database | PostgreSQL via Supabase | Managed DB with RLS and pgvector |
 | Auth | Supabase Auth | Email, OAuth, Magic Link |
 | Storage | Supabase Storage | S3-compatible image storage |
-| ML Inference | Replicate API | MegaDetector + custom re-ID |
+| ML Inference | Replicate API, Gemini API | MegaDetector (legacy), Gemini vision analysis + re-ID |
 | Background Jobs | Trigger.dev | Async image processing |
 | Payments | Stripe | Subscription billing |
 | Hosting | Vercel | Frontend + API routes |
@@ -182,4 +186,4 @@ This constitution supersedes all other development practices and guidelines. Ame
 - Constitution violations MUST be justified in the Complexity Tracking table (plan.md)
 - Unjustified violations are grounds for PR rejection
 
-**Version**: 1.0.0 | **Ratified**: 2025-12-01 | **Last Amended**: 2025-12-01
+**Version**: 1.1.0 | **Ratified**: 2025-12-01 | **Last Amended**: 2025-12-09

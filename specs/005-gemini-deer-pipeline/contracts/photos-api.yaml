@@ -1,0 +1,356 @@
+openapi: 3.0.3
+info:
+  title: TineSight Photos API - Gemini Pipeline
+  description: API endpoints for photo analysis, filtering, and deer detection management
+  version: 1.0.0
+
+servers:
+  - url: /api
+    description: Next.js API Routes
+
+paths:
+  /photos:
+    get:
+      summary: List photos with filters
+      description: Returns paginated list of photos with optional filters for deer presence, sex, and point count
+      tags:
+        - Photos
+      parameters:
+        - name: batch_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by batch upload
+        - name: has_deer
+          in: query
+          schema:
+            type: boolean
+          description: Filter by deer presence
+        - name: sex
+          in: query
+          schema:
+            type: string
+            enum: [buck, doe, fawn, unknown]
+          description: Filter detections by sex
+        - name: min_points
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+          description: Minimum antler points (bucks only)
+        - name: max_points
+          in: query
+          schema:
+            type: integer
+          description: Maximum antler points (bucks only)
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed]
+          description: Filter by detection status
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated list of photos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PhotoWithDetections'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /photos/{id}:
+    get:
+      summary: Get photo details
+      description: Returns photo with all detections and analysis results
+      tags:
+        - Photos
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Photo details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoWithDetections'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /photos/{id}/retry:
+    post:
+      summary: Retry failed photo analysis
+      description: Requeue a failed photo for Gemini analysis
+      tags:
+        - Photos
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Photo requeued for analysis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  photo_id:
+                    type: string
+                    format: uuid
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /photos/archive:
+    post:
+      summary: Archive empty photos
+      description: Bulk archive photos with no deer detections
+      tags:
+        - Photos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                batch_id:
+                  type: string
+                  format: uuid
+                  description: Archive all empty photos in this batch
+                photo_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Specific photo IDs to archive
+      responses:
+        '200':
+          description: Photos archived
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  archived_count:
+                    type: integer
+
+  /photos/stats:
+    get:
+      summary: Get batch statistics
+      description: Returns summary statistics for analyzed photos
+      tags:
+        - Photos
+      parameters:
+        - name: batch_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Batch statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchStats'
+
+components:
+  schemas:
+    PhotoWithDetections:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        storage_path:
+          type: string
+        thumbnail_path:
+          type: string
+        filename:
+          type: string
+        has_deer:
+          type: boolean
+        deer_count:
+          type: integer
+        analysis_notes:
+          type: string
+        analyzed_at:
+          type: string
+          format: date-time
+        detection_status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        error_message:
+          type: string
+        detections:
+          type: array
+          items:
+            $ref: '#/components/schemas/Detection'
+        signed_url:
+          type: string
+          description: Temporary signed URL for image access
+        thumbnail_url:
+          type: string
+          description: Temporary signed URL for thumbnail
+
+    Detection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        deer_id:
+          type: string
+          format: uuid
+          nullable: true
+        bbox_x:
+          type: integer
+          description: X coordinate (0-10000 normalized)
+        bbox_y:
+          type: integer
+          description: Y coordinate (0-10000 normalized)
+        bbox_width:
+          type: integer
+        bbox_height:
+          type: integer
+        head_bbox:
+          type: object
+          nullable: true
+          properties:
+            x:
+              type: integer
+            y:
+              type: integer
+            width:
+              type: integer
+            height:
+              type: integer
+        species:
+          type: string
+          enum: [whitetail, mule_deer, elk, unknown]
+        sex:
+          type: string
+          enum: [buck, doe, fawn, unknown]
+        antler_points:
+          type: integer
+          nullable: true
+        age_class:
+          type: string
+          enum: [young, mature, old, unknown]
+        distinguishing_features:
+          type: string
+          nullable: true
+        gemini_confidence:
+          type: integer
+          minimum: 0
+          maximum: 100
+        is_reference:
+          type: boolean
+        deer:
+          $ref: '#/components/schemas/DeerSummary'
+          nullable: true
+
+    DeerSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    BatchStats:
+      type: object
+      properties:
+        total_photos:
+          type: integer
+        analyzed_photos:
+          type: integer
+        photos_with_deer:
+          type: integer
+        empty_photos:
+          type: integer
+        failed_photos:
+          type: integer
+        buck_count:
+          type: integer
+        doe_count:
+          type: integer
+        unknown_count:
+          type: integer
+        points_breakdown:
+          type: object
+          properties:
+            ten_plus:
+              type: integer
+            eight_nine:
+              type: integer
+            six_seven:
+              type: integer
+            under_six:
+              type: integer
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Unauthorized
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Not found

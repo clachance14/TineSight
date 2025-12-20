@@ -1,0 +1,392 @@
+openapi: 3.0.3
+info:
+  title: TineSight Matching API
+  description: API for deer re-identification matching and confirmation
+  version: 1.0.0
+
+servers:
+  - url: /api
+    description: Next.js API routes
+
+paths:
+  /detections/{id}/matches:
+    get:
+      summary: Get match candidates
+      description: Get potential deer matches for a detection
+      operationId: getMatchCandidates
+      tags:
+        - Matching
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Detection ID
+      responses:
+        '200':
+          description: Match candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detection:
+                    $ref: '#/components/schemas/DetectionSummary'
+                  candidates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MatchCandidate'
+                  hasEmbedding:
+                    type: boolean
+        '401':
+          description: Unauthorized
+        '404':
+          description: Detection not found
+
+  /detections/{id}/confirm:
+    post:
+      summary: Confirm match
+      description: Confirm that a detection matches an existing deer
+      operationId: confirmMatch
+      tags:
+        - Matching
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Detection ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - deerId
+              properties:
+                deerId:
+                  type: string
+                  format: uuid
+                  description: ID of deer to link detection to
+      responses:
+        '200':
+          description: Match confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detection:
+                    $ref: '#/components/schemas/DetectionSummary'
+                  deer:
+                    $ref: '#/components/schemas/DeerSummary'
+                  message:
+                    type: string
+                    example: "Detection linked to buck #5"
+        '400':
+          description: Invalid request (detection already linked)
+        '401':
+          description: Unauthorized
+        '404':
+          description: Detection or deer not found
+
+  /detections/{id}/reject:
+    post:
+      summary: Reject match candidate
+      description: Mark a match candidate as rejected
+      operationId: rejectMatch
+      tags:
+        - Matching
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Detection ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - candidateDeerIds
+              properties:
+                candidateDeerIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: IDs of deer to reject as matches
+      responses:
+        '200':
+          description: Candidates rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rejectedCount:
+                    type: integer
+                  remainingCandidates:
+                    type: integer
+        '401':
+          description: Unauthorized
+        '404':
+          description: Detection not found
+
+  /detections/{id}/create-deer:
+    post:
+      summary: Create new deer from detection
+      description: Create a new deer profile and link this detection to it
+      operationId: createDeerFromDetection
+      tags:
+        - Matching
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Detection ID
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Optional name for the deer
+                  example: "Big 8-pointer"
+      responses:
+        '201':
+          description: Deer created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deer:
+                    $ref: '#/components/schemas/DeerSummary'
+                  detection:
+                    $ref: '#/components/schemas/DetectionSummary'
+                  message:
+                    type: string
+                    example: "New deer profile created"
+        '400':
+          description: Detection already linked to a deer
+        '401':
+          description: Unauthorized
+        '404':
+          description: Detection not found
+
+  /photos/pending-matches:
+    get:
+      summary: Get photos with pending matches
+      description: List photos that have unreviewed match candidates
+      operationId: getPendingMatches
+      tags:
+        - Matching
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Photos with pending matches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        photo:
+                          $ref: '#/components/schemas/PhotoSummary'
+                        pendingDetections:
+                          type: integer
+                        topMatch:
+                          $ref: '#/components/schemas/MatchCandidate'
+                  nextCursor:
+                    type: string
+                  totalPending:
+                    type: integer
+        '401':
+          description: Unauthorized
+
+  /matching/stats:
+    get:
+      summary: Get matching statistics
+      description: Get user's matching activity statistics
+      operationId: getMatchingStats
+      tags:
+        - Matching
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Matching statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalDetections:
+                    type: integer
+                  pendingReview:
+                    type: integer
+                  confirmedMatches:
+                    type: integer
+                  rejectedMatches:
+                    type: integer
+                  orphanedEmbeddings:
+                    type: integer
+                  uniqueDeer:
+                    type: integer
+        '401':
+          description: Unauthorized
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    DetectionSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        imageId:
+          type: string
+          format: uuid
+        thumbnailUrl:
+          type: string
+          format: uri
+        cropUrl:
+          type: string
+          format: uri
+          description: Cropped image of the detection bounding box
+        bboxX:
+          type: integer
+        bboxY:
+          type: integer
+        bboxWidth:
+          type: integer
+        bboxHeight:
+          type: integer
+        class:
+          type: string
+        confidence:
+          type: number
+          format: float
+        deerId:
+          type: string
+          format: uuid
+        hasEmbedding:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    MatchCandidate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        deerId:
+          type: string
+          format: uuid
+        deerName:
+          type: string
+        similarityScore:
+          type: number
+          format: float
+          description: Cosine similarity (0-1)
+        isHighConfidence:
+          type: boolean
+          description: True if similarity >= 0.7
+        status:
+          type: string
+          enum: [pending, confirmed, rejected]
+        representativeImageUrl:
+          type: string
+          format: uri
+          description: Representative image of the candidate deer
+        matchCount:
+          type: integer
+          description: Number of photos this deer has been matched to
+        lastSeen:
+          type: string
+          format: date
+
+    DeerSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        firstSeen:
+          type: string
+          format: date
+        lastSeen:
+          type: string
+          format: date
+        photoCount:
+          type: integer
+        status:
+          type: string
+          enum: [watching, target, harvested]
+        representativeImageUrl:
+          type: string
+          format: uri
+
+    PhotoSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        thumbnailUrl:
+          type: string
+          format: uri
+        capturedAt:
+          type: string
+          format: date-time
+        detectionCount:
+          type: integer

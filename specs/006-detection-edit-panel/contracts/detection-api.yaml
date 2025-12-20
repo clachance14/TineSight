@@ -1,0 +1,334 @@
+openapi: 3.0.3
+info:
+  title: TineSight Detection API
+  description: API for managing deer detections in trail camera photos
+  version: 1.0.0
+  contact:
+    name: TineSight Development
+
+servers:
+  - url: /api
+    description: Relative API path
+
+paths:
+  /detections/{detectionId}:
+    get:
+      summary: Get detection details
+      description: Retrieves a single detection with image URL for display in edit panel
+      operationId: getDetection
+      tags:
+        - Detections
+      parameters:
+        - name: detectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the detection
+      responses:
+        '200':
+          description: Detection found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionResponse'
+        '401':
+          description: Unauthorized - not logged in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - detection belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Detection not found or has been deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    patch:
+      summary: Update detection classification
+      description: Updates editable fields on a detection (sex, antler points, age class, species, distinguishing features)
+      operationId: updateDetection
+      tags:
+        - Detections
+      parameters:
+        - name: detectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the detection to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDetectionRequest'
+      responses:
+        '200':
+          description: Detection updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionResponse'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized - not logged in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - cannot edit detection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Detection not found or has been deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Soft-delete a detection
+      description: Marks a detection as deleted (soft delete). Detection remains in database but is hidden from all views.
+      operationId: deleteDetection
+      tags:
+        - Detections
+      parameters:
+        - name: detectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the detection to delete
+      responses:
+        '200':
+          description: Detection soft-deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteDetectionResponse'
+        '401':
+          description: Unauthorized - not logged in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - cannot delete detection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Detection not found or already deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    DetectionResponse:
+      type: object
+      required:
+        - id
+        - imageId
+        - imageUrl
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Detection UUID
+        imageId:
+          type: string
+          format: uuid
+          description: Parent image UUID
+        imageUrl:
+          type: string
+          format: uri
+          description: Signed URL for the full image
+        cropUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: URL for cropped detection thumbnail (if available)
+        bboxX:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          nullable: true
+          description: Bounding box center X (0-10000 normalized)
+        bboxY:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          nullable: true
+          description: Bounding box center Y (0-10000 normalized)
+        bboxWidth:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          nullable: true
+          description: Bounding box width (0-10000 normalized)
+        bboxHeight:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          nullable: true
+          description: Bounding box height (0-10000 normalized)
+        sex:
+          type: string
+          enum: [buck, doe, fawn, unknown]
+          nullable: true
+          description: Deer sex classification
+        antlerPoints:
+          type: integer
+          minimum: 0
+          maximum: 30
+          nullable: true
+          description: Number of antler points (for bucks)
+        ageClass:
+          type: string
+          enum: [young, mature, old, unknown]
+          nullable: true
+          description: Estimated age classification
+        species:
+          type: string
+          enum: [whitetail, mule_deer, elk, unknown]
+          nullable: true
+          description: Deer species
+        distinguishingFeatures:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Free-text description of unique identifying marks
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: Legacy detection confidence (0-1)
+        geminiConfidence:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+          description: Gemini analysis confidence (0-100)
+        deerId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Linked deer profile UUID (if matched)
+        createdAt:
+          type: string
+          format: date-time
+          description: Detection creation timestamp
+
+    UpdateDetectionRequest:
+      type: object
+      description: Fields to update on a detection. All fields are optional; only provided fields will be updated.
+      properties:
+        sex:
+          type: string
+          enum: [buck, doe, fawn, unknown]
+          nullable: true
+          description: Deer sex classification
+        antlerPoints:
+          type: integer
+          minimum: 0
+          maximum: 30
+          nullable: true
+          description: Number of antler points (0-30)
+        ageClass:
+          type: string
+          enum: [young, mature, old, unknown]
+          nullable: true
+          description: Estimated age classification
+        species:
+          type: string
+          enum: [whitetail, mule_deer, elk, unknown]
+          nullable: true
+          description: Deer species
+        distinguishingFeatures:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Free-text description (max 500 chars)
+
+    DeleteDetectionResponse:
+      type: object
+      required:
+        - success
+        - deletedAt
+      properties:
+        success:
+          type: boolean
+          example: true
+        deletedAt:
+          type: string
+          format: date-time
+          description: Timestamp when the detection was soft-deleted
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+
+    ValidationErrorResponse:
+      type: object
+      required:
+        - error
+        - details
+      properties:
+        error:
+          type: string
+          example: "Validation failed"
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                description: Field name that failed validation
+              message:
+                type: string
+                description: Validation error message
+
+  securitySchemes:
+    SupabaseAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase Auth JWT token (automatically included via cookies)
+
+security:
+  - SupabaseAuth: []
+
+tags:
+  - name: Detections
+    description: Operations for managing deer detections

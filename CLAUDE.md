@@ -37,6 +37,21 @@ npx supabase link --project-ref <ref>                # Link to project
 npx supabase gen types typescript --linked > types/database.ts  # Generate types
 ```
 
+Trigger.dev (v3/v4):
+```bash
+npx trigger.dev@latest dev         # Start local Trigger.dev worker
+# Config: trigger.config.ts | Jobs: ./trigger/
+# Note: `npx trigger dev` and `npx @trigger.dev/cli dev` are WRONG commands
+# Jobs: analyze-photo (Gemini vision), compare-deer (matching), batch-process
+```
+
+Utility scripts (in `scripts/`):
+```bash
+node scripts/cleanup-orphans.mjs   # Delete failed images
+node scripts/retry-failed.mjs      # Reset failed images and retry
+node scripts/trigger-batch.mjs     # Trigger batch processing
+```
+
 ## Architecture
 
 ### Stack
@@ -46,7 +61,7 @@ npx supabase gen types typescript --linked > types/database.ts  # Generate types
 - **Auth**: Supabase Auth (email, OAuth, magic link)
 - **Storage**: Supabase Storage (images)
 - **Background Jobs**: Trigger.dev (async processing)
-- **ML Inference**: Replicate API (MegaDetector + re-ID)
+- **ML Inference**: Gemini API (vision analysis + deer re-ID)
 - **Hosting**: Vercel (serverless)
 - **Data Fetching**: TanStack Query (interactive flows)
 - **Client State**: Zustand (UI state, selections)
@@ -82,6 +97,12 @@ lib/
 trigger/
 └── jobs/             # Background jobs (process-photo, generate-embedding)
 
+scripts/
+├── env.mjs           # Dotenv loader for .env.local
+├── cleanup-orphans.mjs
+├── retry-failed.mjs
+└── trigger-batch.mjs
+
 tests/
 ├── e2e/              # Playwright (run in CI)
 └── integration/      # Service tests
@@ -100,6 +121,12 @@ middleware.ts         # Route protection
 **Route Protection**: `middleware.ts` at project root handles auth redirects. Protected routes in `(dashboard)/` group.
 
 **Row-Level Security**: REQUIRED on all tables. Use `auth.uid()` for ownership checks. Use `has_account_access()` helper for team member access.
+
+**Utility Scripts**: Scripts in `scripts/` use dotenv for env loading. Pattern:
+```javascript
+import './env.mjs'  // Loads .env.local via dotenv
+// Then use process.env.VAR_NAME
+```
 
 ## Constitution Principles
 
@@ -154,3 +181,53 @@ Copy `.env.example` to `.env.local` and configure:
 - `NEXT_PUBLIC_SUPABASE_URL` - Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Public anon key
 - `SUPABASE_SERVICE_ROLE_KEY` - Server-only service role key
+- `GEMINI_API_KEY` - Google Gemini API key for vision analysis
+
+## Active Technologies
+- TypeScript 5.x (strict mode) + Next.js 14 (App Router), React 18, TanStack Query, Trigger.dev, Sharp (image processing) (003-roi-quality-filter)
+- PostgreSQL via Supabase with pgvector extension, Supabase Storage for images (003-roi-quality-filter)
+- @google/genai (Gemini SDK) (005-gemini-deer-pipeline)
+
+## Recent Changes
+- 005-gemini-deer-pipeline: Migrated from Replicate MegaDetector to Gemini for deer detection and matching
+- 003-roi-quality-filter: Added TypeScript 5.x (strict mode) + Next.js 14 (App Router), React 18, TanStack Query, Trigger.dev, Sharp (image processing)
+
+## Lessons Learned
+
+### Common Gotchas
+
+1. **Trigger.dev Command Syntax**
+   - ✅ Correct: `npx trigger.dev@latest dev`
+   - ❌ Wrong: `npx trigger dev`, `npx @trigger.dev/cli dev`
+
+2. **Supabase Auth - Use `getUser()` Not `getSession()`**
+   - `getSession()` is deprecated for server-side auth checks
+   - Always use `getUser()` with `@supabase/ssr` cookie-based sessions
+
+3. **Next.js 16 Middleware Deprecation**
+   - The `middleware.ts` convention is deprecated in favor of `proxy`
+   - Migration needed eventually (see Next.js docs)
+
+4. **Script Environment Loading**
+   - Scripts in `scripts/` must import `./env.mjs` first before accessing `process.env`
+   - Pattern: `import './env.mjs'` at top of file
+
+### Architectural Decisions
+
+5. **Service Layer Discipline**
+   - Components never call Supabase directly
+   - All data access through `lib/services/*.ts`
+
+6. **RLS is Non-Negotiable**
+   - Every table must have Row-Level Security enabled
+   - Use `auth.uid()` for ownership, `has_account_access()` for team access
+
+7. **Specification-First Workflow**
+   - Use speckit commands for structured feature development
+   - Specs live in `specs/<feature-name>/` with spec.md, plan.md, tasks.md
+
+### Migration History
+
+8. **Gemini Migration (005)**
+   - Migrated from Replicate MegaDetector to Gemini API
+   - Simplified ML inference stack with single provider

@@ -1,0 +1,433 @@
+openapi: 3.0.3
+info:
+  title: TineSight Photos API
+  description: API for photo upload, management, and processing
+  version: 1.0.0
+
+servers:
+  - url: /api
+    description: Next.js API routes
+
+paths:
+  /photos/upload:
+    post:
+      summary: Initiate batch upload
+      description: Create a processing batch and get signed URLs for uploading
+      operationId: initiateUpload
+      tags:
+        - Photos
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - files
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - filename
+                      - contentType
+                      - size
+                    properties:
+                      filename:
+                        type: string
+                        example: "IMG_0001.jpg"
+                      contentType:
+                        type: string
+                        enum: [image/jpeg, image/png, image/heic, image/webp]
+                      size:
+                        type: integer
+                        description: File size in bytes
+                        example: 2048576
+      responses:
+        '200':
+          description: Upload URLs generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batchId:
+                    type: string
+                    format: uuid
+                  uploads:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        filename:
+                          type: string
+                        uploadUrl:
+                          type: string
+                          format: uri
+                        imageId:
+                          type: string
+                          format: uuid
+        '400':
+          description: Invalid request (no files, invalid types)
+        '401':
+          description: Unauthorized
+        '413':
+          description: File too large
+
+  /photos/upload/complete:
+    post:
+      summary: Mark batch upload complete
+      description: Trigger background processing for uploaded batch
+      operationId: completeUpload
+      tags:
+        - Photos
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - batchId
+              properties:
+                batchId:
+                  type: string
+                  format: uuid
+                uploadedImageIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: IDs of successfully uploaded images
+      responses:
+        '200':
+          description: Processing started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: processing
+                  message:
+                    type: string
+                    example: "Processing 127 photos..."
+        '401':
+          description: Unauthorized
+        '404':
+          description: Batch not found
+
+  /photos:
+    get:
+      summary: List photos
+      description: Get paginated list of user's photos with optional filters
+      operationId: listPhotos
+      tags:
+        - Photos
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed]
+        - name: hasDeer
+          in: query
+          schema:
+            type: boolean
+        - name: batchId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Pagination cursor
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        '200':
+          description: List of photos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Photo'
+                  nextCursor:
+                    type: string
+                  total:
+                    type: integer
+        '401':
+          description: Unauthorized
+
+  /photos/{id}:
+    get:
+      summary: Get photo details
+      description: Get full photo details including detections
+      operationId: getPhoto
+      tags:
+        - Photos
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Photo details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoDetail'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Photo not found
+
+    delete:
+      summary: Delete photo
+      description: Delete a photo and its detections
+      operationId: deletePhoto
+      tags:
+        - Photos
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Photo deleted
+        '401':
+          description: Unauthorized
+        '404':
+          description: Photo not found
+
+  /photos/{id}/retry:
+    post:
+      summary: Retry failed processing
+      description: Re-queue a failed photo for processing
+      operationId: retryPhoto
+      tags:
+        - Photos
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Processing restarted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: processing
+        '400':
+          description: Photo not in failed state
+        '401':
+          description: Unauthorized
+        '404':
+          description: Photo not found
+
+  /batches:
+    get:
+      summary: List processing batches
+      description: Get list of user's upload batches
+      operationId: listBatches
+      tags:
+        - Batches
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, uploading, processing, completed, partial_error, failed]
+      responses:
+        '200':
+          description: List of batches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batches:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProcessingBatch'
+        '401':
+          description: Unauthorized
+
+  /batches/{id}:
+    get:
+      summary: Get batch status
+      description: Get detailed status of a processing batch
+      operationId: getBatch
+      tags:
+        - Batches
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Batch status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingBatch'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Batch not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Photo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filePath:
+          type: string
+        thumbnailUrl:
+          type: string
+          format: uri
+        capturedAt:
+          type: string
+          format: date-time
+        importedAt:
+          type: string
+          format: date-time
+        detectionStatus:
+          type: string
+          enum: [pending, processing, completed, failed]
+        classification:
+          type: string
+          enum: [animal, empty, human, vehicle, null]
+        confidence:
+          type: number
+          format: float
+        hasDeer:
+          type: boolean
+        detectionCount:
+          type: integer
+        batchId:
+          type: string
+          format: uuid
+
+    PhotoDetail:
+      allOf:
+        - $ref: '#/components/schemas/Photo'
+        - type: object
+          properties:
+            fullUrl:
+              type: string
+              format: uri
+            detections:
+              type: array
+              items:
+                $ref: '#/components/schemas/Detection'
+            errorMessage:
+              type: string
+
+    Detection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        bboxX:
+          type: integer
+        bboxY:
+          type: integer
+        bboxWidth:
+          type: integer
+        bboxHeight:
+          type: integer
+        class:
+          type: string
+        confidence:
+          type: number
+          format: float
+        deerId:
+          type: string
+          format: uuid
+        hasEmbedding:
+          type: boolean
+        matchCandidatesCount:
+          type: integer
+
+    ProcessingBatch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, uploading, processing, completed, partial_error, failed]
+        totalImages:
+          type: integer
+        uploadedImages:
+          type: integer
+        processedImages:
+          type: integer
+        successfulImages:
+          type: integer
+        failedImages:
+          type: integer
+        errorMessage:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
