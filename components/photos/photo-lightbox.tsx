@@ -65,9 +65,32 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault()
+
+    const container = containerRef.current
+    if (!container) return
+
+    // Get cursor position relative to container center
+    const rect = container.getBoundingClientRect()
+    const cursorX = e.clientX - rect.left - rect.width / 2
+    const cursorY = e.clientY - rect.top - rect.height / 2
+
+    // Calculate new scale
     const delta = e.deltaY > 0 ? -0.2 : 0.2
-    setScale((s) => Math.max(0.5, Math.min(s + delta, 5)))
-  }, [])
+    const newScale = Math.max(0.5, Math.min(scale + delta, 5))
+
+    if (newScale === scale) return
+
+    // Calculate the point on the image under the cursor (in unscaled coordinates)
+    const pointX = (cursorX - position.x) / scale
+    const pointY = (cursorY - position.y) / scale
+
+    // Calculate new position so the same point stays under cursor
+    const newX = cursorX - pointX * newScale
+    const newY = cursorY - pointY * newScale
+
+    setScale(newScale)
+    setPosition({ x: newX, y: newY })
+  }, [scale, position])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (scale > 1) {
