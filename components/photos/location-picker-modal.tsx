@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { APIProvider, Map, AdvancedMarker, type MapMouseEvent } from '@vis.gl/react-google-maps'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { APIProvider, Map, AdvancedMarker, useMap, type MapMouseEvent } from '@vis.gl/react-google-maps'
 import { MapPinIcon, MapIcon, PlusIcon } from 'lucide-react'
 import {
   Dialog,
@@ -67,11 +67,55 @@ function MapPicker({
   pinLocation,
   setPinLocation,
   mapType,
+  existingLocations,
 }: {
   pinLocation: { lat: number; lng: number } | null
   setPinLocation: (loc: { lat: number; lng: number }) => void
   mapType: MapTypeId
+  existingLocations: LocationWithPhotoCount[]
 }) {
+  const map = useMap()
+  const hasFittedBoundsRef = useRef(false)
+
+  // Auto-fit map bounds to show existing location pins
+  useEffect(() => {
+    if (!map || existingLocations.length === 0 || hasFittedBoundsRef.current) return
+
+    hasFittedBoundsRef.current = true
+
+    // Single location: center with reasonable zoom
+    if (existingLocations.length === 1) {
+      const loc = existingLocations[0]
+      if (loc) {
+        map.setCenter({ lat: loc.lat, lng: loc.lng })
+        map.setZoom(12)
+        return
+      }
+    }
+
+    // Build bounding box from all pins
+    const bounds = new google.maps.LatLngBounds()
+    existingLocations.forEach((location) => {
+      bounds.extend({ lat: location.lat, lng: location.lng })
+    })
+
+    // All pins at same location: treat like single pin
+    if (bounds.getNorthEast().equals(bounds.getSouthWest())) {
+      map.setCenter(bounds.getCenter())
+      map.setZoom(12)
+      return
+    }
+
+    // Fit bounds with padding (50px on each side)
+    map.fitBounds(bounds, { top: 50, right: 50, bottom: 50, left: 50 })
+
+    // Cap max zoom if pins are very close together
+    setTimeout(() => {
+      const zoom = map.getZoom()
+      if (zoom !== undefined && zoom > 15) map.setZoom(15)
+    }, 100)
+  }, [map, existingLocations])
+
   const handleMapClick = useCallback(
     (event: MapMouseEvent) => {
       if (event.detail.latLng) {
@@ -97,6 +141,17 @@ function MapPicker({
       fullscreenControl={false}
       clickableIcons={false}
     >
+      {/* Existing Location Markers (dimmed) */}
+      {existingLocations.map((location) => (
+        <AdvancedMarker
+          key={location.id}
+          position={{ lat: location.lat, lng: location.lng }}
+        >
+          <MapPinIcon className="w-6 h-6 text-slate-500 fill-slate-500/50 drop-shadow" />
+        </AdvancedMarker>
+      ))}
+
+      {/* User's selected pin (copper, prominent) */}
       {pinLocation && (
         <AdvancedMarker position={pinLocation}>
           <MapPinIcon className="w-8 h-8 text-copper fill-copper drop-shadow-lg" />
@@ -181,7 +236,7 @@ export function LocationPickerModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onSkip()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Set Photo Location</DialogTitle>
           <DialogDescription>
@@ -189,15 +244,16 @@ export function LocationPickerModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 min-h-0 grid gap-4 grid-cols-1 lg:grid-cols-2 lg:min-h-[400px]">
+        <div className="flex-1 min-h-0 grid gap-4 grid-cols-1 lg:grid-cols-2 lg:min-h-[500px]">
           {/* Map Section */}
-          <div className="relative rounded-lg overflow-hidden border border-slate-600 min-h-[300px]">
+          <div className="relative rounded-lg overflow-hidden border border-slate-600 min-h-[400px]">
             {GOOGLE_MAPS_API_KEY ? (
               <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
                 <MapPicker
                   pinLocation={pinLocation}
                   setPinLocation={setPinLocation}
                   mapType={mapType}
+                  existingLocations={existingLocations}
                 />
               </APIProvider>
             ) : (
