@@ -38,6 +38,7 @@ export interface LocationData {
   lat: number
   lng: number
   areaName: string
+  locationId?: string
   directionCompass?: number  // 0-360
   directionNotes?: string
 }

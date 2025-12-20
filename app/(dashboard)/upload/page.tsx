@@ -166,6 +166,7 @@ export default function UploadPage() {
         body: JSON.stringify({
           uploadSessionId: sessionId,
           ...(pendingLocation && {
+            locationId: pendingLocation.locationId,
             locationLat: pendingLocation.lat,
             locationLng: pendingLocation.lng,
             areaName: pendingLocation.areaName,
@@ -320,6 +321,7 @@ export default function UploadPage() {
     // Invalidate areas query if location was set (new area may have been added)
     if (pendingLocation) {
       await queryClient.invalidateQueries({ queryKey: ['areas'] })
+      await queryClient.invalidateQueries({ queryKey: ['locations'] })
       // Clear the pending location after successful upload
       setPendingLocation(null)
     }

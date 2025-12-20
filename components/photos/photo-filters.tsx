@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { X, Link2, SlidersHorizontal, ArrowUpDown, Package, MapPin } from "lucide-react"
+import { X, Link2, SlidersHorizontal, ArrowUpDown, Package, MapPin, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PhotoFilterChips } from "./photo-filter-chips"
 import { useUploadSessions, type UploadSessionForDropdown } from "@/lib/hooks/use-upload-sessions"
@@ -40,6 +40,7 @@ interface PhotoFiltersProps {
   onOpenDrawer: () => void
   deerList?: DeerOption[]
   areaList?: string[]
+  totalFailedCount?: number
 }
 
 // Helper to remove properties from filters object
@@ -74,7 +75,7 @@ function formatSessionOption(session: UploadSessionForDropdown): string {
   return `${dateStr} (${session.total_images} photos)`
 }
 
-export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList = [], areaList = [] }: PhotoFiltersProps) {
+export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList = [], areaList = [], totalFailedCount }: PhotoFiltersProps) {
   // Fetch upload sessions for dropdown
   const { data: sessionsData } = useUploadSessions()
   const sessions = sessionsData?.sessions ?? []
@@ -295,11 +296,17 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
           size="sm"
           onClick={toggleFailed}
           className={cn(
-            "h-8 text-xs",
+            "h-8 text-xs gap-1.5 relative",
             isFailedActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
           )}
         >
+          <AlertCircle className="size-3" />
           Failed
+          {totalFailedCount !== undefined && totalFailedCount > 0 && (
+            <span className="absolute -top-1 -right-1 size-4 rounded-full bg-red-500 text-white text-[10px] font-medium flex items-center justify-center">
+              {totalFailedCount > 99 ? '99+' : totalFailedCount}
+            </span>
+          )}
         </Button>
 
         <Button

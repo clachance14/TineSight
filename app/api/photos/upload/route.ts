@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createBatch, linkBatchToSession, type CreateBatchLocationData } from '@/lib/services/batches'
 import { getSignedUploadUrl } from '@/lib/services/photos'
 import { findOrCreateCamera } from '@/lib/services/cameras'
+import { createLocation } from '@/lib/services/locations'
 import type { Json } from '@/types/database'
 
 // File validation constants
@@ -33,6 +34,7 @@ interface UploadFileRequest {
 interface UploadInitiationRequest {
   files: UploadFileRequest[]
   uploadSessionId?: string
+  locationId?: string
   locationLat?: number
   locationLng?: number
   areaName?: string
@@ -115,19 +117,65 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Resolve location ID - either use provided ID, find existing, or create new
+    let resolvedLocationId: string | undefined = body.locationId
+
+    // If locationId provided, verify user owns it
+    if (body.locationId) {
+      const { data: location } = await supabase
+        .from('locations')
+        .select('id')
+        .eq('id', body.locationId)
+        .eq('user_id', user.id)
+        .single()
+
+      if (!location) {
+        return NextResponse.json({ error: 'Invalid location' }, { status: 400 })
+      }
+      resolvedLocationId = body.locationId
+    } else if (body.areaName) {
+      // Try to find existing location with same name first
+      const { data: existing } = await supabase
+        .from('locations')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('name', body.areaName.trim())
+        .single()
+
+      if (existing) {
+        resolvedLocationId = existing.id
+      } else {
+        // Create new only if doesn't exist
+        try {
+          const { data: newLocation } = await createLocation(user.id, {
+            name: body.areaName.trim(),
+            lat: body.locationLat!,
+            lng: body.locationLng!,
+            ...(body.directionCompass !== undefined && { directionCompass: body.directionCompass }),
+            ...(body.directionNotes !== undefined && { directionNotes: body.directionNotes }),
+          })
+          resolvedLocationId = newLocation?.id
+        } catch (e) {
+          console.error('Location creation failed, proceeding without:', e)
+        }
+      }
+    }
+
     // Create processing batch with location data if provided
     const locationData: CreateBatchLocationData | undefined =
       body.locationLat !== undefined ||
       body.locationLng !== undefined ||
       body.areaName !== undefined ||
       body.directionCompass !== undefined ||
-      body.directionNotes !== undefined
+      body.directionNotes !== undefined ||
+      resolvedLocationId !== undefined
         ? {
             ...(body.locationLat !== undefined && { locationLat: body.locationLat }),
             ...(body.locationLng !== undefined && { locationLng: body.locationLng }),
             ...(body.areaName !== undefined && { areaName: body.areaName }),
             ...(body.directionCompass !== undefined && { directionCompass: body.directionCompass }),
             ...(body.directionNotes !== undefined && { directionNotes: body.directionNotes }),
+            ...(resolvedLocationId && { locationId: resolvedLocationId }),
           }
         : undefined
 

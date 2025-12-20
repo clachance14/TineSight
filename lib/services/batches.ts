@@ -19,6 +19,7 @@ export type { ProcessingBatch, ProcessingBatchInsert, ProcessingBatchUpdate }
  */
 
 export interface CreateBatchLocationData {
+  locationId?: string
   locationLat?: number
   locationLng?: number
   areaName?: string
@@ -43,6 +44,7 @@ export async function createBatch(
     user_id: userId,
     total_images: totalImages,
     status: 'pending',
+    ...(locationData?.locationId && { location_id: locationData.locationId }),
     ...(locationData?.locationLat !== undefined && { location_lat: locationData.locationLat }),
     ...(locationData?.locationLng !== undefined && { location_lng: locationData.locationLng }),
     ...(locationData?.areaName !== undefined && { area_name: locationData.areaName }),

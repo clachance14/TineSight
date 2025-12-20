@@ -252,6 +252,7 @@ function PhotosContent(): React.JSX.Element {
         onOpenDrawer={() => setDrawerOpen(true)}
         deerList={deerList}
         areaList={areaList}
+        totalFailedCount={statsData?.failed_photos}
       />
 
       {/* Filter Drawer */}

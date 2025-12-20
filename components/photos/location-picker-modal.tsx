@@ -53,6 +53,7 @@ export interface LocationData {
   areaName: string
   directionCompass?: number | undefined
   directionNotes?: string | undefined
+  locationId?: string
 }
 
 interface LocationPickerModalProps {
@@ -162,6 +163,7 @@ export function LocationPickerModal({
       lat: pinLocation.lat,
       lng: pinLocation.lng,
       areaName: areaName.trim(),
+      ...(isExistingLocationSelected && { locationId: selectedLocationId }),
     }
 
     if (selectedDirection !== undefined) {

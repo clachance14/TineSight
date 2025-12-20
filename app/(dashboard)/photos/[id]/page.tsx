@@ -91,12 +91,8 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
     notFound()
   }
 
-  // Get signed URL for the photo
+  // Get signed URL for the photo (may be null if storage file is missing)
   const { data: imageUrl } = await getSignedViewUrl(photo.file_path)
-
-  if (!imageUrl) {
-    notFound()
-  }
 
   // Transform detections for PhotoDetailClient component
   // Include Gemini analysis data (species, sex, buck size class, age class) and quality info
@@ -235,7 +231,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
         {/* Main photo view with ROI selection */}
         <div className="lg:col-span-2 space-y-4">
           <PhotoDetailClient
-            imageUrl={imageUrl}
+            imageUrl={imageUrl ?? null}
             detections={detections}
             imageWidth={imageWidth}
             imageHeight={imageHeight}
