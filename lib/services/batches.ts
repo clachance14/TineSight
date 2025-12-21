@@ -18,12 +18,22 @@ export type { ProcessingBatch, ProcessingBatchInsert, ProcessingBatchUpdate }
  * Manages batch upload and processing progress tracking.
  */
 
+export interface CreateBatchLocationData {
+  locationId?: string
+  locationLat?: number
+  locationLng?: number
+  areaName?: string
+  directionCompass?: number
+  directionNotes?: string
+}
+
 /**
  * Create a new processing batch
  */
 export async function createBatch(
   userId: string,
-  totalImages: number
+  totalImages: number,
+  locationData?: CreateBatchLocationData
 ): Promise<{
   data: ProcessingBatch | null
   error: Error | null
@@ -34,6 +44,12 @@ export async function createBatch(
     user_id: userId,
     total_images: totalImages,
     status: 'pending',
+    ...(locationData?.locationId && { location_id: locationData.locationId }),
+    ...(locationData?.locationLat !== undefined && { location_lat: locationData.locationLat }),
+    ...(locationData?.locationLng !== undefined && { location_lng: locationData.locationLng }),
+    ...(locationData?.areaName !== undefined && { area_name: locationData.areaName }),
+    ...(locationData?.directionCompass !== undefined && { direction_compass: locationData.directionCompass }),
+    ...(locationData?.directionNotes !== undefined && { direction_notes: locationData.directionNotes }),
   }
 
   const { data, error } = await supabase
@@ -154,6 +170,33 @@ export async function incrementBatchCounters(
 }
 
 /**
+ * Get batches with photo counts for dropdown display
+ * Returns batches ordered by creation date (newest first)
+ */
+export async function getBatchesWithCounts(
+  userId: string,
+  limit: number = 50
+): Promise<{
+  data: Array<{
+    id: string
+    created_at: string
+    total_images: number
+  }> | null
+  error: Error | null
+}> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('processing_batches')
+    .select('id, created_at, total_images')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  return { data, error }
+}
+
+/**
  * Mark batch as completed
  */
 export async function completeBatch(
@@ -177,4 +220,46 @@ export async function completeBatch(
     .single()
 
   return { data: data as ProcessingBatch | null, error }
+}
+
+/**
+ * Link a batch to an upload session
+ */
+export async function linkBatchToSession(
+  batchId: string,
+  uploadSessionId: string
+): Promise<{ error: Error | null }> {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('processing_batches')
+    .update({ upload_session_id: uploadSessionId })
+    .eq('id', batchId)
+
+  return { error }
+}
+
+/**
+ * Get distinct area names for a user (for autocomplete/filter dropdown)
+ */
+export async function getDistinctAreaNames(
+  userId: string
+): Promise<{
+  data: string[] | null
+  error: Error | null
+}> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('processing_batches')
+    .select('area_name')
+    .eq('user_id', userId)
+    .not('area_name', 'is', null)
+    .order('area_name')
+
+  if (error) return { data: null, error }
+
+  // Extract unique area names
+  const uniqueAreas = Array.from(new Set(data?.map(row => row.area_name).filter(Boolean) as string[]))
+  return { data: uniqueAreas, error: null }
 }

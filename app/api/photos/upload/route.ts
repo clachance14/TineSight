@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createBatch } from '@/lib/services/batches'
+import { createBatch, linkBatchToSession, type CreateBatchLocationData } from '@/lib/services/batches'
 import { getSignedUploadUrl } from '@/lib/services/photos'
 import { findOrCreateCamera } from '@/lib/services/cameras'
+import { createLocation } from '@/lib/services/locations'
 import type { Json } from '@/types/database'
 
 // File validation constants
@@ -32,6 +33,13 @@ interface UploadFileRequest {
 
 interface UploadInitiationRequest {
   files: UploadFileRequest[]
+  uploadSessionId?: string
+  locationId?: string
+  locationLat?: number
+  locationLng?: number
+  areaName?: string
+  directionCompass?: number
+  directionNotes?: string
 }
 
 interface UploadResponse {
@@ -109,10 +117,72 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create processing batch
+    // Resolve location ID - either use provided ID, find existing, or create new
+    let resolvedLocationId: string | undefined = body.locationId
+
+    // If locationId provided, verify user owns it
+    if (body.locationId) {
+      const { data: location } = await supabase
+        .from('locations')
+        .select('id')
+        .eq('id', body.locationId)
+        .eq('user_id', user.id)
+        .single()
+
+      if (!location) {
+        return NextResponse.json({ error: 'Invalid location' }, { status: 400 })
+      }
+      resolvedLocationId = body.locationId
+    } else if (body.areaName) {
+      // Try to find existing location with same name first
+      const { data: existing } = await supabase
+        .from('locations')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('name', body.areaName.trim())
+        .single()
+
+      if (existing) {
+        resolvedLocationId = existing.id
+      } else {
+        // Create new only if doesn't exist
+        try {
+          const { data: newLocation } = await createLocation(user.id, {
+            name: body.areaName.trim(),
+            lat: body.locationLat!,
+            lng: body.locationLng!,
+            ...(body.directionCompass !== undefined && { directionCompass: body.directionCompass }),
+            ...(body.directionNotes !== undefined && { directionNotes: body.directionNotes }),
+          })
+          resolvedLocationId = newLocation?.id
+        } catch (e) {
+          console.error('Location creation failed, proceeding without:', e)
+        }
+      }
+    }
+
+    // Create processing batch with location data if provided
+    const locationData: CreateBatchLocationData | undefined =
+      body.locationLat !== undefined ||
+      body.locationLng !== undefined ||
+      body.areaName !== undefined ||
+      body.directionCompass !== undefined ||
+      body.directionNotes !== undefined ||
+      resolvedLocationId !== undefined
+        ? {
+            ...(body.locationLat !== undefined && { locationLat: body.locationLat }),
+            ...(body.locationLng !== undefined && { locationLng: body.locationLng }),
+            ...(body.areaName !== undefined && { areaName: body.areaName }),
+            ...(body.directionCompass !== undefined && { directionCompass: body.directionCompass }),
+            ...(body.directionNotes !== undefined && { directionNotes: body.directionNotes }),
+            ...(resolvedLocationId && { locationId: resolvedLocationId }),
+          }
+        : undefined
+
     const { data: batch, error: batchError } = await createBatch(
       user.id,
-      body.files.length
+      body.files.length,
+      locationData
     )
 
     if (batchError !== null || batch === null) {
@@ -121,6 +191,16 @@ export async function POST(request: NextRequest) {
         { error: 'Failed to create upload batch' },
         { status: 500 }
       )
+    }
+
+    // Link batch to upload session if provided
+    if (body.uploadSessionId) {
+      const { error: linkError } = await linkBatchToSession(batch.id, body.uploadSessionId)
+
+      if (linkError) {
+        console.error('Failed to link batch to session:', linkError)
+        // Note: batch already created, continue with warning
+      }
     }
 
     // Single camera lookup - all files in a batch are assumed from the same camera

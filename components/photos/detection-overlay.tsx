@@ -27,6 +27,11 @@ interface DetectionOverlayProps {
   imageHeight: number
   visible?: boolean
   /**
+   * When false but visible is true, only show hovered/selected detections
+   * This allows "peek" behavior when hovering detection cards with boxes hidden
+   */
+  showAll?: boolean
+  /**
    * ID of the currently selected detection (for ROI editing)
    */
   selectedDetectionId?: string | null
@@ -47,6 +52,7 @@ export function DetectionOverlay({
   imageWidth,
   imageHeight,
   visible = true,
+  showAll = true,
   selectedDetectionId,
   hoveredDetectionId,
   onDetectionClick,
@@ -114,6 +120,10 @@ export function DetectionOverlay({
         const isHovered = detection.id === hoveredDetectionId
         const hasReference = detection.isReference
 
+        // Determine if this detection's box should be visible
+        // Show if: showAll is true, OR this detection is hovered/selected
+        const isBoxVisible = showAll || isHovered || isSelected
+
         // Color logic: hovered (copper glow), selected (cyan), reference (amber), linked deer (copper), unlinked deer (green), other (blue)
         let borderColor = "border-blue-500"
         let bgColor = "bg-blue-500/10"
@@ -162,12 +172,14 @@ export function DetectionOverlay({
           <div
             className={cn(
               "absolute border-2 rounded transition-all duration-200",
-              borderColor,
-              bgColor,
+              // Always keep pointer events for hover detection, even when invisible
               (onDetectionClick || onDetectionHover) && "pointer-events-auto cursor-pointer",
-              onDetectionClick && hoverBgColor,
-              isSelected && "border-3 ring-2 ring-cyan-400/50",
-              isHovered && "ring-2 ring-copper/50"
+              // Apply colors only when visible, otherwise transparent
+              isBoxVisible ? borderColor : "border-transparent",
+              isBoxVisible ? bgColor : "bg-transparent",
+              isBoxVisible && onDetectionClick && hoverBgColor,
+              isBoxVisible && isSelected && "border-3 ring-2 ring-cyan-400/50",
+              isBoxVisible && isHovered && "ring-2 ring-copper/50"
             )}
             style={{
               left: usePixels ? `${left}px` : `${left}%`,
@@ -179,54 +191,59 @@ export function DetectionOverlay({
             onMouseEnter={() => onDetectionHover?.(detection.id)}
             onMouseLeave={() => onDetectionHover?.(null)}
           >
-            {/* Confidence badge */}
-            <div
-              className={cn(
-                "absolute top-1 left-1 px-1.5 py-0.5 rounded text-xs font-medium text-cream",
-                badgeBgColor
-              )}
-            >
-              {Math.round(detection.confidence * 100)}%
-            </div>
+            {/* Only show badges when box is visible */}
+            {isBoxVisible && (
+              <>
+                {/* Confidence badge */}
+                <div
+                  className={cn(
+                    "absolute top-1 left-1 px-1.5 py-0.5 rounded text-xs font-medium text-cream",
+                    badgeBgColor
+                  )}
+                >
+                  {Math.round(detection.confidence * 100)}%
+                </div>
 
-            {/* Reference indicator */}
-            {hasReference && !isSelected && (
-              <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-400 text-slate-900">
-                REF
-              </div>
-            )}
-
-            {/* Quality status badge */}
-            {qualityBadgeColor && detection.qualityScore !== null && detection.qualityScore !== undefined && (
-              <div
-                className={cn(
-                  "absolute top-7 left-1 px-1.5 py-0.5 rounded text-xs font-medium text-cream",
-                  qualityBadgeColor
+                {/* Reference indicator */}
+                {hasReference && !isSelected && (
+                  <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-400 text-slate-900">
+                    REF
+                  </div>
                 )}
-              >
-                Q: {Math.round(detection.qualityScore * 100)}%
-              </div>
-            )}
 
-            {/* Selected indicator */}
-            {isSelected && (
-              <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-xs font-medium bg-cyan-400 text-slate-900">
-                SELECTED
-              </div>
-            )}
+                {/* Quality status badge */}
+                {qualityBadgeColor && detection.qualityScore !== null && detection.qualityScore !== undefined && (
+                  <div
+                    className={cn(
+                      "absolute top-7 left-1 px-1.5 py-0.5 rounded text-xs font-medium text-cream",
+                      qualityBadgeColor
+                    )}
+                  >
+                    Q: {Math.round(detection.qualityScore * 100)}%
+                  </div>
+                )}
 
-            {/* Deer name badge (if linked) */}
-            {detection.deerId && (
-              <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-xs font-medium bg-slate-deep/80 text-cream">
-                {detection.deerName || `Deer #${detection.deerId.slice(0, 6)}`}
-              </div>
-            )}
+                {/* Selected indicator */}
+                {isSelected && (
+                  <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-xs font-medium bg-cyan-400 text-slate-900">
+                    SELECTED
+                  </div>
+                )}
 
-            {/* ROI indicator */}
-            {detection.hasROI && !isSelected && (
-              <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-xs font-medium bg-copper/80 text-cream">
-                ROI
-              </div>
+                {/* Deer name badge (if linked) */}
+                {detection.deerId && (
+                  <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-xs font-medium bg-slate-deep/80 text-cream">
+                    {detection.deerName || `Deer #${detection.deerId.slice(0, 6)}`}
+                  </div>
+                )}
+
+                {/* ROI indicator */}
+                {detection.hasROI && !isSelected && (
+                  <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-xs font-medium bg-copper/80 text-cream">
+                    ROI
+                  </div>
+                )}
+              </>
             )}
           </div>
         )

@@ -42,7 +42,7 @@ interface DeleteDetectionResponse {
  * Fetch a single detection by ID
  */
 async function fetchDetection(detectionId: string): Promise<DetectionResponse> {
-  const response = await fetch(`/api/detections/${detectionId}`)
+  const response = await fetch(`/api/detections/${detectionId}`, { cache: 'no-store' })
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Failed to fetch detection' }))
@@ -121,6 +121,11 @@ export function useUpdateDetection() {
       }
       // Invalidate photo stats since detection classifications affect counts
       queryClient.invalidateQueries({ queryKey: ['photo-stats'] })
+      // Invalidate deer queries so sightings grid updates
+      if (data.deerId) {
+        queryClient.invalidateQueries({ queryKey: ['deer', data.deerId] })
+      }
+      queryClient.invalidateQueries({ queryKey: ['deer-catalog'] })
     },
   })
 }
@@ -133,9 +138,9 @@ export function useDeleteDetection() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ detectionId }: { detectionId: string; imageId?: string }) =>
+    mutationFn: ({ detectionId }: { detectionId: string; imageId?: string; deerId?: string }) =>
       deleteDetectionApi(detectionId),
-    onSuccess: (_, { detectionId, imageId }) => {
+    onSuccess: (_, { detectionId, imageId, deerId }) => {
       // Remove the detection from cache
       queryClient.removeQueries({ queryKey: ['detection', detectionId] })
       // Invalidate only the specific photo containing this detection
@@ -144,6 +149,11 @@ export function useDeleteDetection() {
       }
       // Invalidate photo stats since deletion affects counts
       queryClient.invalidateQueries({ queryKey: ['photo-stats'] })
+      // Invalidate deer queries so sightings grid updates
+      if (deerId) {
+        queryClient.invalidateQueries({ queryKey: ['deer', deerId] })
+      }
+      queryClient.invalidateQueries({ queryKey: ['deer-catalog'] })
     },
   })
 }

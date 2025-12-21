@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { PhotoDetailClient } from '@/components/photos/photo-detail-client'
 import { DetectionCardWithFeedback } from '@/components/photos/detection-card-with-feedback'
+import { PhotoDeleteButton } from '@/components/photos/photo-delete-button'
 import type { Detection } from '@/types/database'
 
 interface PhotoDetailPageProps {
@@ -54,6 +55,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
   const dateToParam = getParam('dateTo')
   const sizeClassParam = getParam('sizeClass')
   const cameraIdParam = getParam('cameraId')
+  const deerIdParam = getParam('deerId')
 
   if (statusParam) filters.status = statusParam
   if (hasDeerParam) filters.hasDeer = hasDeerParam === 'true'
@@ -66,6 +68,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
   if (dateToParam) filters.dateTo = dateToParam
   if (sizeClassParam) filters.sizeClass = sizeClassParam
   if (cameraIdParam) filters.cameraId = cameraIdParam
+  if (deerIdParam) filters.deerId = deerIdParam
 
   // Build query string for navigation links
   const filterQueryString = new URLSearchParams(
@@ -90,12 +93,8 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
     notFound()
   }
 
-  // Get signed URL for the photo
+  // Get signed URL for the photo (may be null if storage file is missing)
   const { data: imageUrl } = await getSignedViewUrl(photo.file_path)
-
-  if (!imageUrl) {
-    notFound()
-  }
 
   // Transform detections for PhotoDetailClient component
   // Include Gemini analysis data (species, sex, buck size class, age class) and quality info
@@ -168,6 +167,8 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
       deer: { label: 'Deer', className: 'bg-copper/20 text-copper-light' },
       empty: { label: 'Empty', className: 'bg-slate text-cream-dark' },
       other: { label: 'Other Animal', className: 'bg-blue-500/20 text-blue-300' },
+      person: { label: 'Person', className: 'bg-red-500/20 text-red-300' },
+      vehicle: { label: 'Vehicle', className: 'bg-blue-500/20 text-blue-300' },
     }
     const badge = badges[classification as keyof typeof badges] || badges.other
     return (
@@ -178,7 +179,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col h-full overflow-y-auto space-y-6">
       {/* Header with back button and navigation */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -197,7 +198,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
           </div>
         </div>
 
-        {/* Prev/Next navigation */}
+        {/* Prev/Next navigation and actions */}
         <div className="flex items-center gap-2">
           {prevId ? (
             <Button variant="outline" size="icon" asChild>
@@ -221,6 +222,10 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
               <ChevronRight className="h-4 w-4" />
             </Button>
           )}
+          <PhotoDeleteButton
+            photoId={id}
+            returnUrl={filterQueryString ? `/photos?${filterQueryString}` : '/photos'}
+          />
         </div>
       </div>
 
@@ -228,7 +233,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
         {/* Main photo view with ROI selection */}
         <div className="lg:col-span-2 space-y-4">
           <PhotoDetailClient
-            imageUrl={imageUrl}
+            imageUrl={imageUrl ?? null}
             detections={detections}
             imageWidth={imageWidth}
             imageHeight={imageHeight}

@@ -8,11 +8,12 @@ import type { PhotoFilters } from '@/lib/services/photos'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Check } from 'lucide-react'
+import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
 
 // Constants for virtualization
-const ROW_HEIGHT = 200 // px - approximate height for aspect-square cards
 const GAP = 16 // gap-4 = 1rem = 16px
+const ESTIMATED_ROW_HEIGHT = 250 // Conservative estimate for initial render
 
 interface PhotoGridProps {
   filters?: Omit<PhotoFilters, 'offset'>
@@ -40,10 +41,17 @@ interface Photo {
 const PhotoGridItem = memo(function PhotoGridItem({
   photo,
   onClick,
+  priority = false,
 }: {
   photo: Photo
   onClick: (id: string) => void
+  priority?: boolean // Load above-fold images with higher priority
 }) {
+  // Use separate selectors for better memoization
+  const isSelectMode = usePhotoSelectionStore((state) => state.isSelectMode)
+  const selected = usePhotoSelectionStore((state) => state.selectedPhotoIds.has(photo.id))
+  const togglePhotoSelection = usePhotoSelectionStore((state) => state.togglePhotoSelection)
+
   // Status badge variant mapping
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
@@ -64,13 +72,29 @@ const PhotoGridItem = memo(function PhotoGridItem({
     return status.charAt(0).toUpperCase() + status.slice(1)
   }
 
+  const handleClick = useCallback(() => {
+    // If in select mode, toggle selection instead of navigating
+    if (isSelectMode) {
+      togglePhotoSelection(photo.id)
+      return
+    }
+    onClick(photo.id)
+  }, [isSelectMode, togglePhotoSelection, photo.id, onClick])
+
+  const handleCheckboxClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    togglePhotoSelection(photo.id) // This auto-enters select mode
+  }, [togglePhotoSelection, photo.id])
+
   return (
     <div
       className={cn(
         'group relative aspect-square cursor-pointer overflow-hidden rounded-lg bg-slate',
-        'transition-all duration-200 hover:ring-2 hover:ring-copper'
+        !isSelectMode && 'hover:ring-2 hover:ring-copper',
+        selected && 'ring-2 ring-copper'
       )}
-      onClick={() => onClick(photo.id)}
+      onClick={handleClick}
     >
       <div className="relative h-full w-full">
         {photo.thumbnailUrl ? (
@@ -78,20 +102,26 @@ const PhotoGridItem = memo(function PhotoGridItem({
             src={photo.thumbnailUrl}
             alt="Trail camera photo"
             fill
-            className="object-cover transition-transform duration-200 group-hover:scale-105"
+            priority={priority}
+            className="object-cover"
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-            placeholder="blur"
-            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k="
+            {...(!priority && {
+              placeholder: "blur" as const,
+              blurDataURL: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k=",
+            })}
           />
         ) : photo.imageUrl ? (
           <Image
             src={photo.imageUrl}
             alt="Trail camera photo"
             fill
-            className="object-cover transition-transform duration-200 group-hover:scale-105"
+            priority={priority}
+            className="object-cover"
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-            placeholder="blur"
-            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k="
+            {...(!priority && {
+              placeholder: "blur" as const,
+              blurDataURL: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k=",
+            })}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-slate-700">
@@ -109,6 +139,34 @@ const PhotoGridItem = memo(function PhotoGridItem({
               />
             </svg>
           </div>
+        )}
+
+        {/* Checkbox overlay - visible on hover or in select mode */}
+        <div
+          className={cn(
+            'absolute top-2 left-2 z-10',
+            'transition-opacity duration-150',
+            isSelectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          )}
+        >
+          <button
+            type="button"
+            onClick={handleCheckboxClick}
+            className={cn(
+              'w-6 h-6 rounded border-2 flex items-center justify-center',
+              'transition-colors duration-150',
+              selected
+                ? 'bg-copper border-copper text-slate-deep'
+                : 'bg-slate-deep/80 border-cream/50 hover:border-cream'
+            )}
+          >
+            {selected && <Check className="w-4 h-4" />}
+          </button>
+        </div>
+
+        {/* Selection overlay */}
+        {selected && (
+          <div className="absolute inset-0 bg-copper/10 pointer-events-none" />
         )}
 
         {/* Status badge overlay */}
@@ -140,7 +198,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
         )}
 
         {/* Hover overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-deep/60 via-transparent to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-deep/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 pointer-events-none" />
       </div>
     </div>
   )
@@ -202,13 +260,36 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   // Calculate row count for virtualization
   const rowCount = Math.ceil(photos.length / columns)
 
-  // Virtualizer for rows
+  // Virtualizer for rows - uses dynamic measurement for accurate row heights
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT + GAP,
+    estimateSize: () => ESTIMATED_ROW_HEIGHT + GAP,
     overscan: 3, // Render 3 extra rows above/below viewport
   })
+
+  // Scroll restoration: when returning from photo detail, scroll to the photo's row
+  useEffect(() => {
+    if (photos.length === 0) return
+
+    const scrollToId = sessionStorage.getItem('photos:scrollToId')
+    if (!scrollToId) return
+
+    // Find the photo's index in the list
+    const photoIndex = photos.findIndex((p) => p.id === scrollToId)
+    if (photoIndex === -1) return
+
+    // Calculate which row this photo is in
+    const rowIndex = Math.floor(photoIndex / columns)
+
+    // Scroll to that row with a small delay to ensure virtualizer is ready
+    requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(rowIndex, { align: 'start' })
+    })
+
+    // Clear the stored ID so we don't scroll again on re-renders
+    sessionStorage.removeItem('photos:scrollToId')
+  }, [photos, columns, virtualizer])
 
   // Handle photo click
   const handlePhotoClick = useCallback(
@@ -222,17 +303,29 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   // Check if we're near the bottom to trigger infinite scroll
   useEffect(() => {
-    const virtualItems = virtualizer.getVirtualItems()
-    if (virtualItems.length === 0) return
+    const scrollElement = parentRef.current
+    if (!scrollElement) return
 
-    const lastItem = virtualItems[virtualItems.length - 1]
-    if (!lastItem) return
-
-    // If we're viewing the last few rows and there's more data, fetch it
-    if (lastItem.index >= rowCount - 3 && hasNextPage && !isFetchingNextPage) {
-      fetchNextPage()
+    const checkShouldLoadMore = () => {
+      const { scrollTop, scrollHeight, clientHeight } = scrollElement
+      // Load more when within 500px of bottom
+      if (scrollHeight - scrollTop - clientHeight < 500 && hasNextPage && !isFetchingNextPage) {
+        fetchNextPage()
+      }
     }
-  }, [virtualizer.getVirtualItems(), rowCount, hasNextPage, isFetchingNextPage, fetchNextPage])
+
+    scrollElement.addEventListener('scroll', checkShouldLoadMore, { passive: true })
+
+    // Check after layout completes - use RAF to ensure dimensions are calculated
+    const rafId = requestAnimationFrame(() => {
+      checkShouldLoadMore()
+    })
+
+    return () => {
+      scrollElement.removeEventListener('scroll', checkShouldLoadMore)
+      cancelAnimationFrame(rafId)
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
   // Loading skeleton
   if (isLoading) {
@@ -319,12 +412,15 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   // Virtualized photo grid
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Virtualized scroll container */}
       <div
         ref={parentRef}
-        className="h-[calc(100vh-280px)] overflow-auto"
-        style={{ contain: 'strict' }}
+        className="flex-1 min-h-0 overflow-auto"
+        style={{
+          contain: 'layout',
+          transform: 'translateZ(0)',
+        }}
       >
         <div
           style={{
@@ -336,21 +432,24 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const startIndex = virtualRow.index * columns
             const rowPhotos = photos.slice(startIndex, startIndex + columns)
+            // First 2 rows get priority loading for above-fold images
+            const isAboveFold = virtualRow.index < 2
 
             return (
               <div
                 key={virtualRow.key}
+                ref={virtualizer.measureElement}
+                data-index={virtualRow.index}
                 className="absolute left-0 top-0 w-full"
                 style={{
-                  height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,
+                  zIndex: 0,
                 }}
               >
                 <div
-                  className="grid gap-4"
+                  className="grid gap-4 pb-4"
                   style={{
                     gridTemplateColumns: `repeat(${columns}, 1fr)`,
-                    height: `${ROW_HEIGHT}px`,
                   }}
                 >
                   {rowPhotos.map((photo) => (
@@ -358,6 +457,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                       key={photo.id}
                       photo={photo}
                       onClick={handlePhotoClick}
+                      priority={isAboveFold}
                     />
                   ))}
                 </div>

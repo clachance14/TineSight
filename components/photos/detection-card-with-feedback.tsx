@@ -30,6 +30,7 @@ interface DetectionCardProps {
     bboxWidth: number
     bboxHeight: number
     deerId?: string | null
+    deerName?: string | null
     species?: string | null
     sex?: string | null
     sizeClass?: string | null
@@ -90,7 +91,7 @@ export const DetectionCardWithFeedback = memo(function DetectionCardWithFeedback
     >
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-cream">
-          Detection {index + 1}
+          {detection.deerName || `Detection ${index + 1}`}
         </span>
         <span className="text-xs text-cream-dark">
           {Math.round(detection.confidence * 100)}% confidence
@@ -187,6 +188,7 @@ export const DetectionCardWithFeedback = memo(function DetectionCardWithFeedback
           <Link
             href={`/deer/${detection.deerId}`}
             className="text-sm text-copper hover:text-copper-light transition-colors"
+            onClick={(e) => e.stopPropagation()}
           >
             View Deer Profile
           </Link>

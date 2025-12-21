@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef } from "react"
 import Image from "next/image"
+import { ImageOff } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { DetectionOverlay } from "./detection-overlay"
 import { PhotoLightbox } from "./photo-lightbox"
@@ -10,6 +11,7 @@ import { CropLightbox } from "./crop-lightbox"
 import { useObjectContainBounds } from "@/lib/hooks/use-object-contain-bounds"
 import { useDetectionHover } from "@/lib/stores/detection-hover"
 import { useDetectionEdit } from "@/lib/stores/detection-edit"
+import { useUIStore } from "@/lib/stores/ui"
 import { useDetection } from "@/lib/hooks/use-detection"
 import { BLUR_DATA_URL } from "@/lib/constants/image"
 
@@ -30,9 +32,9 @@ interface Detection {
 
 interface PhotoDetailClientProps {
   /**
-   * Signed URL for the photo image
+   * Signed URL for the photo image (null if storage file is missing)
    */
-  imageUrl: string
+  imageUrl: string | null
   /**
    * List of detections for this photo
    */
@@ -91,8 +93,8 @@ export function PhotoDetailClient({
     naturalHeight: naturalDimensions.height,
   })
 
-  // State for UI controls
-  const [showBoundingBoxes, setShowBoundingBoxes] = useState(true)
+  // State for UI controls - bounding box visibility persists across sessions
+  const { showBoundingBoxes, toggleBoundingBoxes } = useUIStore()
   const [isLightboxOpen, setIsLightboxOpen] = useState(false)
 
   // Handle detection click - open edit panel
@@ -109,81 +111,96 @@ export function PhotoDetailClient({
             ref={containerRef}
             className="relative aspect-video w-full overflow-hidden rounded-lg bg-slate-deep"
           >
-            <Image
-              src={imageUrl}
-              alt="Game camera photo"
-              fill
-              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
-              className="object-contain pointer-events-none"
-              priority
-              placeholder="blur"
-              blurDataURL={BLUR_DATA_URL}
-              onLoad={(e) => {
-                const img = e.currentTarget as HTMLImageElement
-                setNaturalDimensions({
-                  width: img.naturalWidth,
-                  height: img.naturalHeight,
-                })
-              }}
-            />
+            {imageUrl ? (
+              <>
+                <Image
+                  src={imageUrl}
+                  alt="Game camera photo"
+                  fill
+                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
+                  className="object-contain pointer-events-none"
+                  priority
+                  placeholder="blur"
+                  blurDataURL={BLUR_DATA_URL}
+                  onLoad={(e) => {
+                    const img = e.currentTarget as HTMLImageElement
+                    setNaturalDimensions({
+                      width: img.naturalWidth,
+                      height: img.naturalHeight,
+                    })
+                  }}
+                />
 
-            {/* Detection overlay */}
-            <DetectionOverlay
-              detections={detections}
-              imageWidth={imageWidth}
-              imageHeight={imageHeight}
-              visible={showDetections && showBoundingBoxes}
-              hoveredDetectionId={hoveredDetectionId}
-              onDetectionClick={handleDetectionClick}
-              onDetectionHover={setHoveredDetectionId}
-              imageBounds={imageBounds.ready ? imageBounds : undefined}
-            />
+                {/* Detection overlay */}
+                <DetectionOverlay
+                  detections={detections}
+                  imageWidth={imageWidth}
+                  imageHeight={imageHeight}
+                  visible={showDetections}
+                  showAll={showBoundingBoxes}
+                  hoveredDetectionId={hoveredDetectionId}
+                  onDetectionClick={handleDetectionClick}
+                  onDetectionHover={setHoveredDetectionId}
+                  imageBounds={imageBounds.ready ? imageBounds : undefined}
+                />
 
-            {/* Controls */}
-            <div className="absolute top-3 right-3 z-50 flex gap-2">
-              {detections.length > 0 && (
-                <button
-                  onClick={() => setShowBoundingBoxes(!showBoundingBoxes)}
-                  className="px-3 py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
-                >
-                  {showBoundingBoxes ? "Hide Boxes" : "Show Boxes"}
-                </button>
-              )}
-              <button
-                onClick={() => setIsLightboxOpen(true)}
-                className="px-3 py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
-              >
-                🔍 Zoom
-              </button>
-            </div>
+                {/* Controls */}
+                <div className="absolute top-3 right-3 z-50 flex gap-2">
+                  {detections.length > 0 && (
+                    <button
+                      onClick={toggleBoundingBoxes}
+                      className="px-3 py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
+                    >
+                      {showBoundingBoxes ? "Hide Boxes" : "Show Boxes"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setIsLightboxOpen(true)}
+                    className="px-3 py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
+                  >
+                    🔍 Zoom
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-cream-dark">
+                <ImageOff className="size-16 mb-4 opacity-50" />
+                <p className="text-lg font-medium">Image not found</p>
+                <p className="text-sm opacity-75">The storage file for this photo is missing</p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
 
-      {/* Photo Lightbox for zooming */}
-      <PhotoLightbox
-        imageUrl={imageUrl}
-        isOpen={isLightboxOpen}
-        onClose={() => setIsLightboxOpen(false)}
-      />
+      {/* Photo Lightbox for zooming (only render when image exists) */}
+      {imageUrl && (
+        <PhotoLightbox
+          imageUrl={imageUrl}
+          isOpen={isLightboxOpen}
+          onClose={() => setIsLightboxOpen(false)}
+        />
+      )}
 
       {/* Detection Edit Panel */}
       <DetectionEditPanel />
 
-      {/* Crop Lightbox for zoomed detection view */}
-      <CropLightbox
-        isOpen={isOpen}
-        cropUrl={fullDetection?.cropUrl}
-        imageUrl={imageUrl}
-        detection={selectedDetection ? {
-          bboxX: selectedDetection.bboxX,
-          bboxY: selectedDetection.bboxY,
-          bboxWidth: selectedDetection.bboxWidth,
-          bboxHeight: selectedDetection.bboxHeight,
-        } : null}
-        imageWidth={imageWidth}
-        imageHeight={imageHeight}
-      />
+      {/* Crop Lightbox for zoomed detection view (only render when image exists) */}
+      {imageUrl && (
+        <CropLightbox
+          isOpen={isOpen}
+          cropUrl={fullDetection?.cropUrl}
+          imageUrl={imageUrl}
+          detection={selectedDetection ? {
+            bboxX: selectedDetection.bboxX,
+            bboxY: selectedDetection.bboxY,
+            bboxWidth: selectedDetection.bboxWidth,
+            bboxHeight: selectedDetection.bboxHeight,
+          } : null}
+          imageWidth={imageWidth}
+          imageHeight={imageHeight}
+        />
+      )}
     </div>
   )
 }

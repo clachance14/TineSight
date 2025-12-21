@@ -15,7 +15,7 @@ export function useCameras() {
   return useQuery({
     queryKey: ['cameras'],
     queryFn: async (): Promise<CamerasResponse> => {
-      const res = await fetch('/api/cameras')
+      const res = await fetch('/api/cameras', { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch cameras' }))

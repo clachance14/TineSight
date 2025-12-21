@@ -1,17 +1,34 @@
 'use client'
 
-import { Suspense, useState, useEffect } from 'react'
+import React, { Suspense, useState, useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { useQuery } from '@tanstack/react-query'
 import { PhotoGrid } from '@/components/photos/photo-grid'
 import { PhotoFilters, type PhotoFilters as PhotoFiltersType } from '@/components/photos/photo-filters'
 import { PhotoFilterDrawer } from '@/components/photos/photo-filter-drawer'
+import { ProcessingStatusBar } from '@/components/photos/processing-status-bar'
+import { SelectionToolbar } from '@/components/photos/selection-toolbar'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import { useDeerCatalog } from '@/lib/hooks/use-deer'
-import type { PhotoFilters as ServicePhotoFilters } from '@/lib/services/photos'
+import { useAreas } from '@/lib/hooks/use-areas'
+import { useLocations } from '@/lib/hooks/use-locations'
+import { useRealtimePhotos } from '@/lib/hooks/use-realtime-photos'
+import { useCurrentUser } from '@/lib/hooks/use-current-user'
+import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
+import type { PhotoFilters as ServicePhotoFilters, OtherAnimalType } from '@/lib/services/photos'
 
-function PhotosContent() {
+function PhotosContent(): React.JSX.Element {
   const searchParams = useSearchParams()
   const router = useRouter()
+
+  // Get current user for realtime subscription
+  const { userId } = useCurrentUser()
+
+  // Subscribe to realtime photo updates
+  const { isConnected } = useRealtimePhotos({
+    userId,
+    enabled: userId.length > 0
+  })
 
   // Initialize filters from URL params
   const getInitialFilters = (): PhotoFiltersType => {
@@ -29,6 +46,11 @@ function PhotosContent() {
     const sizeClass = searchParams.get('sizeClass') as PhotoFiltersType['sizeClass'] | null
     const cameraIdParam = searchParams.get('cameraId')
     const deerIdParam = searchParams.get('deerId')
+    const batchIdParam = searchParams.get('batchId')
+    const uploadSessionIdParam = searchParams.get('uploadSessionId')
+    const areaNameParam = searchParams.get('areaName')
+    const sortByParam = searchParams.get('sortBy') as PhotoFiltersType['sortBy'] | null
+    const otherAnimalsParam = searchParams.get('otherAnimals')
 
     return {
       status: status || 'all',
@@ -45,6 +67,11 @@ function PhotosContent() {
       ...(datePreset ? { datePreset } : {}),
       ...(cameraIdParam ? { cameraId: cameraIdParam } : {}),
       ...(deerIdParam ? { deerId: deerIdParam } : {}),
+      ...(batchIdParam ? { batchId: batchIdParam } : {}),
+      ...(uploadSessionIdParam ? { uploadSessionId: uploadSessionIdParam } : {}),
+      ...(areaNameParam ? { areaName: areaNameParam } : {}),
+      ...(sortByParam ? { sortBy: sortByParam } : {}),
+      ...(otherAnimalsParam ? { otherAnimals: otherAnimalsParam.split(',') as OtherAnimalType[] } : {}),
     }
   }
 
@@ -57,6 +84,17 @@ function PhotosContent() {
   // Fetch deer catalog for filter dropdown
   const { data: deerData } = useDeerCatalog()
   const deerList = deerData?.deer ?? []
+
+  // Fetch areas for filter dropdown
+  const { data: areasData } = useAreas()
+  const areaList = areasData?.areas ?? []
+
+  // Fetch locations for bulk location assignment
+  const { data: locationsData } = useLocations()
+  const locationsList = locationsData?.locations ?? []
+
+  // Photo selection store
+  const clearSelection = usePhotoSelectionStore((state) => state.clearSelection)
 
   // Build filter query string from current filters
   const buildFilterQueryString = (currentFilters: PhotoFiltersType): string => {
@@ -76,6 +114,11 @@ function PhotosContent() {
     if (currentFilters.sizeClass && currentFilters.sizeClass !== 'all') params.set('sizeClass', currentFilters.sizeClass)
     if (currentFilters.cameraId) params.set('cameraId', currentFilters.cameraId)
     if (currentFilters.deerId) params.set('deerId', currentFilters.deerId)
+    if (currentFilters.batchId) params.set('batchId', currentFilters.batchId)
+    if (currentFilters.uploadSessionId) params.set('uploadSessionId', currentFilters.uploadSessionId)
+    if (currentFilters.areaName) params.set('areaName', currentFilters.areaName)
+    if (currentFilters.sortBy && currentFilters.sortBy !== 'imported_at') params.set('sortBy', currentFilters.sortBy)
+    if (currentFilters.otherAnimals?.length) params.set('otherAnimals', currentFilters.otherAnimals.join(','))
 
     return params.toString()
   }
@@ -86,6 +129,11 @@ function PhotosContent() {
     const newUrl = queryString ? `?${queryString}` : '/photos'
     router.replace(newUrl, { scroll: false })
   }, [filters, router])
+
+  // Clear photo selection when filters change
+  useEffect(() => {
+    clearSelection()
+  }, [filters, clearSelection])
 
   // Convert component filters to service filters
   const serviceFilters: ServicePhotoFilters = {
@@ -103,6 +151,10 @@ function PhotosContent() {
     ...(filters.sizeClass !== 'all' && filters.sizeClass !== undefined ? { sizeClass: filters.sizeClass } : {}),
     ...(filters.cameraId !== undefined ? { cameraId: filters.cameraId } : {}),
     ...(filters.deerId !== undefined ? { deerId: filters.deerId } : {}),
+    ...(filters.uploadSessionId !== undefined ? { uploadSessionId: filters.uploadSessionId } : {}),
+    ...(filters.areaName !== undefined ? { areaName: filters.areaName } : {}),
+    ...(filters.sortBy !== undefined ? { sortBy: filters.sortBy } : {}),
+    ...(filters.otherAnimals?.length ? { otherAnimals: filters.otherAnimals } : {}),
     limit: 50,
   }
 
@@ -113,41 +165,96 @@ function PhotosContent() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = usePhotosInfinite(serviceFilters)
+    isPlaceholderData, // True when showing previous data while loading new filter results
+    isFetching, // True when any fetch is in progress (including background)
+  } = usePhotosInfinite(serviceFilters, { realtimeActive: isConnected })
+
+  // Show updating indicator when fetching new filter results (but not initial load)
+  const isUpdatingFilters = !isLoading && isFetching && isPlaceholderData
+
+  // Fetch unfiltered total for stats display
+  const { data: statsData } = useQuery({
+    queryKey: ['photos', 'stats'],
+    queryFn: async () => {
+      const res = await fetch('/api/photos/stats')
+      if (!res.ok) return null
+      return res.json()
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Check if any filters are active
+  const hasActiveFilters =
+    filters.status !== 'all' ||
+    filters.hasDeer !== null ||
+    filters.hasDetections !== null ||
+    filters.qualityStatus !== 'all' ||
+    filters.sex !== 'all' ||
+    filters.sizeClass !== 'all' ||
+    filters.minConfidence !== undefined ||
+    filters.minPoints !== undefined ||
+    filters.maxPoints !== undefined ||
+    filters.dateFrom !== undefined ||
+    filters.dateTo !== undefined ||
+    filters.datePreset !== undefined ||
+    filters.cameraId !== undefined ||
+    filters.deerId !== undefined ||
+    filters.batchId !== undefined ||
+    filters.uploadSessionId !== undefined ||
+    filters.areaName !== undefined ||
+    (filters.otherAnimals && filters.otherAnimals.length > 0) ||
+    filters.sortBy === 'captured_at' // Only count as active if non-default
 
   // Flatten paginated data
   const photos = data?.pages?.flatMap(page => page.photos) ?? []
   const total = data?.pages?.[0]?.total ?? 0
+  const unfilteredTotal = statsData?.total_photos ?? 0
 
   // Calculate stats from the same data that renders in the grid
   const stats = {
-    total,
+    filtered: total,
+    unfilteredTotal,
     processing: photos.filter(p => p.detection_status === 'processing').length,
-    completed: photos.filter(p => p.detection_status === 'completed').length,
     failed: photos.filter(p => p.detection_status === 'failed').length,
+    hasActiveFilters,
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col h-full space-y-4">
       {/* Header with Stats */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-cream">
-            Photos
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight text-cream">
+              Photos
+            </h1>
+            {/* Subtle indicator when updating filter results */}
+            {isUpdatingFilters && (
+              <span className="text-xs text-copper animate-pulse">
+                updating...
+              </span>
+            )}
+          </div>
           {/* Compact Stats Bar */}
           <div className="mt-1 flex items-center gap-4 text-sm">
             <span className="text-cream-dark">
-              <span className="font-semibold tabular-nums text-cream">{stats.total}</span> total
+              {stats.hasActiveFilters && stats.unfilteredTotal > 0 ? (
+                <>
+                  <span className="font-semibold tabular-nums text-cream">{stats.filtered}</span>
+                  {' of '}
+                  <span className="font-semibold tabular-nums text-cream">{stats.unfilteredTotal}</span>
+                  {' photos'}
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold tabular-nums text-cream">{stats.unfilteredTotal || stats.filtered}</span>
+                  {' photos'}
+                </>
+              )}
             </span>
             {stats.processing > 0 && (
               <span className="text-blue-400">
                 <span className="font-semibold tabular-nums">{stats.processing}</span> processing
-              </span>
-            )}
-            {stats.completed > 0 && (
-              <span className="text-green-400">
-                <span className="font-semibold tabular-nums">{stats.completed}</span> completed
               </span>
             )}
             {stats.failed > 0 && (
@@ -159,12 +266,17 @@ function PhotosContent() {
         </div>
       </div>
 
+      {/* Processing Status Bar - shows during active batch processing */}
+      <ProcessingStatusBar />
+
       {/* Filters Toolbar */}
       <PhotoFilters
         filters={filters}
         onFiltersChange={setFilters}
         onOpenDrawer={() => setDrawerOpen(true)}
         deerList={deerList}
+        areaList={areaList}
+        totalFailedCount={statsData?.failed_photos}
       />
 
       {/* Filter Drawer */}
@@ -186,10 +298,20 @@ function PhotosContent() {
           fetchNextPage,
         }}
         onPhotoClick={(id) => {
+          // Store photo ID for scroll restoration when returning
+          sessionStorage.setItem('photos:scrollToId', id)
           const queryString = buildFilterQueryString(filters)
           const url = queryString ? `/photos/${id}?${queryString}` : `/photos/${id}`
           router.push(url)
         }}
+      />
+
+      {/* Selection Toolbar - appears when photos are selected */}
+      <SelectionToolbar
+        visiblePhotoIds={photos.map(p => p.id)}
+        locations={locationsList}
+        totalMatchingCount={total}
+        currentFilters={serviceFilters}
       />
     </div>
   )

@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getPhoto, getSignedViewUrl } from '@/lib/services/photos'
+import { getPhoto, getSignedViewUrl, deletePhoto } from '@/lib/services/photos'
 import type { Detection } from '@/types/database'
 
 interface DetectionResponse {
@@ -155,6 +155,52 @@ export async function GET(
     return NextResponse.json(response, { status: 200 })
   } catch (error) {
     console.error('Unexpected error in GET /api/photos/[id]:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * DELETE /api/photos/[id]
+ * Permanently deletes a photo and its associated files
+ */
+export async function DELETE(
+  _request: NextRequest,
+  context: RouteContext
+): Promise<NextResponse<{ success: boolean } | { error: string }>> {
+  try {
+    const { id } = await context.params
+
+    // Authenticate user
+    const supabase = await createClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError !== null || user === null) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Validate ID format (UUID)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
+      return NextResponse.json({ error: 'Invalid photo ID format' }, { status: 400 })
+    }
+
+    // Delete photo (service handles storage cleanup)
+    const { error: deleteError } = await deletePhoto(user.id, id)
+
+    if (deleteError !== null) {
+      console.error('Failed to delete photo:', deleteError)
+      return NextResponse.json({ error: 'Photo not found or already deleted' }, { status: 404 })
+    }
+
+    return NextResponse.json({ success: true }, { status: 200 })
+  } catch (error) {
+    console.error('Unexpected error in DELETE /api/photos/[id]:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

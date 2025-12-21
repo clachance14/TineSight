@@ -43,7 +43,7 @@ export function usePendingMatches(detectionId?: string) {
       const url = detectionId
         ? `/api/deer/matches?detection_id=${detectionId}`
         : '/api/deer/matches'
-      const res = await fetch(url)
+      const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) throw new Error('Failed to fetch matches')
       return res.json()
     },
@@ -118,6 +118,8 @@ export function useRejectMatch() {
  * Hook to skip a match (leave for later)
  */
 export function useSkipMatch() {
+  const queryClient = useQueryClient()
+
   return useMutation({
     mutationFn: async (matchId: string) => {
       const res = await fetch(`/api/deer/matches/${matchId}/skip`, {
@@ -125,6 +127,9 @@ export function useSkipMatch() {
       })
       if (!res.ok) throw new Error('Failed to skip match')
       return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-matches'] })
     },
   })
 }

@@ -1,29 +1,44 @@
 // Stage 1: Detection-only prompt (fast, focused on localization)
 export const DETECTION_ONLY_PROMPT = `
-Detect all deer in this image.
+Detect all animals, vehicles, and people in this trail camera image.
 
-### 1. BOUNDING BOX CRITERIA (The "Antler Rule")
-- **Goal:** Draw ONE box per deer.
-- **Vertical Extent:** The top of the box must reach the **HIGHEST ANTLER TIP**. Do NOT stop at the ears or skull.
-- **Horizontal Extent:** The box must be wide enough to include the **FULL SPREAD** of the antlers.
-- **The "Whole Animal" Rule:** Imagine the deer is a statue. Box the entire silhouette, including legs, tail, and the full rack.
-- **Occlusion:** If a deer is behind a feeder leg/post, draw ONE box that connects the head and body. Do not stop at the pole.
+### 1. CLASSIFICATION RULES
+Classify each detection into ONE of these classes:
+- **deer**: Whitetail deer, mule deer, elk (cervid family)
+- **hog**: Wild boar, feral pig (thick body, snout, tusks possible)
+- **cow**: Domestic cattle (large bovine, horns possible)
+- **goat**: Domestic or wild goat (bearded, upright curved horns)
+- **vehicle**: Truck, ATV, car, tractor, equipment
+- **person**: Human figure (clothing, upright posture)
 
-### 2. EDGE CASES
-- **Motion Blur (Night):** Detect blurry, "ghost-like" silhouettes as valid deer. Box the entire motion smear.
-- **Flash Blowout:** Detect large, glowing white shapes in the foreground as close-up deer.
-- **Crowds:** If multiple deer overlap, split them into **separate** overlapping boxes.
+### 2. ANTLER VERIFICATION (CRITICAL - "No False Antler" Rule)
+ONLY set has_antlers=true when ALL conditions are met:
+1. Detection is classified as "deer"
+2. Antlers are ATTACHED TO THE DEER'S HEAD (not background branches)
+3. Antlers show BONE STRUCTURE (not tree limbs, shadows, or artifacts)
+4. If in doubt, return has_antlers=false
 
-### 3. EXCLUSIONS
-- Ignore feeder legs/barrels (unless inside the deer box).
-- Ignore shadows and bird feeders.
-- **Tree Branches:** Do NOT include background branches in the box unless they are antlers attached to a buck's head.
+**Negative constraints:**
+- Tree branches behind deer: has_antlers=false (unless clear bone attached to skull)
+- Light streaks/motion blur: has_antlers=false
+- Equipment silhouettes: has_antlers=false
+- Ear confusion: Ears are NOT antlers
+- For non-deer classes: ALWAYS has_antlers=false
 
-### 4. ATTRIBUTES
-- **has_antlers**: Return true if *any* antlers (spikes, main beams) are visible. Return false for does or fawns.
+### 3. BOUNDING BOX RULES
+- ONE box per detection (animal, vehicle, or person)
+- Include full body from head to legs/wheels
+- For deer with antlers: top of box must reach HIGHEST ANTLER TIP
+- Overlapping detections get SEPARATE boxes
+
+### 4. EDGE CASES
+- Motion blur: Still detect as valid (box the entire smear)
+- Night flash: Detect glowing shapes as close-up animals
+- Partial visibility: Detect with available area
 
 ### 5. OUTPUT
-Return strict JSON with "box_2d" in [ymin, xmin, ymax, xmax] format (0-1000).
+Return JSON with "box_2d" in [ymin, xmin, ymax, xmax] format (0-1000).
+Set presence flags (deer_present, hogs_present, cows_present, goats_present, vehicles_present, people_present) based on what was detected.
 `.trim();
 
 // Stage 1+2: Combined detection and classification (legacy, comprehensive)
@@ -145,16 +160,22 @@ Use your reasoning to compare antler width against ear width.
 export const DEER_ANALYSIS_PROMPT = `Analyze this cropped deer image.
 
 TASK:
-1. Verification: Confirm this is a deer.
-2. Sex & Age: Check for neck swelling (rut), body mass, and nose length.
-3. Antler Analysis (CRITICAL):
-   - Use your "Thinking" process to compare antler width against ear width.
-   - Classify into size tiers: "spike", "basket", "standard", or "trophy"
+1. **Species Validation**: Confirm this is actually a deer.
+   - If it's a hog, cow, goat, or non-deer: set is_deer=false and exit.
+   - Deer have: slender legs, no tusks, no beard, cervid body shape.
+
+2. **Sex & Age**: Check for neck swelling (rut), body mass, and nose length.
+
+3. **Antler Analysis (CRITICAL - "Branch Test")**:
+   - First verify: Are these ACTUAL ANTLERS or background tree branches?
+   - Antlers: Attached at skull, bone texture, smooth curves, velvet possible
+   - Branches: Rough bark texture, detached from head, extend beyond silhouette
+   - If branches are confused for antlers: set has_antlers=false, sex="doe"
+
+   If confirmed antlers, use your "Thinking" process to compare antler width against ear width:
    - "spike": Single unbranched beams
    - "basket": Rack is narrow (width INSIDE the ears). Thin mass. Likely a yearling
    - "standard": Rack is wider than the ears. Good structure. Typical mature buck
    - "trophy": Exceptional mass, very wide spread, or tall tines. Dominant buck
-   - Distinguish between antlers and background tree branches.
-   - If the head is blurry or obscured, be conservative.
 
 OUTPUT: Return valid JSON. Use the 'reasoning_trace' field to explain your classification.`.trim();

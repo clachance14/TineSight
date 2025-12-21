@@ -11,9 +11,15 @@
 
 export interface DetectionResult {
   deer_present: boolean;
+  hogs_present: boolean;
+  cows_present: boolean;
+  goats_present: boolean;
+  vehicles_present: boolean;
+  people_present: boolean;
   image_quality_score: number;
   detections: Array<{
     box_2d: [number, number, number, number]; // [ymin, xmin, ymax, xmax] 0-1000
+    detection_class: 'deer' | 'hog' | 'cow' | 'goat' | 'vehicle' | 'person';
     has_antlers: boolean;
     confidence: number;
   }>;
@@ -74,6 +80,31 @@ export const DETECTION_SCHEMA = {
       description: "Whether any deer are visible in the image",
       nullable: false,
     },
+    hogs_present: {
+      type: "BOOLEAN" as const,
+      description: "Whether any hogs are visible in the image",
+      nullable: false,
+    },
+    cows_present: {
+      type: "BOOLEAN" as const,
+      description: "Whether any cows are visible in the image",
+      nullable: false,
+    },
+    goats_present: {
+      type: "BOOLEAN" as const,
+      description: "Whether any goats are visible in the image",
+      nullable: false,
+    },
+    vehicles_present: {
+      type: "BOOLEAN" as const,
+      description: "Whether any vehicles are visible in the image",
+      nullable: false,
+    },
+    people_present: {
+      type: "BOOLEAN" as const,
+      description: "Whether any people are visible in the image",
+      nullable: false,
+    },
     image_quality_score: {
       type: "NUMBER" as const,
       description: "Image quality score from 0-100 (lighting, focus, clarity)",
@@ -81,7 +112,7 @@ export const DETECTION_SCHEMA = {
     },
     detections: {
       type: "ARRAY" as const,
-      description: "Array of detected deer bounding boxes",
+      description: "Array of detected objects with bounding boxes",
       items: {
         type: "OBJECT" as const,
         properties: {
@@ -93,9 +124,15 @@ export const DETECTION_SCHEMA = {
             },
             nullable: false,
           },
+          detection_class: {
+            type: "STRING" as const,
+            description: "Classification of detected object",
+            enum: ["deer", "hog", "cow", "goat", "vehicle", "person"],
+            nullable: false,
+          },
           has_antlers: {
             type: "BOOLEAN" as const,
-            description: "Whether antlers are visible on this deer",
+            description: "Whether antlers are visible on this deer (false for non-deer)",
             nullable: false,
           },
           confidence: {
@@ -104,11 +141,11 @@ export const DETECTION_SCHEMA = {
             nullable: false,
           },
         },
-        required: ["box_2d", "has_antlers", "confidence"],
+        required: ["box_2d", "detection_class", "has_antlers", "confidence"],
       },
     },
   },
-  required: ["deer_present", "image_quality_score", "detections"],
+  required: ["deer_present", "hogs_present", "cows_present", "goats_present", "vehicles_present", "people_present", "image_quality_score", "detections"],
 };
 
 /**

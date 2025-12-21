@@ -1,4 +1,4 @@
-import { task, logger } from "@trigger.dev/sdk/v3";
+import { task, logger, schedules, metadata } from "@trigger.dev/sdk/v3";
 
 /**
  * Trigger.dev client for TineSight background jobs.
@@ -40,6 +40,39 @@ export { task };
  * ```
  */
 export { logger };
+
+/**
+ * Re-export schedules primitive for scheduled jobs.
+ * Use this to define scheduled tasks that run on a cron schedule.
+ *
+ * @example
+ * ```typescript
+ * import { schedules } from "./client";
+ *
+ * export const cleanupTask = schedules.task({
+ *   id: "cleanup-task",
+ *   cron: "0 * * * *", // Every hour
+ *   run: async () => {
+ *     // Scheduled job implementation
+ *   }
+ * });
+ * ```
+ */
+export { schedules };
+
+/**
+ * Re-export metadata for progress tracking and run metadata updates.
+ * Allows attaching up to 256KB of structured data to a run.
+ *
+ * @example
+ * ```typescript
+ * import { metadata } from "./client";
+ *
+ * metadata.set("progress", { current: 10, total: 100 });
+ * metadata.set("status", "processing");
+ * ```
+ */
+export { metadata };
 
 /**
  * Trigger.dev project configuration.

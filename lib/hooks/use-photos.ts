@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef } from 'react'
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
+import { useQuery, useInfiniteQuery, keepPreviousData } from '@tanstack/react-query'
 import type { PhotoFilters } from '@/lib/services/photos'
 
 /**
@@ -14,6 +14,12 @@ const BACKOFF_CONFIG = {
   maxInterval: 30000,   // Cap at 30 seconds
   multiplier: 2,        // Double each time
 }
+
+/**
+ * Realtime fallback poll interval (1 minute)
+ * Used when realtime is active but as a fallback safety mechanism
+ */
+const REALTIME_ACTIVE_POLL_INTERVAL = 60000
 
 /**
  * Calculate next poll interval with exponential backoff
@@ -103,6 +109,10 @@ export function usePhotos(filters?: PhotoFilters) {
 
   return useQuery({
     queryKey: ['photos', filters],
+    // Cache optimization for filter switching
+    staleTime: 5 * 60 * 1000, // 5 minutes - data stays fresh during browsing session
+    gcTime: 30 * 60 * 1000,   // 30 minutes - keep unused cache for filter switching
+    placeholderData: keepPreviousData, // Show previous photos instantly while loading new filter results
     queryFn: async (): Promise<PhotosResponse> => {
       const params = new URLSearchParams()
 
@@ -118,6 +128,9 @@ export function usePhotos(filters?: PhotoFilters) {
       }
       if (filters?.batchId !== undefined) {
         params.append('batchId', filters.batchId)
+      }
+      if (filters?.uploadSessionId !== undefined) {
+        params.append('uploadSessionId', filters.uploadSessionId)
       }
       if (filters?.cameraId !== undefined) {
         params.append('cameraId', filters.cameraId)
@@ -152,17 +165,26 @@ export function usePhotos(filters?: PhotoFilters) {
       if (filters?.deerId !== undefined) {
         params.append('deerId', filters.deerId)
       }
+      if (filters?.areaName !== undefined) {
+        params.append('areaName', filters.areaName)
+      }
+      if (filters?.sortBy !== undefined) {
+        params.append('sortBy', filters.sortBy)
+      }
       if (filters?.limit !== undefined) {
         params.append('limit', String(filters.limit))
       }
       if (filters?.offset !== undefined) {
         params.append('offset', String(filters.offset))
       }
+      if (filters?.otherAnimals?.length) {
+        params.append('otherAnimals', filters.otherAnimals.join(','))
+      }
 
       const queryString = params.toString()
       const url = `/api/photos${queryString ? `?${queryString}` : ''}`
 
-      const res = await fetch(url)
+      const res = await fetch(url, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch photos' }))
@@ -207,7 +229,10 @@ export function usePhotos(filters?: PhotoFilters) {
  * Hook to fetch photos with infinite scroll pagination
  * Uses cursor-based pagination with exponential backoff for polling
  */
-export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
+export function usePhotosInfinite(
+  filters?: Omit<PhotoFilters, 'offset'>,
+  options?: { realtimeActive?: boolean }
+) {
   // Track poll count and previous processing IDs for backoff
   const pollCountRef = useRef(0)
   const prevProcessingIdsRef = useRef<string>('')
@@ -229,6 +254,9 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
       }
       if (filters?.batchId !== undefined) {
         params.append('batchId', filters.batchId)
+      }
+      if (filters?.uploadSessionId !== undefined) {
+        params.append('uploadSessionId', filters.uploadSessionId)
       }
       if (filters?.cameraId !== undefined) {
         params.append('cameraId', filters.cameraId)
@@ -263,10 +291,19 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
       if (filters?.deerId !== undefined) {
         params.append('deerId', filters.deerId)
       }
+      if (filters?.areaName !== undefined) {
+        params.append('areaName', filters.areaName)
+      }
+      if (filters?.sortBy !== undefined) {
+        params.append('sortBy', filters.sortBy)
+      }
       if (filters?.limit !== undefined) {
         params.append('limit', String(filters.limit))
       } else {
         params.append('limit', '50')
+      }
+      if (filters?.otherAnimals?.length) {
+        params.append('otherAnimals', filters.otherAnimals.join(','))
       }
 
       // Add cursor for pagination
@@ -277,7 +314,7 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
       const queryString = params.toString()
       const url = `/api/photos${queryString ? `?${queryString}` : ''}`
 
-      const res = await fetch(url)
+      const res = await fetch(url, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch photos' }))
@@ -288,6 +325,11 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
+    // Cache optimization for filter switching
+    staleTime: 5 * 60 * 1000, // 5 minutes - data stays fresh during browsing session
+    gcTime: 30 * 60 * 1000,   // 30 minutes - keep unused cache for filter switching
+    placeholderData: keepPreviousData, // Show previous photos instantly while loading new filter results
+    maxPages: 10, // Limit memory usage - older pages can be re-fetched
     refetchInterval: (query) => {
       const pages = query.state.data?.pages
       if (!pages) return false
@@ -317,6 +359,11 @@ export function usePhotosInfinite(filters?: Omit<PhotoFilters, 'offset'>) {
         pollCountRef.current += 1
       }
 
+      // If realtime is active, use slow fallback polling instead of backoff
+      if (options?.realtimeActive === true) {
+        return REALTIME_ACTIVE_POLL_INTERVAL
+      }
+
       return calculateBackoff(pollCountRef.current)
     },
   })
@@ -329,7 +376,7 @@ export function usePhotoDetail(id: string) {
   return useQuery({
     queryKey: ['photo', id],
     queryFn: async (): Promise<PhotoDetailResponse> => {
-      const res = await fetch(`/api/photos/${id}`)
+      const res = await fetch(`/api/photos/${id}`, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch photo' }))
@@ -354,7 +401,7 @@ export function useBatchStatus(batchId: string) {
   return useQuery({
     queryKey: ['batch', batchId],
     queryFn: async (): Promise<BatchStatusResponse> => {
-      const res = await fetch(`/api/batches/${batchId}`)
+      const res = await fetch(`/api/batches/${batchId}`, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch batch status' }))

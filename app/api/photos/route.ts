@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getPhotos, getSignedViewUrls } from '@/lib/services/photos'
+import { getPhotos, getSignedViewUrls, type PhotoSortField, type OtherAnimalType } from '@/lib/services/photos'
 import type { Image } from '@/types/database'
 
 interface PhotoResponse extends Image {
@@ -50,6 +50,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const qualityStatusParam = searchParams.get('qualityStatus')
     const cameraIdParam = searchParams.get('cameraId')
     const deerIdParam = searchParams.get('deerId')
+    const uploadSessionId = searchParams.get('uploadSessionId') ?? undefined
+    const areaNameParam = searchParams.get('areaName')
+    const otherAnimalsParam = searchParams.get('otherAnimals')
 
     // Validate and parse limit (default 50, max 100)
     let limit = 50
@@ -195,6 +198,20 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       cameraId = cameraIdParam
     }
 
+    // Parse sortBy filter
+    const sortByParam = searchParams.get('sortBy')
+    let sortBy: PhotoSortField | undefined
+    if (sortByParam !== null) {
+      if (sortByParam === 'captured_at' || sortByParam === 'imported_at') {
+        sortBy = sortByParam
+      } else {
+        return NextResponse.json(
+          { error: 'Invalid sortBy: must be "captured_at" or "imported_at"' },
+          { status: 400 }
+        )
+      }
+    }
+
     // Build query to get photos
     // First, get one extra photo to determine if there's a next page
     const fetchLimit = limit + 1
@@ -215,6 +232,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       sizeClass?: string
       cameraId?: string
       deerId?: string
+      uploadSessionId?: string
+      areaName?: string
+      otherAnimals?: OtherAnimalType[]
+      sortBy?: PhotoSortField
       cursor?: string
       limit: number
       offset: number
@@ -279,6 +300,28 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       filters.batchId = batchId
     }
 
+    if (uploadSessionId !== undefined) {
+      filters.uploadSessionId = uploadSessionId
+    }
+
+    if (areaNameParam !== null && areaNameParam.trim() !== '') {
+      filters.areaName = areaNameParam
+    }
+
+    if (otherAnimalsParam !== null && otherAnimalsParam.trim() !== '') {
+      const validAnimals: OtherAnimalType[] = ['hogs', 'cows', 'goats', 'people', 'vehicles']
+      const animals = otherAnimalsParam.split(',').filter((a): a is OtherAnimalType =>
+        validAnimals.includes(a as OtherAnimalType)
+      )
+      if (animals.length > 0) {
+        filters.otherAnimals = animals
+      }
+    }
+
+    if (sortBy !== undefined) {
+      filters.sortBy = sortBy
+    }
+
     // Apply cursor for pagination
     if (cursor !== null) {
       filters.cursor = cursor
@@ -306,10 +349,15 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const hasNextPage = photos.length > limit
     const photosToReturn = hasNextPage ? photos.slice(0, limit) : photos
     const lastPhoto = photosToReturn[photosToReturn.length - 1]
-    // Cursor format: created_at::id (avoids extra DB lookup on pagination)
-    const nextCursor = hasNextPage && lastPhoto !== undefined
-      ? `${lastPhoto.created_at}::${lastPhoto.id}`
-      : null
+    // Cursor format: timestamp::id using the active sort field (avoids extra DB lookup on pagination)
+    const activeSortField = sortBy ?? 'imported_at'
+    let nextCursor: string | null = null
+    if (hasNextPage && lastPhoto !== undefined) {
+      const cursorTimestamp = activeSortField === 'captured_at'
+        ? (lastPhoto.captured_at ?? lastPhoto.imported_at)
+        : lastPhoto.imported_at
+      nextCursor = `${cursorTimestamp}::${lastPhoto.id}`
+    }
 
     // Fetch quality status and generate signed URLs in parallel for performance
     const photoIds = photosToReturn.map((p) => p.id)

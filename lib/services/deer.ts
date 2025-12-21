@@ -210,7 +210,9 @@ export async function getDeerCatalog(
 
     return {
       ...d,
-      sighting_count: Array.isArray(d['detections']) ? (d['detections'] as unknown[]).length : 0,
+      sighting_count: Array.isArray(d['detections']) && d['detections'][0]
+        ? (d['detections'][0] as { count: number }).count
+        : 0,
       reference_image_url: urlMap.get(index) ?? null,
       reference_bbox: refDetection ? {
         x: refDetection.bbox_x,

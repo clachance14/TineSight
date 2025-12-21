@@ -4,6 +4,8 @@ import { X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useCameras } from "@/lib/hooks/use-cameras"
+import { useBatches } from "@/lib/hooks/use-batches"
+import { useUploadSessions } from "@/lib/hooks/use-upload-sessions"
 import type { PhotoFilters } from "./photo-filters"
 
 interface PhotoFilterChipsProps {
@@ -25,6 +27,8 @@ function omitProperties<T, K extends keyof T>(
 
 export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsProps) {
   const { data: camerasData } = useCameras()
+  const { data: batchesData } = useBatches()
+  const { data: sessionsData } = useUploadSessions()
   const chips: { label: string; onRemove: () => void }[] = []
 
   // Status filter
@@ -40,11 +44,61 @@ export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsP
     })
   }
 
-  // Deer detection filter
+  // Deer detection filter (legacy hasDeer)
   if (filters.hasDeer !== null && filters.hasDeer !== undefined) {
     chips.push({
       label: filters.hasDeer ? 'Has Deer' : 'Empty',
       onRemove: () => onFiltersChange({ ...filters, hasDeer: null })
+    })
+  }
+
+  // Deer detection filter (new hasDetections)
+  if (filters.hasDetections !== null && filters.hasDetections !== undefined) {
+    chips.push({
+      label: filters.hasDetections ? 'With Deer' : 'No Deer',
+      onRemove: () => onFiltersChange({ ...filters, hasDetections: null })
+    })
+  }
+
+  // Other animals filter (multi-select)
+  if (filters.otherAnimals && filters.otherAnimals.length > 0) {
+    const animalLabels: Record<string, string> = {
+      hogs: 'Hogs',
+      cows: 'Cows',
+      goats: 'Goats',
+      people: 'People',
+      vehicles: 'Vehicles'
+    }
+    filters.otherAnimals.forEach((animal) => {
+      chips.push({
+        label: animalLabels[animal] || animal,
+        onRemove: () => {
+          const remaining = filters.otherAnimals?.filter(a => a !== animal)
+          if (remaining && remaining.length > 0) {
+            onFiltersChange({ ...filters, otherAnimals: remaining })
+          } else {
+            onFiltersChange(omitProperties(filters, 'otherAnimals') as PhotoFilters)
+          }
+        }
+      })
+    })
+  }
+
+  // Areas filter (multi-select)
+  if (filters.areaNames && filters.areaNames.length > 0) {
+    filters.areaNames.forEach((areaName) => {
+      const displayName = areaName === '__no_area__' ? 'No Area' : areaName
+      chips.push({
+        label: `Area: ${displayName}`,
+        onRemove: () => {
+          const remaining = filters.areaNames?.filter(a => a !== areaName)
+          if (remaining && remaining.length > 0) {
+            onFiltersChange({ ...filters, areaNames: remaining })
+          } else {
+            onFiltersChange(omitProperties(filters, 'areaNames') as PhotoFilters)
+          }
+        }
+      })
     })
   }
 
@@ -175,23 +229,66 @@ export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsP
 
   // Batch filter
   if (filters.batchId) {
+    const batch = batchesData?.batches.find(b => b.id === filters.batchId)
+    let batchLabel = `Batch: ${filters.batchId.slice(0, 8)}...`
+    if (batch) {
+      const date = new Date(batch.created_at)
+      batchLabel = `Batch: ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    }
     chips.push({
-      label: `Batch: ${filters.batchId.slice(0, 8)}...`,
+      label: batchLabel,
       onRemove: () => {
         onFiltersChange(omitProperties(filters, 'batchId') as PhotoFilters)
       }
     })
   }
 
+  // Upload Session filter
+  if (filters.uploadSessionId) {
+    const session = sessionsData?.sessions.find(s => s.id === filters.uploadSessionId)
+    let sessionLabel = `Upload: ${filters.uploadSessionId.slice(0, 8)}...`
+    if (session) {
+      const date = new Date(session.created_at)
+      sessionLabel = `Upload: ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (${session.total_images})`
+    }
+    chips.push({
+      label: sessionLabel,
+      onRemove: () => {
+        onFiltersChange(omitProperties(filters, 'uploadSessionId') as PhotoFilters)
+      }
+    })
+  }
+
+  // Sort filter (only show chip if non-default: not imported_at desc)
+  if (filters.sortBy === 'captured_at' || filters.sortDirection === 'asc') {
+    const fieldLabel = filters.sortBy === 'captured_at' ? 'Captured' : 'Uploaded'
+    const dirLabel = filters.sortDirection === 'asc' ? '↑' : '↓'
+    chips.push({
+      label: `Sort: ${fieldLabel} ${dirLabel}`,
+      onRemove: () => {
+        onFiltersChange({
+          ...omitProperties(filters, 'sortBy', 'sortDirection'),
+          sortBy: 'imported_at',
+          sortDirection: 'desc'
+        } as PhotoFilters)
+      }
+    })
+  }
+
   // Clear all filters helper
   const clearAll = () => {
-    onFiltersChange({
+    // Create clean filter object without undefined values to satisfy exactOptionalPropertyTypes
+    const cleanFilters: PhotoFilters = {
       status: 'all',
       hasDeer: null,
+      hasDetections: null,
       qualityStatus: 'all',
       sex: 'all',
       sizeClass: 'all',
-    })
+      sortBy: 'imported_at',
+      sortDirection: 'desc',
+    }
+    onFiltersChange(cleanFilters)
   }
 
   if (chips.length === 0) {

@@ -76,7 +76,7 @@ export function useROI(detectionId: string) {
   return useQuery({
     queryKey: ['roi', detectionId],
     queryFn: async (): Promise<ROIResponse> => {
-      const res = await fetch(`/api/detections/${detectionId}/roi`)
+      const res = await fetch(`/api/detections/${detectionId}/roi`, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch ROI' }))
@@ -227,7 +227,7 @@ export function useFeedback(detectionId: string) {
   return useQuery({
     queryKey: ['feedback', detectionId],
     queryFn: async (): Promise<FeedbackListResponse> => {
-      const res = await fetch(`/api/detections/${detectionId}/feedback`)
+      const res = await fetch(`/api/detections/${detectionId}/feedback`, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch feedback' }))

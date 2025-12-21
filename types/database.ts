@@ -331,6 +331,7 @@ export type Database = {
           crop_file_path: string | null
           deer_id: string | null
           deleted_at: string | null
+          detection_class: string | null
           distinguishing_features: string | null
           estimated_point_range: string | null
           gemini_confidence: number | null
@@ -361,6 +362,7 @@ export type Database = {
           crop_file_path?: string | null
           deer_id?: string | null
           deleted_at?: string | null
+          detection_class?: string | null
           distinguishing_features?: string | null
           estimated_point_range?: string | null
           gemini_confidence?: number | null
@@ -391,6 +393,7 @@ export type Database = {
           crop_file_path?: string | null
           deer_id?: string | null
           deleted_at?: string | null
+          detection_class?: string | null
           distinguishing_features?: string | null
           estimated_point_range?: string | null
           gemini_confidence?: number | null
@@ -470,6 +473,7 @@ export type Database = {
           captured_at: string | null
           classification: string | null
           confidence: number | null
+          cow_count: number | null
           created_at: string
           deer_count: number | null
           detection_status: string
@@ -477,13 +481,24 @@ export type Database = {
           exif_data: Json | null
           file_path: string
           file_size_bytes: number | null
+          goat_count: number | null
+          has_cows: boolean | null
           has_deer: boolean | null
+          has_goats: boolean | null
+          has_hogs: boolean | null
+          has_people: boolean | null
+          has_vehicles: boolean | null
+          hog_count: number | null
           id: string
           imported_at: string
           is_archived: boolean
+          is_cancelled: boolean
+          location_id: string | null
+          people_count: number | null
           retry_count: number
           thumbnail_path: string | null
           user_id: string
+          vehicle_count: number | null
         }
         Insert: {
           analysis_notes?: string | null
@@ -493,6 +508,7 @@ export type Database = {
           captured_at?: string | null
           classification?: string | null
           confidence?: number | null
+          cow_count?: number | null
           created_at?: string
           deer_count?: number | null
           detection_status?: string
@@ -500,13 +516,24 @@ export type Database = {
           exif_data?: Json | null
           file_path: string
           file_size_bytes?: number | null
+          goat_count?: number | null
+          has_cows?: boolean | null
           has_deer?: boolean | null
+          has_goats?: boolean | null
+          has_hogs?: boolean | null
+          has_people?: boolean | null
+          has_vehicles?: boolean | null
+          hog_count?: number | null
           id?: string
           imported_at?: string
           is_archived?: boolean
+          is_cancelled?: boolean
+          location_id?: string | null
+          people_count?: number | null
           retry_count?: number
           thumbnail_path?: string | null
           user_id: string
+          vehicle_count?: number | null
         }
         Update: {
           analysis_notes?: string | null
@@ -516,6 +543,7 @@ export type Database = {
           captured_at?: string | null
           classification?: string | null
           confidence?: number | null
+          cow_count?: number | null
           created_at?: string
           deer_count?: number | null
           detection_status?: string
@@ -523,13 +551,24 @@ export type Database = {
           exif_data?: Json | null
           file_path?: string
           file_size_bytes?: number | null
+          goat_count?: number | null
+          has_cows?: boolean | null
           has_deer?: boolean | null
+          has_goats?: boolean | null
+          has_hogs?: boolean | null
+          has_people?: boolean | null
+          has_vehicles?: boolean | null
+          hog_count?: number | null
           id?: string
           imported_at?: string
           is_archived?: boolean
+          is_cancelled?: boolean
+          location_id?: string | null
+          people_count?: number | null
           retry_count?: number
           thumbnail_path?: string | null
           user_id?: string
+          vehicle_count?: number | null
         }
         Relationships: [
           {
@@ -547,7 +586,64 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "images_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "images_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      locations: {
+        Row: {
+          color: string | null
+          created_at: string
+          direction_compass: number | null
+          direction_notes: string | null
+          id: string
+          lat: number
+          lng: number
+          name: string
+          notes: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          direction_compass?: number | null
+          direction_notes?: string | null
+          id?: string
+          lat: number
+          lng: number
+          name: string
+          notes?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          direction_compass?: number | null
+          direction_notes?: string | null
+          id?: string
+          lat?: number
+          lng?: number
+          name?: string
+          notes?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "locations_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -608,45 +704,83 @@ export type Database = {
       }
       processing_batches: {
         Row: {
+          area_name: string | null
+          cancelled_at: string | null
           completed_at: string | null
           created_at: string
+          direction_compass: number | null
+          direction_notes: string | null
           error_message: string | null
           failed_images: number
           id: string
+          location_id: string | null
+          location_lat: number | null
+          location_lng: number | null
           processed_images: number
           status: string
           successful_images: number
           total_images: number
+          upload_session_id: string | null
           uploaded_images: number
           user_id: string
         }
         Insert: {
+          area_name?: string | null
+          cancelled_at?: string | null
           completed_at?: string | null
           created_at?: string
+          direction_compass?: number | null
+          direction_notes?: string | null
           error_message?: string | null
           failed_images?: number
           id?: string
+          location_id?: string | null
+          location_lat?: number | null
+          location_lng?: number | null
           processed_images?: number
           status?: string
           successful_images?: number
           total_images?: number
+          upload_session_id?: string | null
           uploaded_images?: number
           user_id: string
         }
         Update: {
+          area_name?: string | null
+          cancelled_at?: string | null
           completed_at?: string | null
           created_at?: string
+          direction_compass?: number | null
+          direction_notes?: string | null
           error_message?: string | null
           failed_images?: number
           id?: string
+          location_id?: string | null
+          location_lat?: number | null
+          location_lng?: number | null
           processed_images?: number
           status?: string
           successful_images?: number
           total_images?: number
+          upload_session_id?: string | null
           uploaded_images?: number
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "processing_batches_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "processing_batches_upload_session_id_fkey"
+            columns: ["upload_session_id"]
+            isOneToOne: false
+            referencedRelation: "upload_sessions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "processing_batches_user_id_fkey"
             columns: ["user_id"]
@@ -773,6 +907,47 @@ export type Database = {
           },
         ]
       }
+      upload_sessions: {
+        Row: {
+          cancelled_at: string | null
+          completed_at: string | null
+          created_at: string
+          id: string
+          status: string
+          total_batches: number
+          total_images: number
+          user_id: string
+        }
+        Insert: {
+          cancelled_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          total_batches?: number
+          total_images?: number
+          user_id: string
+        }
+        Update: {
+          cancelled_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          total_batches?: number
+          total_images?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "upload_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -783,6 +958,37 @@ export type Database = {
         Returns: number
       }
       count_reference_rois: { Args: { query_user_id: string }; Returns: number }
+      filter_detections_with_images: {
+        Args: {
+          p_batch_id?: string
+          p_has_deer_id?: boolean
+          p_limit?: number
+          p_offset?: number
+          p_point_range?: string
+          p_quality_status?: string
+          p_sex?: string
+          p_size_class?: string
+          p_user_id: string
+        }
+        Returns: {
+          age_class: string
+          captured_at: string
+          crop_file_path: string
+          deer_id: string
+          deer_name: string
+          detection_id: string
+          estimated_point_range: string
+          file_path: string
+          gemini_confidence: number
+          image_id: string
+          quality_score: number
+          quality_status: string
+          sex: string
+          size_class: string
+          species: string
+          thumbnail_path: string
+        }[]
+      }
       find_similar_deer: {
         Args: {
           match_count?: number
@@ -799,6 +1005,101 @@ export type Database = {
           similarity: number
         }[]
       }
+      get_deer_catalog: {
+        Args: {
+          p_cursor_created_at?: string
+          p_cursor_id?: string
+          p_limit?: number
+          p_search?: string
+          p_user_id: string
+        }
+        Returns: {
+          created_at: string
+          first_seen: string
+          id: string
+          last_seen: string
+          name: string
+          notes: string
+          reference_detection_id: string
+          representative_file_path: string
+          representative_image_id: string
+          sighting_count: number
+          status: string
+        }[]
+      }
+      get_deer_sightings: {
+        Args: {
+          p_deer_id: string
+          p_limit?: number
+          p_offset?: number
+          p_user_id: string
+        }
+        Returns: {
+          captured_at: string
+          detection_id: string
+          estimated_point_range: string
+          file_path: string
+          image_id: string
+          size_class: string
+          total_count: number
+        }[]
+      }
+      get_pending_matches_summary: {
+        Args: { p_user_id: string }
+        Returns: {
+          captured_at: string
+          detection_id: string
+          file_path: string
+          image_id: string
+          pending_count: number
+          thumbnail_path: string
+        }[]
+      }
+      get_photo_stats:
+        | {
+            Args: { p_batch_id?: string; p_user_id: string }
+            Returns: {
+              analyzed_photos: number
+              basket_count: number
+              buck_count: number
+              doe_count: number
+              empty_photos: number
+              failed_photos: number
+              pending_photos: number
+              photos_with_deer: number
+              processing_photos: number
+              spike_count: number
+              standard_count: number
+              total_photos: number
+              trophy_count: number
+              unknown_count: number
+              unknown_size_count: number
+            }[]
+          }
+        | {
+            Args: {
+              p_batch_id?: string
+              p_upload_session_id?: string
+              p_user_id: string
+            }
+            Returns: {
+              analyzed_photos: number
+              basket_count: number
+              buck_count: number
+              doe_count: number
+              empty_photos: number
+              failed_photos: number
+              pending_photos: number
+              photos_with_deer: number
+              processing_photos: number
+              spike_count: number
+              standard_count: number
+              total_photos: number
+              trophy_count: number
+              unknown_count: number
+              unknown_size_count: number
+            }[]
+          }
       has_account_access: {
         Args: { account_owner_id: string }
         Returns: boolean
@@ -950,15 +1251,53 @@ export const Constants = {
 
 // Convenience type aliases for common tables
 export type Camera = Tables<'cameras'>
+export type CameraInsert = TablesInsert<'cameras'>
+export type CameraUpdate = TablesUpdate<'cameras'>
+
 export type Deer = Tables<'deer'>
+export type DeerInsert = TablesInsert<'deer'>
+export type DeerUpdate = TablesUpdate<'deer'>
+
 export type DeerEmbedding = Tables<'deer_embeddings'>
+export type DeerEmbeddingInsert = TablesInsert<'deer_embeddings'>
+
 export type Detection = Tables<'detections'>
 export type DetectionInsert = TablesInsert<'detections'>
+export type DetectionUpdate = TablesUpdate<'detections'>
+
+export type DetectionRoi = Tables<'detection_rois'>
+export type DetectionRoiInsert = TablesInsert<'detection_rois'>
+
 export type Image = Tables<'images'>
 export type ImageInsert = TablesInsert<'images'>
 export type ImageUpdate = TablesUpdate<'images'>
+
+export type Location = Tables<'locations'>
+export type LocationInsert = TablesInsert<'locations'>
+export type LocationUpdate = TablesUpdate<'locations'>
+
+export type MatchCandidate = Tables<'match_candidates'>
+export type MatchCandidateInsert = TablesInsert<'match_candidates'>
+
 export type ProcessingBatch = Tables<'processing_batches'>
 export type ProcessingBatchInsert = TablesInsert<'processing_batches'>
 export type ProcessingBatchUpdate = TablesUpdate<'processing_batches'>
+
 export type Profile = Tables<'profiles'>
 export type ProfileInsert = TablesInsert<'profiles'>
+export type ProfileUpdate = TablesUpdate<'profiles'>
+
+export type RoiFeedback = Tables<'roi_feedback'>
+export type RoiFeedbackInsert = TablesInsert<'roi_feedback'>
+
+export type TeamMember = Tables<'team_members'>
+export type TeamMemberInsert = TablesInsert<'team_members'>
+
+export type UploadSession = Tables<'upload_sessions'>
+export type UploadSessionInsert = TablesInsert<'upload_sessions'>
+
+export type FilterPreset = Tables<'filter_presets'>
+export type FilterPresetInsert = TablesInsert<'filter_presets'>
+
+export type BatchMetrics = Tables<'batch_metrics'>
+export type BatchMetricsInsert = TablesInsert<'batch_metrics'>

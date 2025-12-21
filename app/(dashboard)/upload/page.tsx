@@ -5,14 +5,20 @@ import Link from 'next/link'
 import { useQueryClient } from '@tanstack/react-query'
 import { PhotoUploader } from '@/components/photos/photo-uploader'
 import { UploadProgressPanel } from '@/components/photos/upload-progress-panel'
+import { LocationPickerModal, type LocationData } from '@/components/photos/location-picker-modal'
 import { useUploadStore, batchedUpdateProgress } from '@/lib/stores/upload'
+import { setActiveUploadSessionId } from '@/lib/hooks/use-active-batch'
+import { useLocations } from '@/lib/hooks/use-locations'
+import { useAdaptiveThrottle } from '@/lib/hooks/use-adaptive-throttle'
+import { classifyXHRError } from '@/lib/throttle'
+import { ThrottleMetricsPanel } from '@/components/debug/throttle-metrics-panel'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Image } from 'lucide-react'
 
-const CHUNK_SIZE = 20
-const PARALLEL_CHUNKS = 1
-const PROGRESS_THROTTLE_MS = 500 // Max 2 updates per second per file
+const PROGRESS_THROTTLE_MS = 100 // Max 10 updates per second per file for smoother progress
+const MAX_RETRIES = 3
+const RETRY_DELAY_MS = 1000
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
@@ -20,9 +26,94 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   )
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+interface FailedUpload {
+  fileId: string
+  filename: string
+  file: File
+  uploadUrl: string
+  attempt: number
+}
+
 export default function UploadPage() {
   const queryClient = useQueryClient()
   const progressThrottles = useRef<Map<string, number>>(new Map())
+  const failedUploadsRef = useRef<FailedUpload[]>([])
+  const uploadStartTimes = useRef<Map<string, number>>(new Map())
+
+  // Initialize adaptive throttler for upload operations
+  const throttle = useAdaptiveThrottle('upload')
+
+  // Reusable XHR upload function
+  const uploadFile = useCallback((
+    fileId: string,
+    filename: string,
+    file: File,
+    uploadUrl: string
+  ): Promise<{ success: true } | { success: false; error: string }> => {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest()
+      const startTime = Date.now()
+      uploadStartTimes.current.set(fileId, startTime)
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const now = Date.now()
+          const lastUpdate = progressThrottles.current.get(fileId) || 0
+          const progress = Math.round((event.loaded / event.total) * 100)
+          // Always report: first update (lastUpdate === 0), 100%, or if throttle interval passed
+          if (lastUpdate === 0 || progress === 100 || now - lastUpdate > PROGRESS_THROTTLE_MS) {
+            progressThrottles.current.set(fileId, now)
+            batchedUpdateProgress(fileId, progress)
+          }
+        }
+      }
+
+      xhr.onload = () => {
+        const duration = Date.now() - startTime
+        uploadStartTimes.current.delete(fileId)
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          // Record success with duration
+          throttle.recordSuccess(duration)
+          resolve({ success: true })
+        } else {
+          console.error(`[Upload Failed] ${filename}`, {
+            status: xhr.status,
+            statusText: xhr.statusText,
+            response: xhr.responseText?.slice(0, 500),
+          })
+          // Record failure with classified error type
+          throttle.recordFailure(classifyXHRError(xhr))
+          resolve({ success: false, error: `Upload failed: ${xhr.status} ${xhr.statusText}` })
+        }
+      }
+
+      xhr.onerror = () => {
+        uploadStartTimes.current.delete(fileId)
+        console.error(`[Network Error] ${filename}`, { readyState: xhr.readyState })
+        // Record network failure
+        throttle.recordFailure('network')
+        resolve({ success: false, error: 'Network error - browser connection failed' })
+      }
+
+      xhr.ontimeout = () => {
+        uploadStartTimes.current.delete(fileId)
+        console.error(`[Timeout] ${filename}`)
+        // Record network failure (timeout is a network issue)
+        throttle.recordFailure('network')
+        resolve({ success: false, error: 'Upload timeout' })
+      }
+
+      xhr.timeout = 120000
+      xhr.open('PUT', uploadUrl)
+      xhr.setRequestHeader('Content-Type', file.type)
+      xhr.send(file)
+    })
+  }, [throttle])
 
   const {
     uploadQueue,
@@ -30,140 +121,260 @@ export default function UploadPage() {
     startUpload,
     markFileCompleted,
     markFileFailed,
+    pendingLocation,
+    showLocationPicker,
+    setPendingLocation,
+    setShowLocationPicker,
   } = useUploadStore()
+
+  // Fetch existing locations for dropdown in location picker
+  const { data: locationsData } = useLocations()
+  const existingLocations = locationsData?.locations ?? []
+
+  // Handle files ready - show location picker
+  const handleFilesReady = useCallback(() => {
+    setShowLocationPicker(true)
+  }, [setShowLocationPicker])
+
+  // Handle location confirmed - convert modal LocationData to store LocationData
+  const handleLocationConfirm = useCallback((location: LocationData) => {
+    // Map modal LocationData to store LocationData (handling optional properties)
+    setPendingLocation({
+      lat: location.lat,
+      lng: location.lng,
+      areaName: location.areaName,
+      ...(location.directionCompass !== undefined && { directionCompass: location.directionCompass }),
+      ...(location.directionNotes !== undefined && { directionNotes: location.directionNotes }),
+    })
+    setShowLocationPicker(false)
+  }, [setPendingLocation, setShowLocationPicker])
+
+  // Handle location skipped
+  const handleLocationSkip = useCallback(() => {
+    setPendingLocation(null)
+    setShowLocationPicker(false)
+  }, [setPendingLocation, setShowLocationPicker])
 
   const handleStartUpload = useCallback(async () => {
     const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
     if (pendingFiles.length === 0) return
 
-    const chunks = chunkArray(pendingFiles, CHUNK_SIZE)
+    // Check if throttler allows proceeding
+    const proceedResult = throttle.shouldProceed()
+    if (!proceedResult.allowed) {
+      console.warn(`[Throttle] Not allowed to proceed: ${proceedResult.reason}`)
+      if (proceedResult.waitMs && proceedResult.waitMs > 0) {
+        console.log(`[Throttle] Waiting ${proceedResult.waitMs}ms before proceeding...`)
+        await throttle.waitForRecovery()
+      }
+    }
 
-    // Process a single chunk
-    const processChunk = async (chunk: typeof pendingFiles) => {
-      try {
-        // Step 1: Initialize batch and get signed URLs for this chunk
-        const response = await fetch('/api/photos/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            files: chunk.map((f) => ({
-              id: f.id,
-              filename: f.filename,
-              contentType: f.file?.type ?? 'image/jpeg',
-              size: f.file?.size ?? 0,
-              capturedAt: f.capturedAt?.toISOString(),
-              make: f.make,
-              model: f.model,
-              deviceIdentifier: f.deviceIdentifier,
-              exifSignature: f.exifSignature,
-              exifData: f.exifData,
-            })),
+    // Clear failed uploads from previous runs
+    failedUploadsRef.current = []
+
+    // Create upload session before chunking
+    let sessionId: string | null = null
+    try {
+      const sessionRes = await fetch('/api/upload-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (sessionRes.ok) {
+        const sessionData = await sessionRes.json()
+        sessionId = sessionData.sessionId
+        // Track this session for processing status bar (set once, not per-batch)
+        if (sessionId) {
+          setActiveUploadSessionId(sessionId)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create upload session:', err)
+      // Continue without session - backward compatible
+    }
+
+    // Get dynamic values from throttler
+    const chunkSize = throttle.getChunkSize()
+    const parallelChunks = throttle.getConcurrency()
+
+    console.log(`[Throttle] Using chunk size: ${chunkSize}, concurrency: ${parallelChunks}`)
+
+    const chunks = chunkArray(pendingFiles, chunkSize)
+
+    // Initialize a batch: get signed URLs from API
+    const initializeBatch = async (chunk: typeof pendingFiles) => {
+      const response = await fetch('/api/photos/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uploadSessionId: sessionId,
+          ...(pendingLocation && {
+            locationId: pendingLocation.locationId,
+            locationLat: pendingLocation.lat,
+            locationLng: pendingLocation.lng,
+            areaName: pendingLocation.areaName,
+            ...(pendingLocation.directionCompass !== undefined && { directionCompass: pendingLocation.directionCompass }),
+            ...(pendingLocation.directionNotes !== undefined && { directionNotes: pendingLocation.directionNotes }),
           }),
-        })
+          files: chunk.map((f) => ({
+            id: f.id,
+            filename: f.filename,
+            contentType: f.file?.type ?? 'image/jpeg',
+            size: f.file?.size ?? 0,
+            capturedAt: f.capturedAt?.toISOString(),
+            make: f.make,
+            model: f.model,
+            deviceIdentifier: f.deviceIdentifier,
+            exifSignature: f.exifSignature,
+            exifData: f.exifData,
+          })),
+        }),
+      })
 
-        if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.error || 'Failed to initialize upload')
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to initialize upload')
+      }
+
+      const { batchId, uploads } = await response.json()
+      return { chunk, batchId, uploads }
+    }
+
+    // Upload files using pre-fetched signed URLs
+    const uploadBatch = async (batchData: { chunk: typeof pendingFiles; batchId: string; uploads: Array<{ fileId: string; uploadUrl: string; imageId: string }> }) => {
+      const { chunk, batchId, uploads } = batchData
+
+      // Update store with upload URLs and mark as uploading
+      startUpload(batchId, uploads)
+
+      // Upload each file to its signed URL
+      const uploadPromises = chunk.map(async (file) => {
+        const uploadInfo = uploads.find((u) => u.fileId === file.id)
+        if (!uploadInfo) {
+          markFileFailed(file.id, 'No upload URL received')
+          return
         }
 
-        const { batchId, uploads } = await response.json()
+        if (!file.file) {
+          markFileFailed(file.id, 'File data not available')
+          return
+        }
 
-        // Step 2: Update store with upload URLs and mark as uploading
-        startUpload(batchId, uploads)
+        const result = await uploadFile(file.id, file.filename, file.file, uploadInfo.uploadUrl)
 
-        // Step 3: Upload each file to its signed URL
-        const uploadPromises = chunk.map(async (file) => {
-          const uploadInfo = uploads.find((u: { fileId: string }) => u.fileId === file.id)
-          if (!uploadInfo) {
-            markFileFailed(file.id, 'No upload URL received')
-            return
-          }
+        if (result.success) {
+          markFileCompleted(file.id)
+        } else {
+          failedUploadsRef.current.push({
+            fileId: file.id,
+            filename: file.filename,
+            file: file.file,
+            uploadUrl: uploadInfo.uploadUrl,
+            attempt: 1,
+          })
+        }
+      })
 
-          try {
-            // File must exist for pending uploads
-            if (!file.file) {
-              markFileFailed(file.id, 'File data not available')
-              return
-            }
-            const fileData = file.file
+      await Promise.all(uploadPromises)
 
-            const xhr = new XMLHttpRequest()
-            xhr.upload.onprogress = (event) => {
-              if (event.lengthComputable) {
-                const now = Date.now()
-                const lastUpdate = progressThrottles.current.get(file.id) || 0
-                // Throttle updates to max 2 per second, but always send 100%
-                const progress = Math.round((event.loaded / event.total) * 100)
-                if (progress === 100 || now - lastUpdate > PROGRESS_THROTTLE_MS) {
-                  progressThrottles.current.set(file.id, now)
-                  batchedUpdateProgress(file.id, progress)
-                }
-              }
-            }
-
-            await new Promise<void>((resolve, reject) => {
-              xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                  resolve()
-                } else {
-                  // Log Supabase error details
-                  console.error(`[Upload Failed] ${file.filename}`, {
-                    status: xhr.status,
-                    statusText: xhr.statusText,
-                    response: xhr.responseText?.slice(0, 500),
-                  })
-                  reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`))
-                }
-              }
-              xhr.onerror = () => {
-                // Log browser/network error
-                console.error(`[Network Error] ${file.filename}`, {
-                  readyState: xhr.readyState,
-                })
-                reject(new Error('Network error - browser connection failed'))
-              }
-              xhr.ontimeout = () => {
-                console.error(`[Timeout] ${file.filename}`)
-                reject(new Error('Upload timeout'))
-              }
-              xhr.timeout = 120000 // 120 second timeout
-              xhr.open('PUT', uploadInfo.uploadUrl)
-              xhr.setRequestHeader('Content-Type', fileData.type)
-              xhr.send(fileData)
-            })
-
-            markFileCompleted(file.id)
-          } catch (err) {
-            markFileFailed(file.id, err instanceof Error ? err.message : 'Upload failed')
-          }
-        })
-
-        await Promise.all(uploadPromises)
-
-        // Step 4: Trigger processing for this chunk immediately
-        await fetch('/api/photos/upload/complete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batchId, uploadedImageIds: uploads.map((u: { imageId: string }) => u.imageId) }),
-        })
-
-      } catch (err) {
-        console.error('Chunk upload failed:', err)
-      }
+      // Trigger processing for this chunk
+      await fetch('/api/photos/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchId, uploadedImageIds: uploads.map((u) => u.imageId) }),
+      })
     }
 
     setIsPreparing(true)
 
-    // Process chunks in parallel batches of PARALLEL_CHUNKS
-    for (let i = 0; i < chunks.length; i += PARALLEL_CHUNKS) {
-      const batch = chunks.slice(i, i + PARALLEL_CHUNKS)
-      await Promise.all(batch.map(processChunk))
+    // Start session timer for metrics tracking
+    throttle.startSession()
+
+    // Pipeline: fetch signed URLs for next round while current round uploads
+    // This overlaps API latency with upload time
+    const rounds = chunkArray(chunks, parallelChunks)
+
+    // Pre-fetch first round's signed URLs
+    let currentRoundPromises = rounds[0]?.map((chunk) =>
+      initializeBatch(chunk).catch((err) => {
+        console.error('Batch init failed:', err)
+        return null
+      })
+    ) ?? []
+
+    for (let i = 0; i < rounds.length; i++) {
+      // Wait for current round's init to complete
+      const batchDataList = await Promise.all(currentRoundPromises)
+
+      // Start pre-fetching NEXT round's signed URLs (overlaps with uploads below)
+      if (i + 1 < rounds.length) {
+        currentRoundPromises = rounds[i + 1]!.map((chunk) =>
+          initializeBatch(chunk).catch((err) => {
+            console.error('Batch init failed:', err)
+            return null
+          })
+        )
+      }
+
+      // Upload all chunks in current round (parallel uploads)
+      // While this runs, next round's API calls are in flight
+      await Promise.all(
+        batchDataList
+          .filter((data): data is NonNullable<typeof data> => data !== null)
+          .map((batchData) => uploadBatch(batchData))
+      )
     }
 
-    // Step 5: Refresh photo list after all chunks
+    // Step 5: Retry failed uploads at the end
+    while (failedUploadsRef.current.length > 0) {
+      const toRetry = [...failedUploadsRef.current]
+      failedUploadsRef.current = []
+
+      console.log(`[Retry] Retrying ${toRetry.length} failed uploads...`)
+
+      // Add delay before retry batch
+      await delay(RETRY_DELAY_MS)
+
+      for (const failed of toRetry) {
+        if (failed.attempt >= MAX_RETRIES) {
+          // Exhausted retries, mark as failed
+          console.error(`[Upload Failed] ${failed.filename} after ${MAX_RETRIES} attempts`)
+          markFileFailed(failed.fileId, `Upload failed after ${MAX_RETRIES} attempts`)
+          continue
+        }
+
+        // Reset progress for retry
+        batchedUpdateProgress(failed.fileId, 0)
+
+        const result = await uploadFile(failed.fileId, failed.filename, failed.file, failed.uploadUrl)
+
+        if (result.success) {
+          console.log(`[Retry Success] ${failed.filename} succeeded on attempt ${failed.attempt + 1}`)
+          markFileCompleted(failed.fileId)
+        } else {
+          // Queue for another retry
+          failedUploadsRef.current.push({
+            ...failed,
+            attempt: failed.attempt + 1,
+          })
+        }
+      }
+    }
+
+    // Stop session timer for metrics tracking
+    throttle.stopSession()
+
+    // Step 6: Refresh photo list after all chunks and retries
     await queryClient.invalidateQueries({ queryKey: ['photos'] })
+    await queryClient.invalidateQueries({ queryKey: ['upload-sessions'] })
+    // Invalidate areas query if location was set (new area may have been added)
+    if (pendingLocation) {
+      await queryClient.invalidateQueries({ queryKey: ['areas'] })
+      await queryClient.invalidateQueries({ queryKey: ['locations'] })
+      // Clear the pending location after successful upload
+      setPendingLocation(null)
+    }
     setIsPreparing(false)
-  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient])
+  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient, pendingLocation, setPendingLocation, uploadFile, throttle])
 
   return (
     <div className="space-y-6">
@@ -188,12 +399,26 @@ export default function UploadPage() {
       {/* Upload Section */}
       <Card>
         <CardContent className="pt-6">
-          <PhotoUploader onStartUpload={handleStartUpload} />
+          <PhotoUploader
+            onStartUpload={handleStartUpload}
+            onFilesReady={handleFilesReady}
+          />
         </CardContent>
       </Card>
 
       {/* Progress Panel */}
       <UploadProgressPanel />
+
+      {/* Location Picker Modal */}
+      <LocationPickerModal
+        isOpen={showLocationPicker}
+        onConfirm={handleLocationConfirm}
+        onSkip={handleLocationSkip}
+        existingLocations={existingLocations}
+      />
+
+      {/* Debug Panel - Only visible in development */}
+      <ThrottleMetricsPanel />
     </div>
   )
 }
