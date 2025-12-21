@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState, useMemo } from 'react'
+import { useCallback, useState, useMemo, useRef, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { Upload, Image as ImageIcon, X, FileImage, Trash2, HardDrive, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,49 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 })
 
+  // Progress tracking refs
+  const progressCounterRef = useRef(0)
+  const progressTotalRef = useRef(0)
+  const rafIdRef = useRef<number | null>(null)
+  const lastProgressTimeRef = useRef(0)
+
+  // Lifecycle refs for async safety
+  const isMountedRef = useRef(true)
+  const isProcessingRef = useRef(false)
+
+  const MIN_PROGRESS_INTERVAL_MS = 50 // Max 20 updates/sec - human-perceivable
+
+  const scheduleProgressUpdate = useCallback(() => {
+    // Bail if unmounted
+    if (!isMountedRef.current) return
+
+    const now = Date.now()
+    const elapsed = now - lastProgressTimeRef.current
+
+    // Skip if too soon and update already pending
+    if (elapsed < MIN_PROGRESS_INTERVAL_MS && rafIdRef.current !== null) {
+      return
+    }
+
+    // Cancel stale RAF if scheduling a new one
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+    }
+
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null
+      lastProgressTimeRef.current = Date.now()
+
+      // Double-check mount status before setState
+      if (!isMountedRef.current) return
+
+      setProcessingProgress({
+        current: progressCounterRef.current,
+        total: progressTotalRef.current,
+      })
+    })
+  }, [])
+
   // Initialize adaptive throttler for EXIF processing
   const throttle = useAdaptiveThrottle('exif')
 
@@ -44,6 +87,17 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
   const totalSize = useMemo(() => {
     return pendingFiles.reduce((sum, f) => sum + (f.file?.size ?? 0), 0)
   }, [pendingFiles])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+      }
+    }
+  }, [])
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B'
@@ -128,6 +182,10 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
       // Process accepted files
       if (acceptedFiles.length > 0) {
         setIsProcessing(true)
+        isProcessingRef.current = true
+        progressCounterRef.current = 0
+        progressTotalRef.current = acceptedFiles.length
+        lastProgressTimeRef.current = 0
         setProcessingProgress({ current: 0, total: acceptedFiles.length })
 
         // Start the session timer
@@ -145,6 +203,13 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
 
         // Process in adaptive batches - re-fetch batch size after each iteration
         let processedCount = 0
+
+        // Per-file progress update (throttled via RAF)
+        const incrementProgress = () => {
+          if (!isProcessingRef.current) return
+          progressCounterRef.current += 1
+          scheduleProgressUpdate()
+        }
 
         while (processedCount < acceptedFiles.length) {
           // Re-fetch batch size each iteration (adapts based on previous success/failure)
@@ -176,6 +241,9 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
                   console.error(`Failed to generate thumbnail for ${file.name}:`, error)
                 })
 
+                // Update progress after each file completes
+                incrementProgress()
+
                 return {
                   file,
                   capturedAt: metadata.capturedAt,
@@ -190,7 +258,6 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
 
             processedFiles.push(...batchResults)
             processedCount += batch.length
-            setProcessingProgress({ current: processedCount, total: acceptedFiles.length })
 
             // Record successful batch processing - this triggers AIMD to increase batch size
             const batchDuration = Date.now() - batchStartTime
@@ -209,8 +276,17 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
 
         // Add files with metadata to upload queue
         addFiles(processedFiles)
+
+        // Cleanup and ensure final state shows 100%
+        isProcessingRef.current = false
+        if (rafIdRef.current !== null) {
+          cancelAnimationFrame(rafIdRef.current)
+          rafIdRef.current = null
+        }
+        if (isMountedRef.current) {
+          setProcessingProgress({ current: acceptedFiles.length, total: acceptedFiles.length })
+        }
         setIsProcessing(false)
-        setProcessingProgress({ current: 0, total: 0 })
 
         // Notify parent that files are ready (for location picker flow)
         if (onFilesReady) {
@@ -218,7 +294,7 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
         }
       }
     },
-    [addFiles, generateThumbnail, onFilesReady, throttle]
+    [addFiles, generateThumbnail, onFilesReady, throttle, scheduleProgressUpdate]
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
