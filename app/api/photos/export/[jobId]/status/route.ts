@@ -81,6 +81,16 @@ export async function GET(
       )
     }
 
+    // Verify user owns this export job
+    // Payload should contain userId from when job was triggered
+    const payload = run.payload as Record<string, unknown> | undefined
+    const jobUserId = typeof payload?.['userId'] === 'string' ? payload['userId'] : null
+
+    if (!jobUserId || jobUserId !== user.id) {
+      // Return 404 to avoid leaking job existence
+      return NextResponse.json({ error: 'Job not found' }, { status: 404 })
+    }
+
     // Map Trigger.dev status to our simplified status
     const status: JobStatus = mapTriggerStatus(run.status)
 

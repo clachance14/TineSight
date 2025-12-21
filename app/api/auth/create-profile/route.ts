@@ -27,6 +27,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid user' }, { status: 400 })
     }
 
+    // Verify email matches the auth user's email (case-insensitive)
+    const authEmail = authUser.user.email?.toLowerCase()
+    const providedEmail = email?.toLowerCase()
+
+    if (!authEmail) {
+      console.error('Auth user has no email:', userId)
+      return NextResponse.json({ error: 'Invalid user email' }, { status: 400 })
+    }
+
+    if (authEmail !== providedEmail) {
+      console.error('Email mismatch for profile creation:', {
+        userId,
+        providedEmail,
+        authEmail
+      })
+      return NextResponse.json({ error: 'Email mismatch' }, { status: 400 })
+    }
+
     const createdAt = new Date(authUser.user.created_at)
     const ageSeconds = (Date.now() - createdAt.getTime()) / 1000
     if (ageSeconds > 60) {

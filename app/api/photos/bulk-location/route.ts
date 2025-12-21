@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { updatePhotosLocation } from '@/lib/services/photos'
+import { isValidUUID } from '@/lib/utils/validation'
 
 export async function PATCH(request: Request) {
   try {
@@ -28,6 +29,22 @@ export async function PATCH(request: Request) {
     if (photoIds.length > 500) {
       return NextResponse.json(
         { error: 'Maximum 500 photos per bulk operation' },
+        { status: 400 }
+      )
+    }
+
+    // Validate UUIDs
+    const invalidIds = photoIds.filter((id: unknown) => !isValidUUID(id))
+    if (invalidIds.length > 0) {
+      return NextResponse.json(
+        { error: 'All photoIds must be valid UUIDs' },
+        { status: 400 }
+      )
+    }
+
+    if (locationId !== undefined && locationId !== null && !isValidUUID(locationId)) {
+      return NextResponse.json(
+        { error: 'locationId must be a valid UUID' },
         { status: 400 }
       )
     }

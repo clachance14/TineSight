@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { deletePhotos } from '@/lib/services/photos'
+import { isValidUUID } from '@/lib/utils/validation'
+
+// TODO: Add RBAC check when team features are implemented
+// Currently RLS on images table enforces user_id = auth.uid()
+// When team roles exist, verify user has Owner role (not Viewer) before allowing delete
 
 export async function DELETE(request: Request) {
   try {
@@ -28,6 +33,15 @@ export async function DELETE(request: Request) {
     if (photoIds.length > 500) {
       return NextResponse.json(
         { error: 'Maximum 500 photos per bulk operation' },
+        { status: 400 }
+      )
+    }
+
+    // Validate UUIDs
+    const invalidIds = photoIds.filter((id: unknown) => !isValidUUID(id))
+    if (invalidIds.length > 0) {
+      return NextResponse.json(
+        { error: 'All photoIds must be valid UUIDs' },
         { status: 400 }
       )
     }
