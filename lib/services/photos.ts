@@ -398,13 +398,11 @@ export async function getPhotos(
       }
     }
 
-    // Filter by other animals (OR logic) - show photos with ANY selected animal, excluding deer
+    // Filter by other animals (OR logic) - show photos with ANY selected animal
     if (filters?.otherAnimals?.length) {
       const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
       if (orFilter) {
         query = query.or(orFilter)
-        // Exclude deer when filtering by other animals
-        query = query.eq('has_deer', false)
       }
     }
 
@@ -544,13 +542,11 @@ export async function getPhotos(
     }
   }
 
-  // Filter by other animals (OR logic) - show photos with ANY selected animal, excluding deer
+  // Filter by other animals (OR logic) - show photos with ANY selected animal
   if (filters?.otherAnimals?.length) {
     const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
     if (orFilter) {
       query = query.or(orFilter)
-      // Exclude deer when filtering by other animals
-      query = query.eq('has_deer', false)
     }
   }
 

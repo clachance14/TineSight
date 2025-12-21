@@ -229,13 +229,20 @@ export const analyzePhoto = task({
       // Keep imageBuffer for cropping operations
       const imageBufferForCrop = Buffer.from(imageBuffer);
 
-      // Split detections by class
+      // Split detections by class (from filtered detections for processing)
       const deerDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'deer');
       const hogDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'hog');
       const cowDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'cow');
       const goatDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'goat');
       const vehicleDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'vehicle');
       const personDetections = filteredDetections.filter((d: DetectionOnlyBox) => d.detection_class === 'person');
+
+      // Count raw (unfiltered) detections for presence flags to avoid confidence filter mismatch
+      const rawHogCount = detectionResult.detections.filter((d: DetectionOnlyBox) => d.detection_class === 'hog').length;
+      const rawCowCount = detectionResult.detections.filter((d: DetectionOnlyBox) => d.detection_class === 'cow').length;
+      const rawGoatCount = detectionResult.detections.filter((d: DetectionOnlyBox) => d.detection_class === 'goat').length;
+      const rawPersonCount = detectionResult.detections.filter((d: DetectionOnlyBox) => d.detection_class === 'person').length;
+      const rawVehicleCount = detectionResult.detections.filter((d: DetectionOnlyBox) => d.detection_class === 'vehicle').length;
 
       // Within deer, split by antlers (for Stage 2 classification)
       const buckDetections = deerDetections.filter((d: DetectionOnlyBox) => d.has_antlers);
@@ -556,15 +563,15 @@ export const analyzePhoto = task({
         .from("images")
         .update({
           detection_status: "completed",
-          // Deer flags
-          has_deer: detectionResult.deer_present,
+          // Deer flags (use filtered for deer since it's the main feature)
+          has_deer: deerDetections.length > 0,
           deer_count: deerDetections.length,
-          // Multi-class presence flags
-          has_hogs: detectionResult.hogs_present,
-          has_cows: detectionResult.cows_present,
-          has_goats: detectionResult.goats_present,
-          has_people: detectionResult.people_present,
-          has_vehicles: detectionResult.vehicles_present,
+          // Multi-class presence flags (derived from raw detections to avoid confidence mismatch)
+          has_hogs: rawHogCount > 0,
+          has_cows: rawCowCount > 0,
+          has_goats: rawGoatCount > 0,
+          has_people: rawPersonCount > 0,
+          has_vehicles: rawVehicleCount > 0,
           hog_count: hogDetections.length,
           cow_count: cowDetections.length,
           goat_count: goatDetections.length,
@@ -573,9 +580,9 @@ export const analyzePhoto = task({
           // Existing fields
           analysis_notes: detectionResult.analysis_notes,
           analyzed_at: new Date().toISOString(),
-          classification: detectionResult.deer_present ? "deer" : 
-                         (detectionResult.hogs_present || detectionResult.cows_present || detectionResult.goats_present) ? "other" : null,
-          confidence: (detectionResult.deer_present || detectionResult.hogs_present || detectionResult.cows_present || detectionResult.goats_present)
+          classification: deerDetections.length > 0 ? "deer" :
+                         (rawHogCount > 0 || rawCowCount > 0 || rawGoatCount > 0) ? "other" : null,
+          confidence: (deerDetections.length > 0 || rawHogCount > 0 || rawCowCount > 0 || rawGoatCount > 0)
             ? Math.max(...detectionRecords.map((d) => d.confidence))
             : null,
           retry_count: 0, // Reset retry count on success
