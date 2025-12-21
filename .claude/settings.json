@@ -1,5 +1,18 @@
 {
   "enabledPlugins": {
     "agent-sdk-dev@claude-code-plugins": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/enhance-plans.sh"
+          }
+        ]
+      }
+    ]
   }
 }

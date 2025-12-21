@@ -7,3 +7,6 @@
 export { analyzePhoto } from './jobs/analyze-photo';
 export { compareDeer } from './jobs/compare-deer';
 export { batchProcess } from './jobs/batch-process';
+export { cleanupCancelledImages } from './jobs/cleanup-cancelled-images';
+export { exportPhotosTask } from './jobs/export-photos';
+export { cleanupExportsSchedule } from './jobs/cleanup-exports';

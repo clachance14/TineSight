@@ -1,15 +1,32 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { X, Link2, SlidersHorizontal, ArrowUpDown, Package, MapPin, AlertCircle } from "lucide-react"
+import { X, Link2, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PhotoFilterChips } from "./photo-filter-chips"
-import { useUploadSessions, type UploadSessionForDropdown } from "@/lib/hooks/use-upload-sessions"
+import { useUploadSessions } from "@/lib/hooks/use-upload-sessions"
+import { useCameras } from "@/lib/hooks/use-cameras"
 import type { PhotoSortField } from "@/lib/services/photos"
 
+// Import new dropdown components
+import {
+  StatusDropdown,
+  DeerDropdown,
+  OtherAnimalsDropdown,
+  NamedDeerDropdown,
+  SortDropdown,
+  AreasDropdown,
+  SourceDropdown,
+} from "./filters"
+
+// Sort direction type
+export type PhotoSortDirection = 'asc' | 'desc'
+
+// Other animal types for multi-select filter
+export type OtherAnimalType = 'hogs' | 'cows' | 'goats' | 'people' | 'vehicles'
+
 export interface PhotoFilters {
-  status?: 'all' | 'processing' | 'completed' | 'failed'
+  status?: 'all' | 'pending' | 'processing' | 'completed' | 'failed'
   hasDeer?: boolean | null
   hasDetections?: boolean | null  // true = with detections, false = without, null = all
   batchId?: string  // Keep for backward compatibility
@@ -25,8 +42,23 @@ export interface PhotoFilters {
   cameraId?: string
   sizeClass?: 'trophy' | 'standard' | 'basket' | 'spike' | 'unknown' | 'all'
   deerId?: string
-  areaName?: string  // Filter by area, '__no_area__' for unassigned
+  areaName?: string  // Filter by area, '__no_area__' for unassigned (legacy single select)
+  areaNames?: string[]  // Multi-select areas (OR logic)
+  otherAnimals?: OtherAnimalType[]  // Multi-select other animals (OR logic)
+  // Enhanced sorting (faceted sidebar)
   sortBy?: PhotoSortField
+  sortDirection?: PhotoSortDirection
+  secondarySortBy?: PhotoSortField
+  secondarySortDirection?: PhotoSortDirection
+  // New filter fields (faceted sidebar)
+  ageClass?: 'young' | 'mature' | 'prime' | 'declined' | 'unknown' | 'all'
+  deerCountMin?: number
+  deerCountMax?: number
+  hasCows?: boolean
+  hasGoats?: boolean
+  hasHogs?: boolean
+  hasPeople?: boolean
+  hasVehicles?: boolean
 }
 
 interface DeerOption {
@@ -55,42 +87,12 @@ function omitProperties<T, K extends keyof T>(
   return result as Omit<T, K>
 }
 
-// Get user's preferred locale with fallback
-function getUserLocale(): string {
-  if (typeof navigator !== 'undefined' && navigator.language) {
-    return navigator.language
-  }
-  return 'en-US'
-}
-
-// Format upload session for dropdown display
-function formatSessionOption(session: UploadSessionForDropdown): string {
-  const date = new Date(session.created_at)
-  const dateStr = date.toLocaleDateString(getUserLocale(), {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  })
-  return `${dateStr} (${session.total_images} photos)`
-}
-
 export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList = [], areaList = [], totalFailedCount }: PhotoFiltersProps) {
-  // Fetch upload sessions for dropdown
+  // Fetch upload sessions and cameras for dropdown
   const { data: sessionsData } = useUploadSessions()
   const sessions = sessionsData?.sessions ?? []
-
-  // Sort toggle handler
-  const toggleSortBy = () => {
-    const current = filters.sortBy ?? 'imported_at'
-    onFiltersChange({
-      ...filters,
-      sortBy: current === 'imported_at' ? 'captured_at' : 'imported_at',
-    })
-  }
-
-  // Get current sort label
-  const sortLabel = filters.sortBy === 'captured_at' ? 'Captured' : 'Uploaded'
+  const { data: camerasData } = useCameras()
+  const cameras = camerasData?.cameras ?? []
 
   // Check if any filters are active
   const hasActiveFilters =
@@ -111,7 +113,10 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     filters.cameraId ||
     filters.deerId ||
     filters.areaName !== undefined ||
-    filters.sortBy === 'captured_at' // Only count as active if non-default
+    (filters.areaNames && filters.areaNames.length > 0) ||
+    (filters.otherAnimals && filters.otherAnimals.length > 0) ||
+    filters.sortBy === 'captured_at' ||
+    filters.sortDirection === 'asc'
 
   // Count drawer-only filters (those not available as quick filters)
   const drawerFilterCount = [
@@ -121,10 +126,9 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     filters.dateFrom !== undefined,
     filters.dateTo !== undefined,
     filters.datePreset !== undefined,
-    filters.cameraId !== undefined,
   ].filter(Boolean).length
 
-  // Quick filter toggle handlers
+  // Quick filter toggle handlers for Bucks/Does/Trophy
   const toggleBucks = () => {
     const isActive = filters.sex === 'buck' && filters.sizeClass !== 'trophy'
     if (isActive) {
@@ -157,47 +161,19 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     })
   }
 
-  const toggleProcessing = () => {
-    const isActive = filters.status === 'processing'
-    onFiltersChange({
-      ...filters,
-      status: isActive ? 'all' : 'processing',
-    })
-  }
-
-  const toggleFailed = () => {
-    const isActive = filters.status === 'failed'
-    onFiltersChange({
-      ...filters,
-      status: isActive ? 'all' : 'failed',
-    })
-  }
-
-  const toggleWithDetections = () => {
-    const isActive = filters.hasDetections === true
-    onFiltersChange({
-      ...filters,
-      hasDetections: isActive ? null : true,
-    })
-  }
-
-  const toggleNoDetections = () => {
-    const isActive = filters.hasDetections === false
-    onFiltersChange({
-      ...filters,
-      hasDetections: isActive ? null : false,
-    })
-  }
-
   const clearFilters = () => {
-    onFiltersChange({
+    // Create clean filter object without undefined values to satisfy exactOptionalPropertyTypes
+    const cleanFilters: PhotoFilters = {
       status: 'all',
       hasDeer: null,
       hasDetections: null,
       qualityStatus: 'all',
       sex: 'all',
       sizeClass: 'all',
-    })
+      sortBy: 'imported_at',
+      sortDirection: 'desc',
+    }
+    onFiltersChange(cleanFilters)
   }
 
   const copyFilterUrl = async () => {
@@ -215,11 +191,14 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
     if (filters.dateTo) params.set('dateTo', filters.dateTo)
     if (filters.datePreset) params.set('datePreset', filters.datePreset)
     if (filters.cameraId) params.set('cameraId', filters.cameraId)
-    if (filters.batchId) params.set('batchId', filters.batchId)  // Keep for backward compatibility
+    if (filters.batchId) params.set('batchId', filters.batchId)
     if (filters.uploadSessionId) params.set('uploadSessionId', filters.uploadSessionId)
     if (filters.deerId) params.set('deerId', filters.deerId)
     if (filters.areaName) params.set('areaName', filters.areaName)
+    if (filters.areaNames?.length) params.set('areaNames', filters.areaNames.join(','))
+    if (filters.otherAnimals?.length) params.set('otherAnimals', filters.otherAnimals.join(','))
     if (filters.sortBy && filters.sortBy !== 'imported_at') params.set('sortBy', filters.sortBy)
+    if (filters.sortDirection && filters.sortDirection !== 'desc') params.set('sortDirection', filters.sortDirection)
 
     const url = `${window.location.origin}/photos${params.toString() ? `?${params.toString()}` : ''}`
     try {
@@ -233,16 +212,12 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
   const isBucksActive = filters.sex === 'buck' && filters.sizeClass !== 'trophy'
   const isDoesActive = filters.sex === 'doe'
   const isTrophyActive = filters.sex === 'buck' && filters.sizeClass === 'trophy'
-  const isProcessingActive = filters.status === 'processing'
-  const isFailedActive = filters.status === 'failed'
-  const isWithDetectionsActive = filters.hasDetections === true
-  const isNoDetectionsActive = filters.hasDetections === false
 
   return (
     <div className="space-y-3">
       {/* Quick Filter Bar */}
       <div className="flex items-center gap-2 flex-wrap">
-        {/* Quick Filter Toggles */}
+        {/* Keep: Bucks, Does, Trophy quick buttons */}
         <Button
           variant="outline"
           size="sm"
@@ -279,163 +254,89 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
           Trophy
         </Button>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={toggleProcessing}
-          className={cn(
-            "h-8 text-xs",
-            isProcessingActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
-          )}
-        >
-          Processing
-        </Button>
+        {/* New Dropdown: Status */}
+        <StatusDropdown
+          value={filters.status ?? 'all'}
+          onChange={(value) => onFiltersChange({ ...filters, status: value })}
+          failedCount={totalFailedCount}
+        />
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={toggleFailed}
-          className={cn(
-            "h-8 text-xs gap-1.5 relative",
-            isFailedActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
-          )}
-        >
-          <AlertCircle className="size-3" />
-          Failed
-          {totalFailedCount !== undefined && totalFailedCount > 0 && (
-            <span className="absolute -top-1 -right-1 size-4 rounded-full bg-red-500 text-white text-[10px] font-medium flex items-center justify-center">
-              {totalFailedCount > 99 ? '99+' : totalFailedCount}
-            </span>
-          )}
-        </Button>
+        {/* New Dropdown: Deer (With/No) */}
+        <DeerDropdown
+          value={filters.hasDetections ?? null}
+          onChange={(value) => onFiltersChange({ ...filters, hasDetections: value })}
+        />
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={toggleWithDetections}
-          className={cn(
-            "h-8 text-xs",
-            isWithDetectionsActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
-          )}
-        >
-          With Deer
-        </Button>
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={toggleNoDetections}
-          className={cn(
-            "h-8 text-xs",
-            isNoDetectionsActive && "bg-copper text-white border-copper hover:bg-copper/90 hover:text-white"
-          )}
-        >
-          No Deer
-        </Button>
+        {/* New Dropdown: Other Animals */}
+        <OtherAnimalsDropdown
+          selected={filters.otherAnimals ?? []}
+          onChange={(selected) => {
+            if (selected.length > 0) {
+              onFiltersChange({ ...filters, otherAnimals: selected })
+            } else {
+              onFiltersChange(omitProperties(filters, 'otherAnimals'))
+            }
+          }}
+        />
 
         {/* Named Deer Dropdown */}
         {deerList.length > 0 && (
-          <Select
-            value={filters.deerId ?? "all"}
-            onValueChange={(value) => {
-              if (value === "all") {
+          <NamedDeerDropdown
+            deerList={deerList}
+            value={filters.deerId ?? null}
+            onChange={(deerId) => {
+              if (deerId === null) {
                 onFiltersChange(omitProperties(filters, 'deerId'))
               } else {
-                onFiltersChange({ ...filters, deerId: value })
+                onFiltersChange({ ...filters, deerId })
               }
             }}
-          >
-            <SelectTrigger size="sm" className={cn(
-              "h-8 text-xs min-w-[120px]",
-              filters.deerId && "bg-copper text-white border-copper"
-            )}>
-              <SelectValue placeholder="Named Deer" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Deer</SelectItem>
-              {deerList.map((deer) => (
-                <SelectItem key={deer.id} value={deer.id}>
-                  {deer.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          />
         )}
 
-        {/* Sort Toggle */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={toggleSortBy}
-          className={cn(
-            "h-8 text-xs gap-1.5",
-            filters.sortBy === 'captured_at' && "bg-copper/10 border-copper text-copper"
-          )}
-        >
-          <ArrowUpDown className="size-3" />
-          {sortLabel}
-        </Button>
+        {/* New Dropdown: Sort */}
+        <SortDropdown
+          sortBy={(filters.sortBy as 'captured_at' | 'imported_at') ?? 'imported_at'}
+          sortDirection={filters.sortDirection ?? 'desc'}
+          onChange={(sortBy, sortDirection) => onFiltersChange({ ...filters, sortBy, sortDirection })}
+        />
 
-        {/* Upload Session Filter Dropdown */}
-        {sessions.length > 0 && (
-          <Select
-            value={filters.uploadSessionId ?? "all"}
-            onValueChange={(value) => {
-              if (value === "all") {
-                onFiltersChange(omitProperties(filters, 'uploadSessionId'))
-              } else {
-                onFiltersChange({ ...filters, uploadSessionId: value })
-              }
-            }}
-          >
-            <SelectTrigger size="sm" className={cn(
-              "h-8 text-xs min-w-[140px]",
-              filters.uploadSessionId && "bg-copper text-white border-copper"
-            )}>
-              <Package className="size-3 mr-1" />
-              <SelectValue placeholder="Upload" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Uploads</SelectItem>
-              {sessions.map((session) => (
-                <SelectItem key={session.id} value={session.id}>
-                  {formatSessionOption(session)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
-        {/* Area Filter Dropdown - only show when areas exist (FR-013) */}
+        {/* New Dropdown: Areas */}
         {areaList.length > 0 && (
-          <Select
-            value={filters.areaName ?? "all"}
-            onValueChange={(value) => {
-              if (value === "all") {
-                onFiltersChange(omitProperties(filters, 'areaName'))
+          <AreasDropdown
+            areas={areaList}
+            selected={filters.areaNames ?? []}
+            onChange={(selected) => {
+              if (selected.length > 0) {
+                onFiltersChange({ ...filters, areaNames: selected })
               } else {
-                onFiltersChange({ ...filters, areaName: value })
+                onFiltersChange(omitProperties(filters, 'areaNames'))
               }
             }}
-          >
-            <SelectTrigger size="sm" className={cn(
-              "h-8 text-xs min-w-[120px]",
-              filters.areaName && "bg-copper text-white border-copper"
-            )}>
-              <MapPin className="size-3 mr-1" />
-              <SelectValue placeholder="Area" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Areas</SelectItem>
-              <SelectItem value="__no_area__">No Area</SelectItem>
-              {areaList.map((area) => (
-                <SelectItem key={area} value={area}>
-                  {area}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          />
         )}
+
+        {/* New Dropdown: Source (Camera + Upload Session) */}
+        <SourceDropdown
+          cameras={cameras.map(c => ({ id: c.id, name: c.name ?? `Camera ${c.id.slice(0, 6)}` }))}
+          sessions={sessions.map(s => ({ id: s.id, created_at: s.created_at, total_images: s.total_images }))}
+          cameraId={filters.cameraId ?? null}
+          uploadSessionId={filters.uploadSessionId ?? null}
+          onChange={(cameraId, uploadSessionId) => {
+            const newFilters = { ...filters }
+            if (cameraId !== null) {
+              newFilters.cameraId = cameraId
+            } else {
+              delete newFilters.cameraId
+            }
+            if (uploadSessionId !== null) {
+              newFilters.uploadSessionId = uploadSessionId
+            } else {
+              delete newFilters.uploadSessionId
+            }
+            onFiltersChange(newFilters)
+          }}
+        />
 
         {/* More Filters Button */}
         <Button
@@ -445,7 +346,7 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
           className="h-8 gap-1.5 text-xs relative"
         >
           <SlidersHorizontal className="size-3" />
-          More Filters
+          More
           {drawerFilterCount > 0 && (
             <span className="absolute -top-1 -right-1 size-4 rounded-full bg-copper text-white text-[10px] font-medium flex items-center justify-center">
               {drawerFilterCount}

@@ -20,7 +20,7 @@ export function useUploadSessions() {
   return useQuery({
     queryKey: ['upload-sessions'],
     queryFn: async (): Promise<UploadSessionsResponse> => {
-      const res = await fetch('/api/upload-sessions')
+      const res = await fetch('/api/upload-sessions', { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch upload sessions' }))

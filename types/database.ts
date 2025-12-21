@@ -492,6 +492,8 @@ export type Database = {
           id: string
           imported_at: string
           is_archived: boolean
+          is_cancelled: boolean
+          location_id: string | null
           people_count: number | null
           retry_count: number
           thumbnail_path: string | null
@@ -525,6 +527,8 @@ export type Database = {
           id?: string
           imported_at?: string
           is_archived?: boolean
+          is_cancelled?: boolean
+          location_id?: string | null
           people_count?: number | null
           retry_count?: number
           thumbnail_path?: string | null
@@ -558,6 +562,8 @@ export type Database = {
           id?: string
           imported_at?: string
           is_archived?: boolean
+          is_cancelled?: boolean
+          location_id?: string | null
           people_count?: number | null
           retry_count?: number
           thumbnail_path?: string | null
@@ -577,6 +583,13 @@ export type Database = {
             columns: ["camera_id"]
             isOneToOne: false
             referencedRelation: "cameras"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "images_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
             referencedColumns: ["id"]
           },
           {
@@ -692,6 +705,7 @@ export type Database = {
       processing_batches: {
         Row: {
           area_name: string | null
+          cancelled_at: string | null
           completed_at: string | null
           created_at: string
           direction_compass: number | null
@@ -712,6 +726,7 @@ export type Database = {
         }
         Insert: {
           area_name?: string | null
+          cancelled_at?: string | null
           completed_at?: string | null
           created_at?: string
           direction_compass?: number | null
@@ -732,6 +747,7 @@ export type Database = {
         }
         Update: {
           area_name?: string | null
+          cancelled_at?: string | null
           completed_at?: string | null
           created_at?: string
           direction_compass?: number | null
@@ -893,6 +909,7 @@ export type Database = {
       }
       upload_sessions: {
         Row: {
+          cancelled_at: string | null
           completed_at: string | null
           created_at: string
           id: string
@@ -902,6 +919,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          cancelled_at?: string | null
           completed_at?: string | null
           created_at?: string
           id?: string
@@ -911,6 +929,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          cancelled_at?: string | null
           completed_at?: string | null
           created_at?: string
           id?: string
@@ -1036,6 +1055,51 @@ export type Database = {
           thumbnail_path: string
         }[]
       }
+      get_photo_stats:
+        | {
+            Args: { p_batch_id?: string; p_user_id: string }
+            Returns: {
+              analyzed_photos: number
+              basket_count: number
+              buck_count: number
+              doe_count: number
+              empty_photos: number
+              failed_photos: number
+              pending_photos: number
+              photos_with_deer: number
+              processing_photos: number
+              spike_count: number
+              standard_count: number
+              total_photos: number
+              trophy_count: number
+              unknown_count: number
+              unknown_size_count: number
+            }[]
+          }
+        | {
+            Args: {
+              p_batch_id?: string
+              p_upload_session_id?: string
+              p_user_id: string
+            }
+            Returns: {
+              analyzed_photos: number
+              basket_count: number
+              buck_count: number
+              doe_count: number
+              empty_photos: number
+              failed_photos: number
+              pending_photos: number
+              photos_with_deer: number
+              processing_photos: number
+              spike_count: number
+              standard_count: number
+              total_photos: number
+              trophy_count: number
+              unknown_count: number
+              unknown_size_count: number
+            }[]
+          }
       has_account_access: {
         Args: { account_owner_id: string }
         Returns: boolean

@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getPhotos, getSignedViewUrls, type PhotoSortField } from '@/lib/services/photos'
+import { getPhotos, getSignedViewUrls, type PhotoSortField, type OtherAnimalType } from '@/lib/services/photos'
 import type { Image } from '@/types/database'
 
 interface PhotoResponse extends Image {
@@ -52,6 +52,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const deerIdParam = searchParams.get('deerId')
     const uploadSessionId = searchParams.get('uploadSessionId') ?? undefined
     const areaNameParam = searchParams.get('areaName')
+    const otherAnimalsParam = searchParams.get('otherAnimals')
 
     // Validate and parse limit (default 50, max 100)
     let limit = 50
@@ -233,6 +234,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       deerId?: string
       uploadSessionId?: string
       areaName?: string
+      otherAnimals?: OtherAnimalType[]
       sortBy?: PhotoSortField
       cursor?: string
       limit: number
@@ -304,6 +306,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
 
     if (areaNameParam !== null && areaNameParam.trim() !== '') {
       filters.areaName = areaNameParam
+    }
+
+    if (otherAnimalsParam !== null && otherAnimalsParam.trim() !== '') {
+      const validAnimals: OtherAnimalType[] = ['hogs', 'cows', 'goats', 'people', 'vehicles']
+      const animals = otherAnimalsParam.split(',').filter((a): a is OtherAnimalType =>
+        validAnimals.includes(a as OtherAnimalType)
+      )
+      if (animals.length > 0) {
+        filters.otherAnimals = animals
+      }
     }
 
     if (sortBy !== undefined) {

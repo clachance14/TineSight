@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Pencil, Check, X } from 'lucide-react'
 import { useDeer, useUpdateDeer } from '@/lib/hooks/use-deer'
 import { useToast } from '@/lib/hooks/use-toast'
@@ -41,6 +42,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
   const [editNotes, setEditNotes] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
 
+  const router = useRouter()
   const { data: deer, isLoading } = useDeer(deerId, { page, pageSize })
   const updateDeer = useUpdateDeer()
   const { toast } = useToast()
@@ -119,6 +121,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
       })
       setIsEditing(false)
       setNameError(null)
+      router.refresh() // Re-run server components to update header
     } catch (error) {
       toast({
         title: 'Error',
@@ -273,6 +276,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
             ) : (
               <SightingsGrid
                 sightings={sightings}
+                deerId={deerId}
                 page={pagination.page}
                 totalPages={pagination.totalPages}
                 onPageChange={setPage}

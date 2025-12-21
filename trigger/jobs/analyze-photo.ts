@@ -66,6 +66,31 @@ export const analyzePhoto = task({
     const supabase = createAdminClient() as SupabaseClient<Database>;
 
     try {
+      // Check if batch was cancelled before this job started
+      const jobStartTime = new Date();
+      const { data: batch } = await supabase
+        .from('processing_batches')
+        .select('cancelled_at')
+        .eq('id', batchId)
+        .single();
+
+      if (batch?.cancelled_at) {
+        const cancelledAt = new Date(batch.cancelled_at);
+        if (cancelledAt < jobStartTime) {
+          logger.info('Batch was cancelled before job started, skipping', {
+            imageId,
+            batchId,
+            cancelledAt: batch.cancelled_at,
+          });
+          return {
+            skipped: true,
+            reason: 'batch_cancelled',
+            imageId,
+            batchId,
+          };
+        }
+      }
+
       // Step 1: Fetch image record to get storage_path
       logger.info("Fetching image record", { imageId });
 

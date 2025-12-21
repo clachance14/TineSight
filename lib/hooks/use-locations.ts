@@ -19,7 +19,7 @@ export function useLocations() {
   return useQuery({
     queryKey: ['locations'],
     queryFn: async (): Promise<LocationsResponse> => {
-      const res = await fetch('/api/locations')
+      const res = await fetch('/api/locations', { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch locations' }))

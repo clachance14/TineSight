@@ -59,6 +59,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
 
     const { searchParams } = new URL(request.url)
     const batchId = searchParams.get('batch_id')
+    const uploadSessionId = searchParams.get('upload_session_id')
 
     // Single optimized RPC call replaces 3 sequential queries
     // Note: get_photo_stats RPC function exists in DB but not in generated types
@@ -66,6 +67,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
     const { data, error } = await (supabase.rpc as any)('get_photo_stats', {
       p_user_id: user.id,
       p_batch_id: batchId ?? null,
+      p_upload_session_id: uploadSessionId ?? null,
     })
 
     if (error !== null) {
@@ -98,7 +100,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
           spike: 0,
           unknown: 0,
         },
-      }, 'private-medium', { status: 200 })
+      }, 'no-store', { status: 200 })
     }
 
     const stats: BatchStats = {
@@ -121,7 +123,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
       },
     }
 
-    return jsonWithCache(stats, 'private-medium', { status: 200 })
+    return jsonWithCache(stats, 'no-store', { status: 200 })
   } catch (error) {
     console.error('Unexpected error in GET /api/photos/stats:', error)
     return NextResponse.json(

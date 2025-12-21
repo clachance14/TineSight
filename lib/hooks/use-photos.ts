@@ -177,11 +177,14 @@ export function usePhotos(filters?: PhotoFilters) {
       if (filters?.offset !== undefined) {
         params.append('offset', String(filters.offset))
       }
+      if (filters?.otherAnimals?.length) {
+        params.append('otherAnimals', filters.otherAnimals.join(','))
+      }
 
       const queryString = params.toString()
       const url = `/api/photos${queryString ? `?${queryString}` : ''}`
 
-      const res = await fetch(url)
+      const res = await fetch(url, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch photos' }))
@@ -299,6 +302,9 @@ export function usePhotosInfinite(
       } else {
         params.append('limit', '50')
       }
+      if (filters?.otherAnimals?.length) {
+        params.append('otherAnimals', filters.otherAnimals.join(','))
+      }
 
       // Add cursor for pagination
       if (pageParam) {
@@ -308,7 +314,7 @@ export function usePhotosInfinite(
       const queryString = params.toString()
       const url = `/api/photos${queryString ? `?${queryString}` : ''}`
 
-      const res = await fetch(url)
+      const res = await fetch(url, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch photos' }))
@@ -370,7 +376,7 @@ export function usePhotoDetail(id: string) {
   return useQuery({
     queryKey: ['photo', id],
     queryFn: async (): Promise<PhotoDetailResponse> => {
-      const res = await fetch(`/api/photos/${id}`)
+      const res = await fetch(`/api/photos/${id}`, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch photo' }))
@@ -395,7 +401,7 @@ export function useBatchStatus(batchId: string) {
   return useQuery({
     queryKey: ['batch', batchId],
     queryFn: async (): Promise<BatchStatusResponse> => {
-      const res = await fetch(`/api/batches/${batchId}`)
+      const res = await fetch(`/api/batches/${batchId}`, { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch batch status' }))

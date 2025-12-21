@@ -67,7 +67,7 @@ export function useDeerCatalog(search?: string, options?: { limit?: number }) {
       if (search) params.set('search', search)
       params.set('limit', limit.toString())
       const url = `/api/deer?${params}`
-      const res = await fetch(url)
+      const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) throw new Error('Failed to fetch catalog')
       return res.json()
     },
@@ -90,7 +90,7 @@ export function useDeerCatalogInfinite(search?: string, options?: { limit?: numb
       params.set('limit', limit.toString())
       if (pageParam) params.set('cursor', pageParam as string)
       const url = `/api/deer?${params}`
-      const res = await fetch(url)
+      const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) throw new Error('Failed to fetch catalog')
       return res.json()
     },
@@ -115,7 +115,7 @@ export function useDeer(deerId: string | null, options: UseDeerOptions = {}) {
         page: page.toString(),
         pageSize: pageSize.toString(),
       })
-      const res = await fetch(`/api/deer/${deerId}?${params}`)
+      const res = await fetch(`/api/deer/${deerId}?${params}`, { cache: 'no-store' })
       if (!res.ok) throw new Error('Failed to fetch deer')
       return res.json()
     },

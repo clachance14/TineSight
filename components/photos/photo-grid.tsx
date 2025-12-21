@@ -8,7 +8,8 @@ import type { PhotoFilters } from '@/lib/services/photos'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Check } from 'lucide-react'
+import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
 
 // Constants for virtualization
 const GAP = 16 // gap-4 = 1rem = 16px
@@ -46,6 +47,11 @@ const PhotoGridItem = memo(function PhotoGridItem({
   onClick: (id: string) => void
   priority?: boolean // Load above-fold images with higher priority
 }) {
+  // Use separate selectors for better memoization
+  const isSelectMode = usePhotoSelectionStore((state) => state.isSelectMode)
+  const selected = usePhotoSelectionStore((state) => state.selectedPhotoIds.has(photo.id))
+  const togglePhotoSelection = usePhotoSelectionStore((state) => state.togglePhotoSelection)
+
   // Status badge variant mapping
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
@@ -66,13 +72,29 @@ const PhotoGridItem = memo(function PhotoGridItem({
     return status.charAt(0).toUpperCase() + status.slice(1)
   }
 
+  const handleClick = useCallback(() => {
+    // If in select mode, toggle selection instead of navigating
+    if (isSelectMode) {
+      togglePhotoSelection(photo.id)
+      return
+    }
+    onClick(photo.id)
+  }, [isSelectMode, togglePhotoSelection, photo.id, onClick])
+
+  const handleCheckboxClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    togglePhotoSelection(photo.id) // This auto-enters select mode
+  }, [togglePhotoSelection, photo.id])
+
   return (
     <div
       className={cn(
         'group relative aspect-square cursor-pointer overflow-hidden rounded-lg bg-slate',
-        'hover:ring-2 hover:ring-copper'
+        !isSelectMode && 'hover:ring-2 hover:ring-copper',
+        selected && 'ring-2 ring-copper'
       )}
-      onClick={() => onClick(photo.id)}
+      onClick={handleClick}
     >
       <div className="relative h-full w-full">
         {photo.thumbnailUrl ? (
@@ -119,6 +141,34 @@ const PhotoGridItem = memo(function PhotoGridItem({
           </div>
         )}
 
+        {/* Checkbox overlay - visible on hover or in select mode */}
+        <div
+          className={cn(
+            'absolute top-2 left-2 z-10',
+            'transition-opacity duration-150',
+            isSelectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          )}
+        >
+          <button
+            type="button"
+            onClick={handleCheckboxClick}
+            className={cn(
+              'w-6 h-6 rounded border-2 flex items-center justify-center',
+              'transition-colors duration-150',
+              selected
+                ? 'bg-copper border-copper text-slate-deep'
+                : 'bg-slate-deep/80 border-cream/50 hover:border-cream'
+            )}
+          >
+            {selected && <Check className="w-4 h-4" />}
+          </button>
+        </div>
+
+        {/* Selection overlay */}
+        {selected && (
+          <div className="absolute inset-0 bg-copper/10 pointer-events-none" />
+        )}
+
         {/* Status badge overlay */}
         <div className="absolute right-2 top-2">
           <Badge variant={getStatusBadgeVariant(photo.detection_status)}>
@@ -148,7 +198,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
         )}
 
         {/* Hover overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-deep/60 via-transparent to-transparent opacity-0 group-hover:opacity-100" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-deep/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 pointer-events-none" />
       </div>
     </div>
   )

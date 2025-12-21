@@ -55,6 +55,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
   const dateToParam = getParam('dateTo')
   const sizeClassParam = getParam('sizeClass')
   const cameraIdParam = getParam('cameraId')
+  const deerIdParam = getParam('deerId')
 
   if (statusParam) filters.status = statusParam
   if (hasDeerParam) filters.hasDeer = hasDeerParam === 'true'
@@ -67,6 +68,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
   if (dateToParam) filters.dateTo = dateToParam
   if (sizeClassParam) filters.sizeClass = sizeClassParam
   if (cameraIdParam) filters.cameraId = cameraIdParam
+  if (deerIdParam) filters.deerId = deerIdParam
 
   // Build query string for navigation links
   const filterQueryString = new URLSearchParams(

@@ -60,7 +60,7 @@ export function ThrottleMetricsPanel() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 min-w-[280px] rounded-lg border border-copper/30 bg-slate/90 p-4 font-mono text-xs shadow-lg backdrop-blur-sm">
+    <div className="fixed top-20 right-4 z-50 min-w-[280px] rounded-lg border border-copper/30 bg-slate/90 p-4 font-mono text-xs shadow-lg backdrop-blur-sm">
       <div className="mb-2 font-sans text-sm font-semibold text-copper">
         Throttle Metrics
       </div>

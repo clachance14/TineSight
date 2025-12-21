@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { setActiveBatchId } from '@/lib/hooks/use-active-batch'
+// Note: setActiveUploadSessionId is now called in upload/page.tsx at session creation time,
+// not per-batch in startUpload. This ensures we track the full session, not just the last batch.
 
 export interface UploadFile {
   id: string
@@ -164,8 +165,8 @@ export const useUploadStore = create<UploadState>((set) => ({
   setIsPreparing: (isPreparing) => set({ isPreparing }),
 
   startUpload: (batchId, uploadData) => {
-    // Store active batch ID for processing status tracking on photos page
-    setActiveBatchId(batchId)
+    // Note: Session ID is set once in upload/page.tsx at session creation time,
+    // not per-batch here. This properly aggregates stats across all batches.
 
     set((state) => {
       // Match upload data to files in queue and update their state

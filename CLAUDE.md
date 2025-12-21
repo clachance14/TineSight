@@ -19,6 +19,23 @@ See `.specify/memory/product-vision.md` for complete problem definition, user jo
 
 TineSight is a **specification-first project** currently in the planning phase. Complete specifications exist for the MVP foundation, but source code has not yet been implemented. Start implementation with `/speckit.implement`.
 
+## MANDATORY: Multi-Agent Execution
+
+**After exiting plan mode, Claude MUST automatically:**
+
+1. **Analyze dependencies** - Identify independent vs dependent tasks
+2. **Group into parallel batches** - Cluster independent tasks
+3. **Execute with up to 5 agents** - Launch Task tool agents in parallel
+4. **Serialize only when required** - Only sequence when there are explicit dependencies
+
+**Parallelization rules:**
+- File edits in different directories → parallel
+- Independent component implementations → parallel
+- Database migrations → sequential (order matters)
+- Tests depending on implementation → sequential after implementation
+
+**Example:** If implementing 3 independent components, launch 3 agents in a single message.
+
 ## Commands
 
 Once the project is initialized:

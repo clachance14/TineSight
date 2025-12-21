@@ -42,8 +42,38 @@ export function PhotoDeleteButton({ photoId, returnUrl = '/photos' }: PhotoDelet
         throw new Error(data.error || 'Failed to delete photo')
       }
 
-      // Invalidate all photo-related queries to ensure fresh data
-      await queryClient.invalidateQueries({ queryKey: ['photos'] })
+      // Optimistically remove the photo from all cached photo lists
+      // This ensures immediate UI update without waiting for refetch
+      queryClient.setQueriesData(
+        { queryKey: ['photos'] },
+        (oldData: unknown) => {
+          // Handle infinite query format (pages array)
+          if (oldData && typeof oldData === 'object' && 'pages' in oldData) {
+            const data = oldData as { pages: Array<{ photos: Array<{ id: string }>; total: number }> }
+            return {
+              ...data,
+              pages: data.pages.map((page) => ({
+                ...page,
+                photos: page.photos.filter((p) => p.id !== photoId),
+                total: Math.max(0, page.total - 1),
+              })),
+            }
+          }
+          // Handle simple query format (single response)
+          if (oldData && typeof oldData === 'object' && 'photos' in oldData) {
+            const data = oldData as { photos: Array<{ id: string }>; total: number }
+            return {
+              ...data,
+              photos: data.photos.filter((p) => p.id !== photoId),
+              total: Math.max(0, data.total - 1),
+            }
+          }
+          return oldData
+        }
+      )
+
+      // Invalidate stats to update the photo count
+      queryClient.invalidateQueries({ queryKey: ['photos', 'stats'] })
 
       toast({
         title: 'Photo Deleted',

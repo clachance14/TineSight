@@ -8,6 +8,7 @@ export type UploadSessionStatus =
   | 'completed'
   | 'partial_error'
   | 'failed'
+  | 'cancelled'
 
 export type UploadSession = {
   id: string
@@ -37,6 +38,13 @@ export type UploadSessionUpdate = {
   status?: UploadSessionStatus
   created_at?: string
   completed_at?: string | null
+}
+
+export type CancelSessionResult = {
+  session_id: string
+  batches_cancelled: number
+  photos_marked_for_deletion: number
+  photos_retained: number
 }
 
 /**
@@ -135,7 +143,7 @@ export async function updateUploadSessionStatus(
   }
 
   // Set completed_at when transitioning to a terminal state
-  if (status === 'completed' || status === 'failed' || status === 'partial_error') {
+  if (status === 'completed' || status === 'failed' || status === 'partial_error' || status === 'cancelled') {
     updateData['completed_at'] = new Date().toISOString()
   }
 
@@ -200,4 +208,125 @@ export async function completeUploadSession(
     .single()
 
   return { data: data as UploadSession | null, error }
+}
+
+/**
+ * Cancel an upload session and mark photos for deletion
+ *
+ * @param userId - User ID to verify ownership
+ * @param sessionId - Upload session ID to cancel
+ * @param deleteScope - 'pending' to delete only unprocessed photos, 'all' to delete all photos
+ * @returns Stats about cancelled batches and photos
+ */
+export async function cancelSession(
+  userId: string,
+  sessionId: string,
+  deleteScope: 'pending' | 'all'
+): Promise<{
+  data: CancelSessionResult | null
+  error: Error | null
+}> {
+  const supabase = await createClient()
+
+  try {
+    // 1. Verify ownership
+    const { data: session, error: sessionError } = await supabase
+      .from('upload_sessions')
+      .select('id, user_id, total_images')
+      .eq('id', sessionId)
+      .eq('user_id', userId)
+      .single()
+
+    if (sessionError || !session) {
+      return {
+        data: null,
+        error: new Error('Session not found or access denied'),
+      }
+    }
+
+    // 2. Get batch IDs for this session
+    const { data: batches, error: batchesError } = await supabase
+      .from('processing_batches')
+      .select('id')
+      .eq('upload_session_id', sessionId)
+
+    if (batchesError) {
+      return { data: null, error: batchesError }
+    }
+
+    const batchIds = batches?.map((b) => b.id) || []
+
+    // 3. Atomically update batches to cancelled status (only those still processing)
+    const { data: cancelledBatches, error: batchUpdateError } = await supabase
+      .from('processing_batches')
+      .update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+      } as never)
+      .eq('upload_session_id', sessionId)
+      .eq('status', 'processing')
+      .select('id')
+
+    if (batchUpdateError) {
+      return { data: null, error: batchUpdateError }
+    }
+
+    const batchesCancelled = cancelledBatches?.length || 0
+
+    // 4. Mark images for deletion based on scope
+    let photosMarkedForDeletion = 0
+
+    if (batchIds.length > 0) {
+      let imageQuery = supabase
+        .from('images')
+        .update({ is_cancelled: true } as never)
+        .in('batch_id', batchIds)
+
+      // Apply scope filter
+      if (deleteScope === 'pending') {
+        imageQuery = imageQuery.in('detection_status', ['pending', 'processing'])
+      }
+      // For 'all' scope, no additional filter needed
+
+      const { data: markedImages, error: imageUpdateError } = await imageQuery.select('id')
+
+      if (imageUpdateError) {
+        return { data: null, error: imageUpdateError }
+      }
+
+      photosMarkedForDeletion = markedImages?.length || 0
+    }
+
+    // 5. Update session status to cancelled
+    const { error: sessionUpdateError } = await supabase
+      .from('upload_sessions')
+      .update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+      } as never)
+      .eq('id', sessionId)
+
+    if (sessionUpdateError) {
+      return { data: null, error: sessionUpdateError }
+    }
+
+    // 6. Return stats
+    const totalImages = session.total_images || 0
+    const photosRetained = totalImages - photosMarkedForDeletion
+
+    return {
+      data: {
+        session_id: sessionId,
+        batches_cancelled: batchesCancelled,
+        photos_marked_for_deletion: photosMarkedForDeletion,
+        photos_retained: photosRetained,
+      },
+      error: null,
+    }
+  } catch (err) {
+    return {
+      data: null,
+      error: err instanceof Error ? err : new Error('Unknown error during cancellation'),
+    }
+  }
 }

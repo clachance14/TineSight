@@ -53,7 +53,7 @@ export function useFilterPresets() {
   return useQuery({
     queryKey: filterPresetsKeys.list(),
     queryFn: async (): Promise<FilterPresetsResponse> => {
-      const res = await fetch('/api/filter-presets')
+      const res = await fetch('/api/filter-presets', { cache: 'no-store' })
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch presets' }))
         throw new Error(error.error || 'Failed to fetch presets')
@@ -71,7 +71,7 @@ export function useFilterPreset(presetId: string | null) {
     queryKey: filterPresetsKeys.detail(presetId!),
     queryFn: async (): Promise<FilterPreset> => {
       if (!presetId) throw new Error('No preset ID')
-      const res = await fetch(`/api/filter-presets/${presetId}`)
+      const res = await fetch(`/api/filter-presets/${presetId}`, { cache: 'no-store' })
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch preset' }))
         throw new Error(error.error || 'Failed to fetch preset')

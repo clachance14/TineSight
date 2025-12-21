@@ -1,6 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { createHash } from 'crypto'
-import type { Camera } from '@/types/database'
+import type { Tables } from '@/types/database'
+
+// Camera row type from database
+export type Camera = Tables<'cameras'>
 
 // Camera with photo count from aggregated query
 export interface CameraWithPhotoCount extends Camera {

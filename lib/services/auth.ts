@@ -21,6 +21,27 @@ export async function signUp(email: string, password: string, fullName?: string)
     return { data: null, error }
   }
 
+  // Create profile via server-side API (bypasses RLS)
+  if (data.user !== null) {
+    try {
+      const response = await fetch('/api/auth/create-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: data.user.id,
+          email: data.user.email ?? email,
+          fullName: fullName ?? '',
+        }),
+      })
+      if (!response.ok) {
+        const body = await response.json()
+        console.error('Profile creation failed:', response.status, body)
+      }
+    } catch (err) {
+      console.error('Failed to create profile:', err)
+    }
+  }
+
   return { data, error: null }
 }
 

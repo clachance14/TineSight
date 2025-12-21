@@ -19,6 +19,7 @@ interface Sighting {
 
 interface SightingsGridProps {
   sightings: Sighting[]
+  deerId: string
   page: number
   totalPages: number
   onPageChange: (page: number) => void
@@ -26,6 +27,7 @@ interface SightingsGridProps {
 
 export function SightingsGrid({
   sightings,
+  deerId,
   page,
   totalPages,
   onPageChange,
@@ -60,7 +62,7 @@ export function SightingsGrid({
       {/* Grid */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {sightings.map((sighting) => (
-          <Link key={sighting.id} href={`/photos/${sighting.image_id}`}>
+          <Link key={sighting.id} href={`/photos/${sighting.image_id}?deerId=${deerId}`}>
             <Card className="cursor-pointer transition-all hover:ring-2 hover:ring-copper">
               <CardContent className="p-2">
                 <div className="relative aspect-square overflow-hidden rounded-lg bg-slate">

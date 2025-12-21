@@ -1,8 +1,18 @@
 import { createClient } from '@/lib/supabase/server'
 import type { Image, ImageInsert, ImageUpdate, Detection, Json } from '@/types/database'
 
-// Sort field options
-export type PhotoSortField = 'captured_at' | 'imported_at'
+// Sort field options - extended for faceted sidebar
+export type PhotoSortField =
+  | 'captured_at'
+  | 'imported_at'
+  | 'confidence'
+  | 'points'
+  | 'size_class'
+  | 'deer_name'
+  | 'deer_count'
+
+// Sort direction
+export type PhotoSortDirection = 'asc' | 'desc'
 
 // Result type for area filter helper
 interface AreaFilterResult {
@@ -47,6 +57,84 @@ async function getAreaFilterBatchIds(
   }
 }
 
+/**
+ * Helper to get batch IDs for multi-area filtering (OR logic)
+ * Returns batch IDs for any of the selected areas
+ */
+async function getMultiAreaFilterBatchIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  areaNames: string[]
+): Promise<AreaFilterResult> {
+  const includesNoArea = areaNames.includes('__no_area__')
+  const namedAreas = areaNames.filter(a => a !== '__no_area__')
+
+  let allBatchIds: string[] = []
+
+  // Get batches for named areas
+  if (namedAreas.length > 0) {
+    const { data: areaBatches } = await supabase
+      .from('processing_batches')
+      .select('id')
+      .eq('user_id', userId)
+      .in('area_name', namedAreas)
+
+    if (areaBatches) {
+      allBatchIds = areaBatches.map(b => b.id)
+    }
+  }
+
+  // Get batches with null area_name if "No Area" is selected
+  if (includesNoArea) {
+    const { data: noAreaBatches } = await supabase
+      .from('processing_batches')
+      .select('id')
+      .eq('user_id', userId)
+      .is('area_name', null)
+
+    if (noAreaBatches) {
+      allBatchIds = [...allBatchIds, ...noAreaBatches.map(b => b.id)]
+    }
+  }
+
+  return {
+    batchIds: allBatchIds,
+    includeNullBatchId: includesNoArea  // Include images with null batch_id if "No Area" selected
+  }
+}
+
+/**
+ * Build OR filter string for other animals (hogs, cows, goats, people, vehicles)
+ */
+function buildOtherAnimalsOrFilter(animals: OtherAnimalType[]): string {
+  const conditions: string[] = []
+
+  for (const animal of animals) {
+    switch (animal) {
+      case 'hogs':
+        conditions.push('has_hogs.is.true')
+        break
+      case 'cows':
+        conditions.push('has_cows.is.true')
+        break
+      case 'goats':
+        conditions.push('has_goats.is.true')
+        break
+      case 'people':
+        conditions.push('has_people.is.true')
+        break
+      case 'vehicles':
+        conditions.push('has_vehicles.is.true')
+        break
+    }
+  }
+
+  return conditions.join(',')
+}
+
+// Other animal types for multi-select filter
+export type OtherAnimalType = 'hogs' | 'cows' | 'goats' | 'people' | 'vehicles'
+
 // Filter types for querying photos
 export interface PhotoFilters {
   status?: string
@@ -65,8 +153,11 @@ export interface PhotoFilters {
   dateFrom?: string  // ISO date string
   dateTo?: string  // ISO date string
   deerId?: string  // Filter by named deer
-  areaName?: string  // Filter by area name, or '__no_area__' for photos without area
+  areaName?: string  // Filter by area name, or '__no_area__' for photos without area (legacy, single)
+  areaNames?: string[]  // Multi-select areas (OR logic), can include '__no_area__'
+  otherAnimals?: OtherAnimalType[]  // Multi-select other animals (OR logic)
   sortBy?: PhotoSortField  // Sort by capture time or upload time (default: imported_at)
+  sortDirection?: PhotoSortDirection  // Sort direction (default: desc for newest first)
   limit?: number
   offset?: number
   cursor?: string  // Format: timestamp::id for cursor-based pagination
@@ -266,8 +357,8 @@ export async function getPhotos(
       }
     }
 
-    // Filter by area name (via processing_batches)
-    if (filters?.areaName !== undefined) {
+    // Filter by area name (via processing_batches) - legacy single select
+    if (filters?.areaName !== undefined && !filters?.areaNames?.length) {
       const areaResult = await getAreaFilterBatchIds(supabase, userId, filters.areaName)
       if (areaResult.batchIds !== null) {
         if (areaResult.batchIds.length === 0 && !areaResult.includeNullBatchId) {
@@ -284,6 +375,36 @@ export async function getPhotos(
         } else {
           query = query.in('batch_id', areaResult.batchIds)
         }
+      }
+    }
+
+    // Filter by multiple area names (OR logic) - new multi-select
+    if (filters?.areaNames?.length) {
+      const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
+      const batchIds = areaResult.batchIds ?? []
+      if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
+        // No matches found
+        return { data: [], error: null, count: 0 }
+      }
+      if (areaResult.includeNullBatchId) {
+        // Include both batches matching areas AND images with null batch_id
+        if (batchIds.length > 0) {
+          query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
+        } else {
+          query = query.is('batch_id', null)
+        }
+      } else if (batchIds.length > 0) {
+        query = query.in('batch_id', batchIds)
+      }
+    }
+
+    // Filter by other animals (OR logic) - show photos with ANY selected animal, excluding deer
+    if (filters?.otherAnimals?.length) {
+      const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
+      if (orFilter) {
+        query = query.or(orFilter)
+        // Exclude deer when filtering by other animals
+        query = query.eq('has_deer', false)
       }
     }
 
@@ -382,8 +503,8 @@ export async function getPhotos(
     }
   }
 
-  // Filter by area name (via processing_batches)
-  if (filters?.areaName !== undefined) {
+  // Filter by area name (via processing_batches) - legacy single select
+  if (filters?.areaName !== undefined && !filters?.areaNames?.length) {
     const areaResult = await getAreaFilterBatchIds(supabase, userId, filters.areaName)
     if (areaResult.batchIds !== null) {
       if (areaResult.batchIds.length === 0 && !areaResult.includeNullBatchId) {
@@ -400,6 +521,36 @@ export async function getPhotos(
       } else {
         query = query.in('batch_id', areaResult.batchIds)
       }
+    }
+  }
+
+  // Filter by multiple area names (OR logic) - new multi-select
+  if (filters?.areaNames?.length) {
+    const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
+    const batchIds = areaResult.batchIds ?? []
+    if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
+      // No matches found
+      return { data: [], error: null, count: 0 }
+    }
+    if (areaResult.includeNullBatchId) {
+      // Include both batches matching areas AND images with null batch_id
+      if (batchIds.length > 0) {
+        query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
+      } else {
+        query = query.is('batch_id', null)
+      }
+    } else if (batchIds.length > 0) {
+      query = query.in('batch_id', batchIds)
+    }
+  }
+
+  // Filter by other animals (OR logic) - show photos with ANY selected animal, excluding deer
+  if (filters?.otherAnimals?.length) {
+    const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
+    if (orFilter) {
+      query = query.or(orFilter)
+      // Exclude deer when filtering by other animals
+      query = query.eq('has_deer', false)
     }
   }
 
@@ -446,6 +597,252 @@ export async function getPhotos(
   }
 
   return { data, error: null, count }
+}
+
+/**
+ * Get all photo IDs matching filters (lightweight, for bulk selection)
+ * Returns only IDs without pagination - use for "select all matching" feature
+ */
+export async function getPhotoIds(
+  userId: string,
+  filters?: PhotoFilters
+): Promise<{
+  data: string[] | null
+  error: Error | null
+  count: number
+}> {
+  const supabase = await createClient()
+
+  // Determine if we need to filter by detections
+  const needsQualityFilter = filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all'
+  const needsConfidenceFilter = filters?.minConfidence !== undefined
+  const needsSexFilter = filters?.sex !== undefined
+  const needsSizeClassFilter = filters?.sizeClass !== undefined
+  const needsPointsFilter = filters?.minPoints !== undefined || filters?.maxPoints !== undefined
+  const needsDeerFilter = filters?.deerId !== undefined
+  const needsHasDetectionsFilter = filters?.hasDetections !== undefined
+
+  // If filtering by detection-related fields, we need to join with detections
+  if (needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter) {
+
+    // For hasDetections filter, we need ALL image_ids with any detection (unfiltered)
+    let allImageIdsWithDetections: string[] = []
+    if (needsHasDetectionsFilter) {
+      const { data: allDetections } = await supabase
+        .from('detections')
+        .select('image_id')
+        .is('deleted_at', null)
+      allImageIdsWithDetections = [...new Set((allDetections ?? []).map((d: { image_id: string }) => d.image_id))]
+    }
+
+    // Build detection query based on OTHER filters (not hasDetections)
+    let detectionQuery = supabase.from('detections').select('image_id, estimated_point_range')
+      .is('deleted_at', null)
+
+    if (needsQualityFilter) {
+      detectionQuery = detectionQuery.eq('quality_status', filters!.qualityStatus!)
+    }
+    if (needsConfidenceFilter) {
+      const threshold = filters!.minConfidence! / 100
+      detectionQuery = detectionQuery.gte('confidence', threshold)
+    }
+    if (needsSexFilter) {
+      detectionQuery = detectionQuery.eq('sex', filters!.sex!)
+    }
+    if (needsSizeClassFilter) {
+      detectionQuery = detectionQuery.eq('size_class', filters!.sizeClass!)
+    }
+    if (needsDeerFilter) {
+      detectionQuery = detectionQuery.eq('deer_id', filters!.deerId!)
+    }
+
+    const { data: detections, error: detectionsError } = await detectionQuery
+
+    if (detectionsError !== null) {
+      return { data: null, error: detectionsError, count: 0 }
+    }
+
+    // Filter detections by point range if needed
+    let filteredDetections = detections ?? []
+    if (needsPointsFilter) {
+      filteredDetections = filteredDetections.filter((d: { estimated_point_range: string | null }) => {
+        if (!d.estimated_point_range) return false
+        const match = d.estimated_point_range.match(/(\d+)-(\d+)/)
+        if (!match) return false
+        const minRange = parseInt(match[1]!, 10)
+        const maxRange = parseInt(match[2]!, 10)
+        if (filters?.minPoints !== undefined && maxRange < filters.minPoints) return false
+        if (filters?.maxPoints !== undefined && minRange > filters.maxPoints) return false
+        return true
+      })
+    }
+
+    const filteredImageIds = [...new Set(filteredDetections.map((d: { image_id: string }) => d.image_id))]
+
+    // Build query - select only id
+    let query = supabase
+      .from('images')
+      .select('id')
+      .eq('user_id', userId)
+
+    // Handle hasDetections filter
+    if (filters?.hasDetections === false) {
+      if (allImageIdsWithDetections.length > 0) {
+        query = query.not('id', 'in', `(${allImageIdsWithDetections.join(',')})`)
+      }
+    } else if (filters?.hasDetections === true) {
+      const hasOtherFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter
+      const imageIdsToUse = hasOtherFilters ? filteredImageIds : allImageIdsWithDetections
+      if (imageIdsToUse.length === 0) {
+        return { data: [], error: null, count: 0 }
+      }
+      query = query.in('id', imageIdsToUse)
+    } else {
+      if (filteredImageIds.length === 0) {
+        return { data: [], error: null, count: 0 }
+      }
+      query = query.in('id', filteredImageIds)
+    }
+
+    // Apply remaining filters (same as getPhotos)
+    if (filters?.status !== undefined && filters.status !== 'all') {
+      query = query.eq('detection_status', filters.status)
+    }
+    if (filters?.hasDeer !== undefined) {
+      if (filters.hasDeer) {
+        query = query.not('classification', 'is', null)
+      } else {
+        query = query.is('classification', null)
+      }
+    }
+    if (filters?.uploadSessionId !== undefined) {
+      const { data: sessionBatches } = await supabase
+        .from('processing_batches')
+        .select('id')
+        .eq('upload_session_id', filters.uploadSessionId)
+      if (sessionBatches && sessionBatches.length > 0) {
+        query = query.in('batch_id', sessionBatches.map(b => b.id))
+      } else {
+        return { data: [], error: null, count: 0 }
+      }
+    }
+    if (filters?.areaNames?.length) {
+      const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
+      const batchIds = areaResult.batchIds ?? []
+      if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
+        return { data: [], error: null, count: 0 }
+      }
+      if (areaResult.includeNullBatchId) {
+        if (batchIds.length > 0) {
+          query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
+        } else {
+          query = query.is('batch_id', null)
+        }
+      } else if (batchIds.length > 0) {
+        query = query.in('batch_id', batchIds)
+      }
+    }
+    if (filters?.otherAnimals?.length) {
+      const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
+      if (orFilter) {
+        query = query.or(orFilter)
+        query = query.eq('has_deer', false)
+      }
+    }
+    if (filters?.cameraId !== undefined) {
+      query = query.eq('camera_id', filters.cameraId)
+    }
+    if (filters?.isArchived !== undefined) {
+      query = query.eq('is_archived', filters.isArchived)
+    }
+    if (filters?.dateFrom !== undefined) {
+      query = query.gte('captured_at', filters.dateFrom)
+    }
+    if (filters?.dateTo !== undefined) {
+      query = query.lte('captured_at', filters.dateTo)
+    }
+
+    const { data, error } = await query
+
+    if (error !== null) {
+      return { data: null, error, count: 0 }
+    }
+
+    const ids = (data ?? []).map((row: { id: string }) => row.id)
+    return { data: ids, error: null, count: ids.length }
+  }
+
+  // Standard query without detection-based filters - select only id
+  let query = supabase
+    .from('images')
+    .select('id')
+    .eq('user_id', userId)
+
+  if (filters?.status !== undefined && filters.status !== 'all') {
+    query = query.eq('detection_status', filters.status)
+  }
+  if (filters?.hasDeer !== undefined) {
+    if (filters.hasDeer) {
+      query = query.not('classification', 'is', null)
+    } else {
+      query = query.is('classification', null)
+    }
+  }
+  if (filters?.uploadSessionId !== undefined) {
+    const { data: sessionBatches } = await supabase
+      .from('processing_batches')
+      .select('id')
+      .eq('upload_session_id', filters.uploadSessionId)
+    if (sessionBatches && sessionBatches.length > 0) {
+      query = query.in('batch_id', sessionBatches.map(b => b.id))
+    } else {
+      return { data: [], error: null, count: 0 }
+    }
+  }
+  if (filters?.areaNames?.length) {
+    const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
+    const batchIds = areaResult.batchIds ?? []
+    if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
+      return { data: [], error: null, count: 0 }
+    }
+    if (areaResult.includeNullBatchId) {
+      if (batchIds.length > 0) {
+        query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
+      } else {
+        query = query.is('batch_id', null)
+      }
+    } else if (batchIds.length > 0) {
+      query = query.in('batch_id', batchIds)
+    }
+  }
+  if (filters?.otherAnimals?.length) {
+    const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
+    if (orFilter) {
+      query = query.or(orFilter)
+      query = query.eq('has_deer', false)
+    }
+  }
+  if (filters?.cameraId !== undefined) {
+    query = query.eq('camera_id', filters.cameraId)
+  }
+  if (filters?.isArchived !== undefined) {
+    query = query.eq('is_archived', filters.isArchived)
+  }
+  if (filters?.dateFrom !== undefined) {
+    query = query.gte('captured_at', filters.dateFrom)
+  }
+  if (filters?.dateTo !== undefined) {
+    query = query.lte('captured_at', filters.dateTo)
+  }
+
+  const { data, error } = await query
+
+  if (error !== null) {
+    return { data: null, error, count: 0 }
+  }
+
+  const ids = (data ?? []).map((row: { id: string }) => row.id)
+  return { data: ids, error: null, count: ids.length }
 }
 
 /**
@@ -1048,6 +1445,121 @@ export async function retryAllFailed(
   }
 
   return { data: { count: count ?? 0 }, error: null }
+}
+
+/**
+ * Update location_id for multiple photos at once (bulk operation)
+ * @param userId - User ID for RLS check
+ * @param photoIds - Array of photo IDs to update
+ * @param locationId - Location ID to assign (null to clear location)
+ * @returns Count of updated photos
+ */
+export async function updatePhotosLocation(
+  userId: string,
+  photoIds: string[],
+  locationId: string | null
+): Promise<{
+  data: { count: number } | null
+  error: Error | null
+}> {
+  if (photoIds.length === 0) {
+    return { data: { count: 0 }, error: null }
+  }
+
+  const supabase = await createClient()
+
+  const { count, error } = await supabase
+    .from('images')
+    .update({ location_id: locationId } as never)
+    .eq('user_id', userId)
+    .in('id', photoIds)
+
+  if (error !== null) {
+    return { data: null, error }
+  }
+
+  return { data: { count: count ?? photoIds.length }, error: null }
+}
+
+/**
+ * Delete multiple photos permanently including storage files (bulk operation)
+ * @param userId - User ID for RLS check
+ * @param photoIds - Array of photo IDs to delete
+ * @returns Count of deleted photos and any storage cleanup errors
+ */
+export async function deletePhotos(
+  userId: string,
+  photoIds: string[]
+): Promise<{
+  data: { deletedCount: number; storageErrors: string[] } | null
+  error: Error | null
+}> {
+  if (photoIds.length === 0) {
+    return { data: { deletedCount: 0, storageErrors: [] }, error: null }
+  }
+
+  const supabase = await createClient()
+
+  // 1. Get all file paths before deletion
+  const { data: photos, error: fetchError } = await supabase
+    .from('images')
+    .select('id, file_path, thumbnail_path')
+    .eq('user_id', userId)
+    .in('id', photoIds)
+
+  if (fetchError !== null) {
+    return { data: null, error: fetchError }
+  }
+
+  // 2. Get detection crop paths
+  const { data: detections } = await supabase
+    .from('detections')
+    .select('crop_file_path')
+    .in('image_id', photoIds)
+
+  // 3. Collect all storage paths
+  const storagePaths: string[] = []
+  for (const photo of photos ?? []) {
+    if (photo.file_path) storagePaths.push(photo.file_path)
+    if (photo.thumbnail_path) storagePaths.push(photo.thumbnail_path)
+  }
+  for (const detection of detections ?? []) {
+    if (detection.crop_file_path) storagePaths.push(detection.crop_file_path)
+  }
+
+  // 4. Delete database records (cascades to detections via FK)
+  const { error: deleteError, count } = await supabase
+    .from('images')
+    .delete()
+    .eq('user_id', userId)
+    .in('id', photoIds)
+
+  if (deleteError !== null) {
+    return { data: null, error: deleteError }
+  }
+
+  // 5. Delete storage files in batches (Supabase limit: 1000 per call)
+  const storageErrors: string[] = []
+  const BATCH_SIZE = 1000
+
+  for (let i = 0; i < storagePaths.length; i += BATCH_SIZE) {
+    const batch = storagePaths.slice(i, i + BATCH_SIZE)
+    const { error: storageError } = await supabase.storage
+      .from('photos')
+      .remove(batch)
+
+    if (storageError !== null) {
+      storageErrors.push(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${storageError.message}`)
+    }
+  }
+
+  return {
+    data: {
+      deletedCount: count ?? photos?.length ?? 0,
+      storageErrors,
+    },
+    error: null,
+  }
 }
 
 /**

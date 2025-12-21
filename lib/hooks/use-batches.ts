@@ -20,7 +20,7 @@ export function useBatches() {
   return useQuery({
     queryKey: ['batches'],
     queryFn: async (): Promise<BatchesResponse> => {
-      const res = await fetch('/api/batches')
+      const res = await fetch('/api/batches', { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch batches' }))

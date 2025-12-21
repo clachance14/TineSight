@@ -7,12 +7,15 @@ import { PhotoGrid } from '@/components/photos/photo-grid'
 import { PhotoFilters, type PhotoFilters as PhotoFiltersType } from '@/components/photos/photo-filters'
 import { PhotoFilterDrawer } from '@/components/photos/photo-filter-drawer'
 import { ProcessingStatusBar } from '@/components/photos/processing-status-bar'
+import { SelectionToolbar } from '@/components/photos/selection-toolbar'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import { useDeerCatalog } from '@/lib/hooks/use-deer'
 import { useAreas } from '@/lib/hooks/use-areas'
+import { useLocations } from '@/lib/hooks/use-locations'
 import { useRealtimePhotos } from '@/lib/hooks/use-realtime-photos'
 import { useCurrentUser } from '@/lib/hooks/use-current-user'
-import type { PhotoFilters as ServicePhotoFilters } from '@/lib/services/photos'
+import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
+import type { PhotoFilters as ServicePhotoFilters, OtherAnimalType } from '@/lib/services/photos'
 
 function PhotosContent(): React.JSX.Element {
   const searchParams = useSearchParams()
@@ -47,6 +50,7 @@ function PhotosContent(): React.JSX.Element {
     const uploadSessionIdParam = searchParams.get('uploadSessionId')
     const areaNameParam = searchParams.get('areaName')
     const sortByParam = searchParams.get('sortBy') as PhotoFiltersType['sortBy'] | null
+    const otherAnimalsParam = searchParams.get('otherAnimals')
 
     return {
       status: status || 'all',
@@ -67,6 +71,7 @@ function PhotosContent(): React.JSX.Element {
       ...(uploadSessionIdParam ? { uploadSessionId: uploadSessionIdParam } : {}),
       ...(areaNameParam ? { areaName: areaNameParam } : {}),
       ...(sortByParam ? { sortBy: sortByParam } : {}),
+      ...(otherAnimalsParam ? { otherAnimals: otherAnimalsParam.split(',') as OtherAnimalType[] } : {}),
     }
   }
 
@@ -83,6 +88,13 @@ function PhotosContent(): React.JSX.Element {
   // Fetch areas for filter dropdown
   const { data: areasData } = useAreas()
   const areaList = areasData?.areas ?? []
+
+  // Fetch locations for bulk location assignment
+  const { data: locationsData } = useLocations()
+  const locationsList = locationsData?.locations ?? []
+
+  // Photo selection store
+  const clearSelection = usePhotoSelectionStore((state) => state.clearSelection)
 
   // Build filter query string from current filters
   const buildFilterQueryString = (currentFilters: PhotoFiltersType): string => {
@@ -106,6 +118,7 @@ function PhotosContent(): React.JSX.Element {
     if (currentFilters.uploadSessionId) params.set('uploadSessionId', currentFilters.uploadSessionId)
     if (currentFilters.areaName) params.set('areaName', currentFilters.areaName)
     if (currentFilters.sortBy && currentFilters.sortBy !== 'imported_at') params.set('sortBy', currentFilters.sortBy)
+    if (currentFilters.otherAnimals?.length) params.set('otherAnimals', currentFilters.otherAnimals.join(','))
 
     return params.toString()
   }
@@ -116,6 +129,11 @@ function PhotosContent(): React.JSX.Element {
     const newUrl = queryString ? `?${queryString}` : '/photos'
     router.replace(newUrl, { scroll: false })
   }, [filters, router])
+
+  // Clear photo selection when filters change
+  useEffect(() => {
+    clearSelection()
+  }, [filters, clearSelection])
 
   // Convert component filters to service filters
   const serviceFilters: ServicePhotoFilters = {
@@ -136,6 +154,7 @@ function PhotosContent(): React.JSX.Element {
     ...(filters.uploadSessionId !== undefined ? { uploadSessionId: filters.uploadSessionId } : {}),
     ...(filters.areaName !== undefined ? { areaName: filters.areaName } : {}),
     ...(filters.sortBy !== undefined ? { sortBy: filters.sortBy } : {}),
+    ...(filters.otherAnimals?.length ? { otherAnimals: filters.otherAnimals } : {}),
     limit: 50,
   }
 
@@ -183,6 +202,7 @@ function PhotosContent(): React.JSX.Element {
     filters.batchId !== undefined ||
     filters.uploadSessionId !== undefined ||
     filters.areaName !== undefined ||
+    (filters.otherAnimals && filters.otherAnimals.length > 0) ||
     filters.sortBy === 'captured_at' // Only count as active if non-default
 
   // Flatten paginated data
@@ -284,6 +304,14 @@ function PhotosContent(): React.JSX.Element {
           const url = queryString ? `/photos/${id}?${queryString}` : `/photos/${id}`
           router.push(url)
         }}
+      />
+
+      {/* Selection Toolbar - appears when photos are selected */}
+      <SelectionToolbar
+        visiblePhotoIds={photos.map(p => p.id)}
+        locations={locationsList}
+        totalMatchingCount={total}
+        currentFilters={serviceFilters}
       />
     </div>
   )

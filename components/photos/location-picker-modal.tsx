@@ -141,13 +141,19 @@ function MapPicker({
       fullscreenControl={false}
       clickableIcons={false}
     >
-      {/* Existing Location Markers (dimmed) */}
+      {/* Existing Location Markers */}
       {existingLocations.map((location) => (
         <AdvancedMarker
           key={location.id}
           position={{ lat: location.lat, lng: location.lng }}
         >
-          <MapPinIcon className="w-6 h-6 text-slate-500 fill-slate-500/50 drop-shadow" />
+          <MapPinIcon
+            className="w-7 h-7 drop-shadow-lg"
+            style={{
+              color: location.color ?? '#C4895A',
+              fill: `${location.color ?? '#C4895A'}CC`,
+            }}
+          />
         </AdvancedMarker>
       ))}
 
@@ -244,9 +250,9 @@ export function LocationPickerModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 min-h-0 grid gap-4 grid-cols-1 lg:grid-cols-2 lg:min-h-[500px]">
-          {/* Map Section */}
-          <div className="relative rounded-lg overflow-hidden border border-slate-600 min-h-[400px]">
+        <div className="flex-1 min-h-0 grid gap-4 grid-cols-1 lg:grid-cols-3 lg:min-h-[500px]">
+          {/* Map Section - takes 2/3 of width */}
+          <div className="lg:col-span-2 relative rounded-lg overflow-hidden border border-slate-600 min-h-[400px]">
             {GOOGLE_MAPS_API_KEY ? (
               <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
                 <MapPicker

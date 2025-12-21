@@ -14,7 +14,7 @@ export function useAreas() {
   return useQuery({
     queryKey: ['areas'],
     queryFn: async (): Promise<AreasResponse> => {
-      const res = await fetch('/api/photos/areas')
+      const res = await fetch('/api/photos/areas', { cache: 'no-store' })
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to fetch areas' }))

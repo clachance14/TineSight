@@ -7,6 +7,7 @@ import { PhotoUploader } from '@/components/photos/photo-uploader'
 import { UploadProgressPanel } from '@/components/photos/upload-progress-panel'
 import { LocationPickerModal, type LocationData } from '@/components/photos/location-picker-modal'
 import { useUploadStore, batchedUpdateProgress } from '@/lib/stores/upload'
+import { setActiveUploadSessionId } from '@/lib/hooks/use-active-batch'
 import { useLocations } from '@/lib/hooks/use-locations'
 import { useAdaptiveThrottle } from '@/lib/hooks/use-adaptive-throttle'
 import { classifyXHRError } from '@/lib/throttle'
@@ -15,7 +16,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Image } from 'lucide-react'
 
-const PROGRESS_THROTTLE_MS = 500 // Max 2 updates per second per file
+const PROGRESS_THROTTLE_MS = 100 // Max 10 updates per second per file for smoother progress
 const MAX_RETRIES = 3
 const RETRY_DELAY_MS = 1000
 
@@ -63,7 +64,8 @@ export default function UploadPage() {
           const now = Date.now()
           const lastUpdate = progressThrottles.current.get(fileId) || 0
           const progress = Math.round((event.loaded / event.total) * 100)
-          if (progress === 100 || now - lastUpdate > PROGRESS_THROTTLE_MS) {
+          // Always report: first update (lastUpdate === 0), 100%, or if throttle interval passed
+          if (lastUpdate === 0 || progress === 100 || now - lastUpdate > PROGRESS_THROTTLE_MS) {
             progressThrottles.current.set(fileId, now)
             batchedUpdateProgress(fileId, progress)
           }
@@ -180,6 +182,10 @@ export default function UploadPage() {
       if (sessionRes.ok) {
         const sessionData = await sessionRes.json()
         sessionId = sessionData.sessionId
+        // Track this session for processing status bar (set once, not per-batch)
+        if (sessionId) {
+          setActiveUploadSessionId(sessionId)
+        }
       }
     } catch (err) {
       console.error('Failed to create upload session:', err)
@@ -280,6 +286,9 @@ export default function UploadPage() {
 
     setIsPreparing(true)
 
+    // Start session timer for metrics tracking
+    throttle.startSession()
+
     // Pipeline: fetch signed URLs for next round while current round uploads
     // This overlaps API latency with upload time
     const rounds = chunkArray(chunks, parallelChunks)
@@ -350,6 +359,9 @@ export default function UploadPage() {
         }
       }
     }
+
+    // Stop session timer for metrics tracking
+    throttle.stopSession()
 
     // Step 6: Refresh photo list after all chunks and retries
     await queryClient.invalidateQueries({ queryKey: ['photos'] })
