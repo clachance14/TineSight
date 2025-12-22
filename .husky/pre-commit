@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+
+# Claude Code Review Pre-Commit Hook
+# Performs AI code review and blocks commit on critical issues
+
+set -e
+
+echo "Running Claude Code Review..."
+echo "================================"
+
+# Skip if no staged changes
+if git diff --cached --quiet; then
+    echo "No staged changes to review."
+    exit 0
+fi
+
+# Create a temporary file to capture output
+REVIEW_OUTPUT=$(mktemp)
+trap "rm -f $REVIEW_OUTPUT" EXIT
+
+# Run Claude Code with the review skill
+# --print outputs to stdout without interactive mode
+if ! claude --print "/review" > "$REVIEW_OUTPUT" 2>&1; then
+    echo "Claude Code review failed to execute."
+    echo "Output:"
+    cat "$REVIEW_OUTPUT"
+    echo ""
+    echo "Proceeding with commit (review tool error)."
+    exit 0
+fi
+
+# Display the review output
+cat "$REVIEW_OUTPUT"
+
+# Check for the verdict
+if grep -q "REVIEW_RESULT: FAIL" "$REVIEW_OUTPUT"; then
+    echo ""
+    echo "================================"
+    echo "COMMIT BLOCKED: Critical issues found."
+    echo "Please address the issues above before committing."
+    echo ""
+    echo "To skip this check (not recommended):"
+    echo "  git commit --no-verify"
+    echo "================================"
+    exit 1
+fi
+
+if grep -q "REVIEW_RESULT: PASS" "$REVIEW_OUTPUT"; then
+    echo ""
+    echo "================================"
+    echo "Review complete. Commit approved."
+    echo "================================"
+    exit 0
+fi
+
+# If no clear verdict, warn but allow commit
+echo ""
+echo "================================"
+echo "WARNING: Could not determine review verdict."
+echo "Proceeding with commit, but manual review recommended."
+echo "================================"
+exit 0

@@ -300,14 +300,14 @@ export function LocationPickerModal({
                       <SelectItem
                         key={location.id}
                         value={location.id}
-                        className="text-cream hover:bg-slate focus:bg-slate"
+                        className="text-cream hover:bg-slate focus:bg-slate focus:text-cream"
                       >
                         {location.name}
                       </SelectItem>
                     ))}
                     <SelectItem
                       value="new"
-                      className="text-copper hover:bg-slate focus:bg-slate"
+                      className="text-copper hover:bg-slate focus:bg-slate focus:text-copper"
                     >
                       <span className="flex items-center gap-2">
                         <PlusIcon className="w-4 h-4" />
