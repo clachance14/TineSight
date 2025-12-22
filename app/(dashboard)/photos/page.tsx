@@ -50,6 +50,7 @@ function PhotosContent(): React.JSX.Element {
     const uploadSessionIdParam = searchParams.get('uploadSessionId')
     const areaNameParam = searchParams.get('areaName')
     const sortByParam = searchParams.get('sortBy') as PhotoFiltersType['sortBy'] | null
+    const sortDirectionParam = searchParams.get('sortDirection') as PhotoFiltersType['sortDirection'] | null
     const otherAnimalsParam = searchParams.get('otherAnimals')
 
     return {
@@ -71,6 +72,7 @@ function PhotosContent(): React.JSX.Element {
       ...(uploadSessionIdParam ? { uploadSessionId: uploadSessionIdParam } : {}),
       ...(areaNameParam ? { areaName: areaNameParam } : {}),
       ...(sortByParam ? { sortBy: sortByParam } : {}),
+      ...(sortDirectionParam ? { sortDirection: sortDirectionParam } : {}),
       ...(otherAnimalsParam ? { otherAnimals: otherAnimalsParam.split(',') as OtherAnimalType[] } : {}),
     }
   }
@@ -118,6 +120,7 @@ function PhotosContent(): React.JSX.Element {
     if (currentFilters.uploadSessionId) params.set('uploadSessionId', currentFilters.uploadSessionId)
     if (currentFilters.areaName) params.set('areaName', currentFilters.areaName)
     if (currentFilters.sortBy && currentFilters.sortBy !== 'imported_at') params.set('sortBy', currentFilters.sortBy)
+    if (currentFilters.sortDirection && currentFilters.sortDirection !== 'desc') params.set('sortDirection', currentFilters.sortDirection)
     if (currentFilters.otherAnimals?.length) params.set('otherAnimals', currentFilters.otherAnimals.join(','))
 
     return params.toString()
