@@ -428,12 +428,21 @@ export async function getPhotos(
     if (filters?.cursor !== undefined) {
       const [cursorTimestamp, cursorId] = filters.cursor.split('::')
       if (cursorTimestamp && cursorId) {
-        // Use the same field we're sorting by
-        const cursorField = sortField
         // Filter for photos that come after the cursor (descending order)
-        query = query.or(
-          `${cursorField}.lt.${cursorTimestamp},and(${cursorField}.eq.${cursorTimestamp},id.lt.${cursorId})`
-        )
+        // Special handling for captured_at which can be NULL - cursor uses imported_at as fallback
+        if (sortField === 'captured_at') {
+          // Handle NULL captured_at: compare against both captured_at AND imported_at (for NULL cases)
+          query = query.or(
+            `captured_at.lt.${cursorTimestamp},` +
+            `and(captured_at.eq.${cursorTimestamp},id.lt.${cursorId}),` +
+            `and(captured_at.is.null,imported_at.lt.${cursorTimestamp}),` +
+            `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.lt.${cursorId})`
+          )
+        } else {
+          query = query.or(
+            `${sortField}.lt.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.lt.${cursorId})`
+          )
+        }
       }
     }
 
@@ -572,12 +581,21 @@ export async function getPhotos(
   if (filters?.cursor !== undefined) {
     const [cursorTimestamp, cursorId] = filters.cursor.split('::')
     if (cursorTimestamp && cursorId) {
-      // Use the same field we're sorting by
-      const cursorField = sortField
       // Filter for photos that come after the cursor (descending order)
-      query = query.or(
-        `${cursorField}.lt.${cursorTimestamp},and(${cursorField}.eq.${cursorTimestamp},id.lt.${cursorId})`
-      )
+      // Special handling for captured_at which can be NULL - cursor uses imported_at as fallback
+      if (sortField === 'captured_at') {
+        // Handle NULL captured_at: compare against both captured_at AND imported_at (for NULL cases)
+        query = query.or(
+          `captured_at.lt.${cursorTimestamp},` +
+          `and(captured_at.eq.${cursorTimestamp},id.lt.${cursorId}),` +
+          `and(captured_at.is.null,imported_at.lt.${cursorTimestamp}),` +
+          `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.lt.${cursorId})`
+        )
+      } else {
+        query = query.or(
+          `${sortField}.lt.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.lt.${cursorId})`
+        )
+      }
     }
   }
 
