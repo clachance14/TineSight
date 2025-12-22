@@ -154,6 +154,7 @@ function PhotosContent(): React.JSX.Element {
     ...(filters.uploadSessionId !== undefined ? { uploadSessionId: filters.uploadSessionId } : {}),
     ...(filters.areaName !== undefined ? { areaName: filters.areaName } : {}),
     ...(filters.sortBy !== undefined ? { sortBy: filters.sortBy } : {}),
+    ...(filters.sortDirection !== undefined ? { sortDirection: filters.sortDirection } : {}),
     ...(filters.otherAnimals?.length ? { otherAnimals: filters.otherAnimals } : {}),
     limit: 50,
   }

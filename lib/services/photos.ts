@@ -314,17 +314,20 @@ export async function getPhotos(
       query = query.in('id', filteredImageIds)
     }
 
-    // Apply dynamic ordering based on sortBy (default: imported_at)
+    // Apply dynamic ordering based on sortBy (default: imported_at) and sortDirection (default: desc)
     const sortField = filters?.sortBy ?? 'imported_at'
+    // Supabase ascending: true = smallest values first (oldest dates)
+    // desc (newest) needs ascending: false, asc (oldest) needs ascending: true
+    const ascending = filters?.sortDirection === 'asc'
     if (sortField === 'captured_at') {
-      // Photos without captured_at (null) should appear last
+      // Photos without captured_at (null) should appear last regardless of direction
       query = query
-        .order('captured_at', { ascending: false, nullsFirst: false })
-        .order('id', { ascending: false })
+        .order('captured_at', { ascending, nullsFirst: false })
+        .order('id', { ascending })
     } else {
       query = query
-        .order('imported_at', { ascending: false })
-        .order('id', { ascending: false })
+        .order('imported_at', { ascending })
+        .order('id', { ascending })
     }
 
     // Apply other filters
@@ -428,19 +431,21 @@ export async function getPhotos(
     if (filters?.cursor !== undefined) {
       const [cursorTimestamp, cursorId] = filters.cursor.split('::')
       if (cursorTimestamp && cursorId) {
-        // Filter for photos that come after the cursor (descending order)
+        // Filter for photos that come after the cursor
+        // Use .lt for descending (smaller values after), .gt for ascending (larger values after)
+        const cmp = ascending ? 'gt' : 'lt'
         // Special handling for captured_at which can be NULL - cursor uses imported_at as fallback
         if (sortField === 'captured_at') {
           // Handle NULL captured_at: compare against both captured_at AND imported_at (for NULL cases)
           query = query.or(
-            `captured_at.lt.${cursorTimestamp},` +
-            `and(captured_at.eq.${cursorTimestamp},id.lt.${cursorId}),` +
-            `and(captured_at.is.null,imported_at.lt.${cursorTimestamp}),` +
-            `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.lt.${cursorId})`
+            `captured_at.${cmp}.${cursorTimestamp},` +
+            `and(captured_at.eq.${cursorTimestamp},id.${cmp}.${cursorId}),` +
+            `and(captured_at.is.null,imported_at.${cmp}.${cursorTimestamp}),` +
+            `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
           )
         } else {
           query = query.or(
-            `${sortField}.lt.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.lt.${cursorId})`
+            `${sortField}.${cmp}.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
           )
         }
       }
@@ -461,8 +466,9 @@ export async function getPhotos(
   }
 
   // Standard query without detection-based filters
-  // Apply dynamic ordering based on sortBy (default: imported_at)
+  // Apply dynamic ordering based on sortBy (default: imported_at) and sortDirection (default: desc)
   const sortField = filters?.sortBy ?? 'imported_at'
+  const ascending = filters?.sortDirection === 'asc'
 
   let query = supabase
     .from('images')
@@ -470,14 +476,14 @@ export async function getPhotos(
     .eq('user_id', userId)
 
   if (sortField === 'captured_at') {
-    // Photos without captured_at (null) should appear last
+    // Photos without captured_at (null) should appear last regardless of direction
     query = query
-      .order('captured_at', { ascending: false, nullsFirst: false })
-      .order('id', { ascending: false })
+      .order('captured_at', { ascending, nullsFirst: false })
+      .order('id', { ascending })
   } else {
     query = query
-      .order('imported_at', { ascending: false })
-      .order('id', { ascending: false })
+      .order('imported_at', { ascending })
+      .order('id', { ascending })
   }
 
   // Apply filters
@@ -581,19 +587,21 @@ export async function getPhotos(
   if (filters?.cursor !== undefined) {
     const [cursorTimestamp, cursorId] = filters.cursor.split('::')
     if (cursorTimestamp && cursorId) {
-      // Filter for photos that come after the cursor (descending order)
+      // Filter for photos that come after the cursor
+      // Use .lt for descending (smaller values after), .gt for ascending (larger values after)
+      const cmp = ascending ? 'gt' : 'lt'
       // Special handling for captured_at which can be NULL - cursor uses imported_at as fallback
       if (sortField === 'captured_at') {
         // Handle NULL captured_at: compare against both captured_at AND imported_at (for NULL cases)
         query = query.or(
-          `captured_at.lt.${cursorTimestamp},` +
-          `and(captured_at.eq.${cursorTimestamp},id.lt.${cursorId}),` +
-          `and(captured_at.is.null,imported_at.lt.${cursorTimestamp}),` +
-          `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.lt.${cursorId})`
+          `captured_at.${cmp}.${cursorTimestamp},` +
+          `and(captured_at.eq.${cursorTimestamp},id.${cmp}.${cursorId}),` +
+          `and(captured_at.is.null,imported_at.${cmp}.${cursorTimestamp}),` +
+          `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
         )
       } else {
         query = query.or(
-          `${sortField}.lt.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.lt.${cursorId})`
+          `${sortField}.${cmp}.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
         )
       }
     }

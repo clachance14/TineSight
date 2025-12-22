@@ -18,10 +18,11 @@ interface SortDropdownProps {
 
 export function SortDropdown({ sortBy, sortDirection, onChange }: SortDropdownProps) {
   // Combine field and direction into single value for radio group
-  const value = `${sortBy}_${sortDirection}`
+  // Use colon separator since field names contain underscores (captured_at, imported_at)
+  const value = `${sortBy}:${sortDirection}`
 
   const handleValueChange = (newValue: string) => {
-    const [field, direction] = newValue.split('_') as ['captured_at' | 'imported_at', 'asc' | 'desc']
+    const [field, direction] = newValue.split(':') as ['captured_at' | 'imported_at', 'asc' | 'desc']
     onChange(field, direction)
   }
 
@@ -46,16 +47,16 @@ export function SortDropdown({ sortBy, sortDirection, onChange }: SortDropdownPr
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         <DropdownMenuRadioGroup value={value} onValueChange={handleValueChange}>
-          <DropdownMenuRadioItem value="captured_at_desc">
+          <DropdownMenuRadioItem value="captured_at:desc">
             Date Captured - Newest
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="captured_at_asc">
+          <DropdownMenuRadioItem value="captured_at:asc">
             Date Captured - Oldest
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="imported_at_desc">
+          <DropdownMenuRadioItem value="imported_at:desc">
             Date Uploaded - Newest
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="imported_at_asc">
+          <DropdownMenuRadioItem value="imported_at:asc">
             Date Uploaded - Oldest
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
