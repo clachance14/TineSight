@@ -313,7 +313,134 @@ TineSight occupies a unique position:
                     Buck Re-ID
 ```
 
-**No direct competitor offers AI buck re-identification.** This is TineSight's moat.
+**No direct competitor offers fully automatic AI buck re-identification.** This is TineSight's moat.
+
+---
+
+## Deep Competitive Analysis
+
+### DeerLab - Primary Competitor
+
+**Website**: [deerlab.com](https://deerlab.com/)
+**Pricing**: $84-$408/year depending on properties, cameras, and photo volume
+**Free Trial**: 14-30 days
+
+#### What DeerLab Does Well
+- **Auto-tagging species**: AI identifies bucks, does, turkeys, hogs, bears with ~90% accuracy
+- **Weather integration**: Automatically pulls wind, barometric pressure, sunrise/sunset for every photo
+- **Buck profiles**: Track movement patterns, heat maps, camera activity
+- **Timestamp management**: Batch-edit thousands of photo timestamps at once
+- **Groups photos**: Clusters photos within 15-minute windows for pattern analysis
+
+#### DeerLab's Critical Gap (TineSight's Opportunity)
+
+**From [DeerLab's own help documentation](https://help.deerlab.com/en/articles/5458837-does-deerlab-automatically-identify-unique-animals):**
+
+> "To identify unique animals, like a specific buck, DeerLab would need to already have a model created, tested, and integrated into the system. DeerLab processes millions of photos, and **it's impossible to uniquely identify specific animals** without such models."
+
+**Translation**: DeerLab can tell you "this is a buck" but NOT "this is the SAME buck from last week."
+
+#### DeerLab Workflow vs. TineSight
+
+| Step | DeerLab | TineSight |
+|------|---------|-----------|
+| Upload photos | ✅ Automatic | ✅ Automatic |
+| Detect deer species | ✅ AI (buck/doe/fawn) | ✅ AI |
+| Identify SAME individual buck | ❌ **Manual tagging required** | ✅ **AI automatic** |
+| Create buck profile | User must tag photos manually | Auto-generated from re-ID |
+| Track buck over time | Only after manual tagging | Automatic from first detection |
+
+#### Marketing Angle Against DeerLab
+
+> "DeerLab tells you there's a buck in the photo. TineSight tells you it's the SAME buck you saw 3 weeks ago on a different camera."
+
+---
+
+### HuntPro - Secondary Competitor
+
+**Website**: [huntpro.app](https://www.huntpro.app/)
+**Pricing**: Tiered subscription (details vary)
+**Patent**: US 10,776,695 B1 for "intelligent recognition of trail camera images"
+
+#### What HuntPro Does Well
+- **Species detection**: AI identifies 12+ species (whitetail bucks/does/fawns, hogs, turkeys, etc.)
+- **Massive scale**: Handles 35,000+ images/week for large operations
+- **Buck ID Mode**: Allows tagging individual bucks for tracking
+- **Population surveys**: Built for wildlife management at scale
+- **NDA Partnership**: Official partner of National Deer Association
+
+#### HuntPro's Ambiguity (Potential Gap)
+
+HuntPro's "Buck ID" feature is marketed as:
+> "Once a target deer is identified in the system, hunters can tag the deer through HuntPro's identification mode feature creating a profile category specific to the animal. Future images of the tagged deer will upload directly to its profile."
+
+**The unclear part**: Does "future images upload directly to its profile" mean:
+1. AI automatically recognizes the same buck? OR
+2. User manually assigns future photos to that profile?
+
+Based on available documentation, it appears to be **manual tagging first**, then profile organization—similar to DeerLab.
+
+#### Marketing Angle Against HuntPro
+
+> "HuntPro is built for wildlife agencies running population surveys. TineSight is built for lease operators who need to show clients their trophy bucks."
+
+---
+
+### Other Competitors
+
+| Competitor | What They Do | Gap vs. TineSight |
+|------------|--------------|-------------------|
+| **HuntStand** | Mapping, stand locations, land ownership | No photo management or deer ID |
+| **onX Hunt** | GPS maps, landowner data | No trail camera features |
+| **Moultrie Mobile** | Cellular camera management | Camera-brand locked, no cross-camera re-ID |
+| **BuckScore** | Antler scoring from photos | Manual point-and-click, not re-identification |
+| **WISE** | Free trail cam software | Manual tagging, no AI |
+| **Big Game Logic** | Budget trail cam tools | Basic, no AI identification |
+
+---
+
+## TineSight Differentiation Summary
+
+### Unique Value Propositions
+
+1. **Automatic Re-ID**: The AI recognizes "this is the same buck" without manual tagging
+   - DeerLab: Manual tagging required
+   - HuntPro: Manual tagging appears required
+   - TineSight: **Fully automatic**
+
+2. **Lease Operator Focus**: Built for the business of hunting leases, not just hunting
+   - Trophy catalogs for sales presentations
+   - Proof of buck quality for prospects
+   - ROI messaging (close deals faster)
+
+3. **Antler-Based Recognition**: Uses antler morphology (unique per buck) for matching
+   - Academic research shows 97%+ accuracy is achievable
+   - Antlers are "fingerprints" for bucks
+
+4. **Cross-Camera Matching**: Identifies same buck across unlimited cameras
+   - Most competitors are camera-brand locked or don't cross-match
+
+### Messaging Hierarchy
+
+**Primary Message** (Lead with this):
+> "The only app that automatically recognizes individual bucks across your trail cameras."
+
+**Secondary Message** (Business value):
+> "Build a trophy buck catalog that closes lease deals."
+
+**Tertiary Message** (Time savings):
+> "Stop manually tagging thousands of photos. Let AI do it."
+
+### Battlecards
+
+#### When Prospect Mentions DeerLab:
+> "DeerLab is great for organizing photos and seeing patterns. The difference is: DeerLab tells you 'there's a buck in this photo.' TineSight tells you 'this is Big 10, the same buck you saw on Camera 4 last Tuesday.' If you want to actually know your individual bucks without manually tagging every photo, that's what we built TineSight for."
+
+#### When Prospect Mentions HuntPro:
+> "HuntPro is powerful—they're partnered with NDA and handle massive photo volumes. They're really built for wildlife agencies doing population surveys. TineSight is focused on one thing: automatically identifying individual bucks so you can build a trophy catalog. If you're a lease operator trying to show prospects your best bucks, that's our sweet spot."
+
+#### When Prospect Says "I'll Just Tag Manually":
+> "How many photos did you take last season? 3,000? 5,000? And how many hours did you spend tagging? Now imagine the same buck shows up on 6 different cameras over 3 months. Are you confident you tagged him consistently every time? The AI doesn't get tired, doesn't second-guess, and doesn't accidentally create 3 profiles for the same buck."
 
 ---
 
