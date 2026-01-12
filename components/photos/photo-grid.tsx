@@ -153,7 +153,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
             type="button"
             onClick={handleCheckboxClick}
             className={cn(
-              'w-6 h-6 rounded border-2 flex items-center justify-center',
+              'w-8 h-8 md:w-6 md:h-6 rounded border-2 flex items-center justify-center',
               'transition-colors duration-150',
               selected
                 ? 'bg-copper border-copper text-slate-deep'
@@ -330,8 +330,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   // Loading skeleton
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {Array.from({ length: 12 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-2 sm:gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="aspect-square">
             <Skeleton className="h-full w-full" />
           </div>
@@ -447,7 +447,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                 }}
               >
                 <div
-                  className="grid gap-4 pb-4"
+                  className="grid gap-2 sm:gap-4 pb-4"
                   style={{
                     gridTemplateColumns: `repeat(${columns}, 1fr)`,
                   }}

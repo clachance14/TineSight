@@ -83,14 +83,14 @@ export function PhotoViewer({ photoId, onClose, onNavigate }: PhotoViewerProps) 
         onClick={(e) => e.stopPropagation()}
       >
         {/* Image Container */}
-        <div className="flex-1 flex items-center justify-center p-8 relative">
+        <div className="flex-1 flex items-center justify-center p-4 md:p-8 relative">
           {/* Navigation Arrows */}
           {onNavigate && (
             <>
               <Button
                 variant="ghost"
                 size="icon-lg"
-                className="absolute left-4 top-1/2 -translate-y-1/2 bg-slate/80 hover:bg-slate text-cream hover:text-copper-light backdrop-blur-sm z-10"
+                className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 bg-slate/80 hover:bg-slate text-cream hover:text-copper-light backdrop-blur-sm z-10 h-10 w-10 md:h-12 md:w-12 min-h-[40px] min-w-[40px]"
                 onClick={() => onNavigate('prev')}
                 aria-label="Previous photo"
               >
@@ -99,7 +99,7 @@ export function PhotoViewer({ photoId, onClose, onNavigate }: PhotoViewerProps) 
               <Button
                 variant="ghost"
                 size="icon-lg"
-                className="absolute right-4 top-1/2 -translate-y-1/2 bg-slate/80 hover:bg-slate text-cream hover:text-copper-light backdrop-blur-sm z-10"
+                className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 bg-slate/80 hover:bg-slate text-cream hover:text-copper-light backdrop-blur-sm z-10 h-10 w-10 md:h-12 md:w-12 min-h-[40px] min-w-[40px]"
                 onClick={() => onNavigate('next')}
                 aria-label="Next photo"
               >
@@ -161,7 +161,7 @@ export function PhotoViewer({ photoId, onClose, onNavigate }: PhotoViewerProps) 
         </div>
 
         {/* Sidebar - Detection Details Panel */}
-        <div className="w-80 bg-slate border-l border-slate-light overflow-y-auto">
+        <div className="hidden md:block w-80 bg-slate border-l border-slate-light overflow-y-auto">
           {/* Header */}
           <div className="sticky top-0 bg-slate border-b border-slate-light p-4 flex items-center justify-between z-10">
             <h2 className="text-lg font-semibold text-cream">Photo Details</h2>
@@ -338,7 +338,7 @@ export function PhotoViewer({ photoId, onClose, onNavigate }: PhotoViewerProps) 
       <Button
         variant="ghost"
         size="icon-lg"
-        className="absolute top-4 right-[21rem] bg-slate/80 hover:bg-slate text-cream hover:text-copper-light backdrop-blur-sm z-10"
+        className="absolute top-4 right-4 md:right-[21rem] bg-slate/80 hover:bg-slate text-cream hover:text-copper-light backdrop-blur-sm z-10 h-10 w-10 min-h-[40px] min-w-[40px]"
         onClick={onClose}
         aria-label="Close viewer"
       >

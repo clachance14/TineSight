@@ -91,11 +91,12 @@ export function FilterSidebar({
 
   return (
     <>
-      {/* Sidebar Container */}
+      {/* Sidebar Container - hidden on mobile, use drawer pattern instead */}
       <aside
         className={cn(
-          "fixed left-0 top-16 bottom-0 z-40 flex flex-col transition-all duration-300 ease-in-out",
+          "fixed left-0 top-16 bottom-0 z-40 flex-col transition-all duration-300 ease-in-out",
           "bg-[var(--color-deep-forest)] border-r border-[var(--color-forest-light)]",
+          "hidden md:flex",
           filterSidebarOpen ? "w-[280px]" : "w-0"
         )}
         style={{
@@ -244,7 +245,7 @@ export function FilterSidebar({
         </div>
       </aside>
 
-      {/* Toggle Button */}
+      {/* Toggle Button - hidden on mobile */}
       <Button
         variant="ghost"
         size="sm"
@@ -253,6 +254,7 @@ export function FilterSidebar({
           "fixed top-20 z-50 h-8 w-8 p-0 transition-all duration-300",
           "bg-[var(--color-forest)] border border-[var(--color-forest-light)]",
           "hover:bg-[var(--color-forest-light)] text-[var(--color-parchment)]",
+          "hidden md:flex items-center justify-center",
           filterSidebarOpen ? "left-[280px]" : "left-0"
         )}
         title={filterSidebarOpen ? "Hide filters" : "Show filters"}

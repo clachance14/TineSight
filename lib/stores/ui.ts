@@ -8,6 +8,7 @@ interface UIState {
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
   toggleSidebar: () => void
+  closeSidebar: () => void
   // Photo viewer preferences (persisted)
   showBoundingBoxes: boolean
   setShowBoundingBoxes: (show: boolean) => void
@@ -24,9 +25,10 @@ interface UIState {
 export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
-      sidebarOpen: true,
+      sidebarOpen: false,
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+      closeSidebar: () => set({ sidebarOpen: false }),
       // Photo viewer preferences
       showBoundingBoxes: true,
       setShowBoundingBoxes: (show) => set({ showBoundingBoxes: show }),

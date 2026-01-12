@@ -58,7 +58,7 @@ export function CropLightbox({
   }
 
   return (
-    <div className="fixed inset-0 right-[400px] z-[60] bg-black/95 flex items-center justify-center p-8">
+    <div className="fixed inset-0 md:right-[400px] z-[60] bg-black/95 flex items-center justify-center p-4 md:p-8">
       {cropUrl ? (
         <img
           src={cropUrl}
@@ -67,7 +67,7 @@ export function CropLightbox({
         />
       ) : imageUrl ? (
         <div
-          className="w-full h-full max-w-[800px] max-h-[600px] rounded-lg"
+          className="w-full h-full max-w-[800px] max-h-[400px] md:max-h-[600px] rounded-lg"
           style={cropStyle}
         />
       ) : null}
