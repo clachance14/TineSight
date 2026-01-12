@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useMemo, useState, memo } from 'react'
 import Image from 'next/image'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { usePinch } from '@use-gesture/react'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
 import { Badge } from '@/components/ui/badge'
@@ -10,10 +11,17 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { Loader2, Check } from 'lucide-react'
 import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
+import { useUIStore, type MobileGridColumns } from '@/lib/stores/ui'
 
 // Constants for virtualization
 const GAP = 16 // gap-4 = 1rem = 16px
 const ESTIMATED_ROW_HEIGHT = 250 // Conservative estimate for initial render
+
+// Mobile breakpoint (matches Tailwind's md:)
+const MOBILE_BREAKPOINT = 768
+
+// Available mobile column options
+const MOBILE_COLUMN_OPTIONS: MobileGridColumns[] = [4, 5, 6, 7]
 
 interface PhotoGridProps {
   filters?: Omit<PhotoFilters, 'offset'>
@@ -233,20 +241,64 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   const parentRef = useRef<HTMLDivElement>(null)
   const [columns, setColumns] = useState(5)
+  const [isMobile, setIsMobile] = useState(false)
 
-  // Calculate columns based on viewport width (matching grid breakpoints)
+  // Get mobile grid columns preference from store
+  const mobileGridColumns = useUIStore((state) => state.mobileGridColumns)
+  const setMobileGridColumns = useUIStore((state) => state.setMobileGridColumns)
+
+  // Track if we're on mobile and calculate columns
   useEffect(() => {
     const updateColumns = () => {
       const width = window.innerWidth
-      if (width < 640) setColumns(2)       // grid-cols-2
-      else if (width < 1024) setColumns(3) // sm:grid-cols-3
-      else if (width < 1280) setColumns(4) // lg:grid-cols-4
-      else setColumns(5)                   // xl:grid-cols-5
+      const mobile = width < MOBILE_BREAKPOINT
+      setIsMobile(mobile)
+
+      if (mobile) {
+        // Mobile: use user-selected column count
+        setColumns(mobileGridColumns)
+      } else {
+        // Desktop: use normal responsive behavior
+        if (width < 1024) setColumns(3)      // tablet
+        else if (width < 1280) setColumns(4) // desktop
+        else setColumns(5)                    // large desktop
+      }
     }
     updateColumns()
     window.addEventListener('resize', updateColumns)
     return () => window.removeEventListener('resize', updateColumns)
-  }, [])
+  }, [mobileGridColumns])
+
+  // Pinch-to-zoom gesture handler (mobile only)
+  usePinch(
+    ({ direction: [xDir], memo = mobileGridColumns }) => {
+      if (!isMobile) return memo
+
+      const currentIndex = MOBILE_COLUMN_OPTIONS.indexOf(mobileGridColumns)
+
+      // Pinch out (zoom in) = fewer columns = move toward 4
+      if (xDir > 0 && currentIndex > 0) {
+        const newColumns = MOBILE_COLUMN_OPTIONS[currentIndex - 1]
+        if (newColumns !== undefined) {
+          setMobileGridColumns(newColumns)
+        }
+      }
+      // Pinch in (zoom out) = more columns = move toward 7
+      else if (xDir < 0 && currentIndex < MOBILE_COLUMN_OPTIONS.length - 1) {
+        const newColumns = MOBILE_COLUMN_OPTIONS[currentIndex + 1]
+        if (newColumns !== undefined) {
+          setMobileGridColumns(newColumns)
+        }
+      }
+
+      return mobileGridColumns
+    },
+    {
+      target: parentRef,
+      eventOptions: { passive: false },
+      threshold: 0.1,
+    }
+  )
 
   // Flatten all pages into a single array of photos
   const photos = useMemo(() => {
