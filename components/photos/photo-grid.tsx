@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { Loader2, Check } from 'lucide-react'
 import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
 import { useUIStore, type MobileGridColumns } from '@/lib/stores/ui'
+import { SmartBadge } from './smart-badge'
 
 // Constants for virtualization
 const GAP = 16 // gap-4 = 1rem = 16px
@@ -22,6 +23,14 @@ const MOBILE_BREAKPOINT = 768
 
 // Available mobile column options
 const MOBILE_COLUMN_OPTIONS: MobileGridColumns[] = [4, 5, 6, 7]
+
+// Helper function for responsive gap calculation
+const getGapClass = (columns: number, isMobile: boolean) => {
+  if (!isMobile) return 'gap-4'  // Desktop: 16px
+  if (columns >= 6) return 'gap-1'  // Mobile 6-7 cols: 4px
+  if (columns >= 5) return 'gap-1.5'  // Mobile 5 cols: 6px
+  return 'gap-2'  // Mobile 4 cols: 8px
+}
 
 interface PhotoGridProps {
   filters?: Omit<PhotoFilters, 'offset'>
@@ -50,35 +59,17 @@ const PhotoGridItem = memo(function PhotoGridItem({
   photo,
   onClick,
   priority = false,
+  columns,
 }: {
   photo: Photo
   onClick: (id: string) => void
   priority?: boolean // Load above-fold images with higher priority
+  columns: number
 }) {
   // Use separate selectors for better memoization
   const isSelectMode = usePhotoSelectionStore((state) => state.isSelectMode)
   const selected = usePhotoSelectionStore((state) => state.selectedPhotoIds.has(photo.id))
   const togglePhotoSelection = usePhotoSelectionStore((state) => state.togglePhotoSelection)
-
-  // Status badge variant mapping
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return 'secondary'
-      case 'processing':
-        return 'processing'
-      case 'completed':
-        return 'success'
-      case 'failed':
-        return 'destructive'
-      default:
-        return 'outline'
-    }
-  }
-
-  const formatStatus = (status: string) => {
-    return status.charAt(0).toUpperCase() + status.slice(1)
-  }
 
   const handleClick = useCallback(() => {
     // If in select mode, toggle selection instead of navigating
@@ -98,7 +89,9 @@ const PhotoGridItem = memo(function PhotoGridItem({
   return (
     <div
       className={cn(
-        'group relative aspect-square cursor-pointer overflow-hidden rounded-lg bg-slate',
+        'group relative aspect-square cursor-pointer overflow-hidden bg-slate',
+        columns >= 6 ? 'rounded-md' : 'rounded-lg',  // Adaptive border radius
+        'active:scale-[0.97] transition-transform duration-100',  // Touch feedback
         !isSelectMode && 'hover:ring-2 hover:ring-copper',
         selected && 'ring-2 ring-copper'
       )}
@@ -149,10 +142,11 @@ const PhotoGridItem = memo(function PhotoGridItem({
           </div>
         )}
 
-        {/* Checkbox overlay - visible on hover or in select mode */}
+        {/* Checkbox overlay - visible on hover or in select mode, hidden on mobile */}
         <div
           className={cn(
             'absolute top-2 left-2 z-10',
+            'hidden md:block',  // Hide on mobile
             'transition-opacity duration-150',
             isSelectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           )}
@@ -161,7 +155,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
             type="button"
             onClick={handleCheckboxClick}
             className={cn(
-              'w-8 h-8 md:w-6 md:h-6 rounded border-2 flex items-center justify-center',
+              'w-6 h-6 rounded border-2 flex items-center justify-center',
               'transition-colors duration-150',
               selected
                 ? 'bg-copper border-copper text-slate-deep'
@@ -172,21 +166,28 @@ const PhotoGridItem = memo(function PhotoGridItem({
           </button>
         </div>
 
-        {/* Selection overlay */}
+        {/* Selection overlay - hidden on mobile */}
         {selected && (
-          <div className="absolute inset-0 bg-copper/10 pointer-events-none" />
+          <div className="absolute inset-0 bg-copper/10 pointer-events-none hidden md:block" />
         )}
 
-        {/* Status badge overlay */}
-        <div className="absolute right-2 top-2">
-          <Badge variant={getStatusBadgeVariant(photo.detection_status)}>
-            {formatStatus(photo.detection_status)}
-          </Badge>
-        </div>
+        {/* Status badge overlay - only show for non-completed status */}
+        {photo.detection_status !== 'completed' && (
+          <div className="absolute right-2 top-2">
+            <SmartBadge
+              status={photo.detection_status}
+              iconOnly={columns >= 5}
+            />
+          </div>
+        )}
 
-        {/* Quality status badge (if present) */}
+        {/* Quality status badge - hidden on mobile, tap to reveal */}
         {photo.bestQualityStatus && photo.bestQualityStatus !== 'pending' && (
-          <div className="absolute bottom-2 right-2">
+          <div className={cn(
+            "absolute bottom-2 right-2",
+            "md:opacity-100",
+            "opacity-0 group-hover:opacity-100 transition-opacity"
+          )}>
             <Badge
               variant={
                 photo.bestQualityStatus === 'high_quality'
@@ -499,7 +500,10 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                 }}
               >
                 <div
-                  className="grid gap-2 sm:gap-4 pb-4"
+                  className={cn(
+                    "grid pb-4",
+                    getGapClass(columns, isMobile)
+                  )}
                   style={{
                     gridTemplateColumns: `repeat(${columns}, 1fr)`,
                   }}
@@ -510,6 +514,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                       photo={photo}
                       onClick={handlePhotoClick}
                       priority={isAboveFold}
+                      columns={columns}
                     />
                   ))}
                 </div>
