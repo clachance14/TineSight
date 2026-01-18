@@ -56,6 +56,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'tinesight-ui-preferences',
+      skipHydration: true, // Prevents auto-hydration crash on iOS Safari
       partialize: (state) => ({
         // Persist these preferences
         showBoundingBoxes: state.showBoundingBoxes,
