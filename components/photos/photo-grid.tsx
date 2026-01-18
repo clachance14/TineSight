@@ -252,6 +252,14 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   const mobileGridColumns = useUIStore((state) => state.mobileGridColumns)
   const setMobileGridColumns = useUIStore((state) => state.setMobileGridColumns)
 
+  // Ref to avoid stale closures in usePinch handler
+  const mobileGridColumnsRef = useRef(mobileGridColumns)
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    mobileGridColumnsRef.current = mobileGridColumns
+  }, [mobileGridColumns])
+
   // Track if we're on mobile and calculate columns
   useEffect(() => {
     const updateColumns = () => {
@@ -275,32 +283,36 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   }, [mobileGridColumns])
 
   // Pinch-to-zoom gesture handler (mobile only)
+  // Uses ref to avoid stale closures and only updates state on gesture END
+  // to prevent mid-gesture layout thrashing that causes crashes on iPhone
   usePinch(
-    ({ direction: [xDir], memo = mobileGridColumns }) => {
+    ({ direction: [xDir], memo, last }) => {
       if (!isMobile) return memo
 
-      const currentIndex = MOBILE_COLUMN_OPTIONS.indexOf(mobileGridColumns)
+      // Use ref for initial value (never stale), then track via memo
+      const currentCols = memo ?? mobileGridColumnsRef.current
+      const currentIndex = MOBILE_COLUMN_OPTIONS.indexOf(currentCols)
 
+      let newCols = currentCols
       // Pinch out (zoom in) = fewer columns = move toward 4
       if (xDir > 0 && currentIndex > 0) {
-        const newColumns = MOBILE_COLUMN_OPTIONS[currentIndex - 1]
-        if (newColumns !== undefined) {
-          setMobileGridColumns(newColumns)
-        }
+        newCols = MOBILE_COLUMN_OPTIONS[currentIndex - 1]
       }
       // Pinch in (zoom out) = more columns = move toward 7
       else if (xDir < 0 && currentIndex < MOBILE_COLUMN_OPTIONS.length - 1) {
-        const newColumns = MOBILE_COLUMN_OPTIONS[currentIndex + 1]
-        if (newColumns !== undefined) {
-          setMobileGridColumns(newColumns)
-        }
+        newCols = MOBILE_COLUMN_OPTIONS[currentIndex + 1]
       }
 
-      return mobileGridColumns
+      // Only update state when gesture ENDS - no mid-gesture reflows
+      if (last && newCols !== mobileGridColumnsRef.current) {
+        setMobileGridColumns(newCols)
+      }
+
+      return newCols  // Track intended value in memo for next frame
     },
     {
       target: parentRef,
-      eventOptions: { passive: false },
+      eventOptions: { passive: false },  // Required for gesture capture on iOS
       threshold: 0.1,
     }
   )
@@ -326,11 +338,14 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   })
 
   // Scroll restoration: when returning from photo detail, scroll to the photo's row
+  // Only re-run when photos load, not on column change (avoids re-triggering during pinch)
   useEffect(() => {
     if (photos.length === 0) return
 
     const scrollToId = sessionStorage.getItem('photos:scrollToId')
     if (!scrollToId) return
+
+    sessionStorage.removeItem('photos:scrollToId')  // Clear immediately
 
     // Find the photo's index in the list
     const photoIndex = photos.findIndex((p) => p.id === scrollToId)
@@ -343,10 +358,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     requestAnimationFrame(() => {
       virtualizer.scrollToIndex(rowIndex, { align: 'start' })
     })
-
-    // Clear the stored ID so we don't scroll again on re-renders
-    sessionStorage.removeItem('photos:scrollToId')
-  }, [photos, columns, virtualizer])
+  }, [photos.length])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle photo click
   const handlePhotoClick = useCallback(
