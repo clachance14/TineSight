@@ -2,7 +2,6 @@
 
 import React, { Suspense, useState, useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { DebugErrorBoundary } from '@/components/debug-error-boundary'
 import { useQuery } from '@tanstack/react-query'
 import { SlidersHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -388,10 +387,8 @@ function PhotosContent(): React.JSX.Element {
 
 export default function PhotosPage() {
   return (
-    <DebugErrorBoundary>
-      <Suspense fallback={<div className="text-cream-dark">Loading photos...</div>}>
-        <PhotosContent />
-      </Suspense>
-    </DebugErrorBoundary>
+    <Suspense fallback={<div className="text-cream-dark">Loading photos...</div>}>
+      <PhotosContent />
+    </Suspense>
   )
 }

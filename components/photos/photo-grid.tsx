@@ -3,7 +3,6 @@
 import { useEffect, useRef, useCallback, useMemo, useState, memo } from 'react'
 import Image from 'next/image'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { usePinch } from '@use-gesture/react'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
 import { Badge } from '@/components/ui/badge'
@@ -11,37 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { Loader2, Check } from 'lucide-react'
 import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
-import { useUIStore, type MobileGridColumns } from '@/lib/stores/ui'
 import { SmartBadge } from './smart-badge'
-
-// Debug logging helper - sends logs to server for Vercel visibility
-// DELETE AFTER DEBUGGING
-const debugLog = (step: string, data?: Record<string, unknown>) => {
-  try {
-    const payload = JSON.stringify({
-      step,
-      data,
-      timestamp: new Date().toISOString(),
-      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
-    })
-    // Use sendBeacon for reliability during crashes, fall back to fetch
-    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      navigator.sendBeacon('/api/debug-log', payload)
-    } else {
-      fetch('/api/debug-log', {
-        method: 'POST',
-        body: payload,
-        headers: { 'Content-Type': 'application/json' },
-        keepalive: true,
-      }).catch(() => {})
-    }
-  } catch {
-    // Silently fail
-  }
-}
-
-// Log module load
-debugLog('1-MODULE_LOAD', { message: 'photo-grid.tsx module loaded' })
 
 // Constants for virtualization
 const GAP = 16 // gap-4 = 1rem = 16px
@@ -49,9 +18,6 @@ const ESTIMATED_ROW_HEIGHT = 250 // Conservative estimate for initial render
 
 // Mobile breakpoint (matches Tailwind's md:)
 const MOBILE_BREAKPOINT = 768
-
-// Available mobile column options
-const MOBILE_COLUMN_OPTIONS: MobileGridColumns[] = [4, 5, 6, 7]
 
 // Helper function for responsive gap calculation
 const getGapClass = (columns: number, isMobile: boolean) => {
@@ -252,11 +218,8 @@ const PhotoGridItem = memo(function PhotoGridItem({
  * Uses @tanstack/react-virtual for performance with large datasets.
  */
 export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProps) {
-  debugLog('2-COMPONENT_START', { hasExternalData: !!externalData })
-
   // Use external data if provided (single source of truth), otherwise fetch internally
   const internalQuery = usePhotosInfinite(externalData ? undefined : filters)
-  debugLog('3-AFTER_QUERY_HOOK')
 
   const {
     data,
@@ -275,11 +238,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
         isFetchingNextPage: externalData.isFetchingNextPage,
       }
     : internalQuery
-  debugLog('4-DATA_DESTRUCTURED', { isLoading, hasData: !!data, photoCount: externalData?.photos?.length })
 
   const parentRef = useRef<HTMLDivElement>(null)
-  // Track if initial mount is complete - prevents column changes during hydration
-  const [mountComplete, setMountComplete] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
 
   // Calculate initial columns based on screen width - NO state changes during mount
@@ -298,51 +258,18 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     return getColumnsForWidth(width, mobile)
   })
 
-  debugLog('5-REFS_AND_STATE_INIT', { columns, mountComplete })
-
-  // Get mobile grid columns preference from store - but DON'T use it during initial mount
-  const mobileGridColumns = useUIStore((state) => state.mobileGridColumns)
-  const setMobileGridColumns = useUIStore((state) => state.setMobileGridColumns)
-  debugLog('6-UI_STORE_READ', { mobileGridColumns })
-
-  // Ref to avoid stale closures in usePinch handler
-  const mobileGridColumnsRef = useRef(mobileGridColumns)
-  debugLog('7-MOBILE_COLS_REF_INIT')
-
-  // Keep ref in sync with state
+  // Track if we're on mobile and calculate columns
   useEffect(() => {
-    debugLog('8-EFFECT_SYNC_REF_START')
-    mobileGridColumnsRef.current = mobileGridColumns
-  }, [mobileGridColumns])
-
-  // Mark mount as complete after a delay - only then allow column changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      debugLog('MOUNT_COMPLETE')
-      setMountComplete(true)
-    }, 1000) // Wait 1 second after mount before allowing column changes
-    return () => clearTimeout(timer)
-  }, [])
-
-  // Track if we're on mobile and calculate columns - but only after mount complete
-  useEffect(() => {
-    debugLog('9-EFFECT_UPDATE_COLUMNS_START', { mountComplete })
     const updateColumns = () => {
       const width = window.innerWidth
       const mobile = width < MOBILE_BREAKPOINT
       setIsMobile(mobile)
 
-      // Don't change columns during initial mount - prevents iOS crash
-      if (!mountComplete) {
-        debugLog('9-SKIPPING_COLUMN_UPDATE_MOUNT_NOT_COMPLETE')
-        return
-      }
-
       if (mobile) {
-        // Mobile: use user-selected column count (only after mount complete)
-        setColumns(mobileGridColumns)
+        // Mobile: fixed 5 columns
+        setColumns(5)
       } else {
-        // Desktop: use normal responsive behavior
+        // Desktop: responsive behavior
         if (width < 1024) setColumns(3)      // tablet
         else if (width < 1280) setColumns(4) // desktop
         else setColumns(5)                    // large desktop
@@ -351,46 +278,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     updateColumns()
     window.addEventListener('resize', updateColumns)
     return () => window.removeEventListener('resize', updateColumns)
-  }, [mobileGridColumns, mountComplete, getColumnsForWidth])
-
-  debugLog('10-BEFORE_USE_PINCH', { isMobile })
-
-  // Pinch-to-zoom gesture handler (mobile only)
-  // Uses ref to avoid stale closures and only updates state on gesture END
-  // to prevent mid-gesture layout thrashing that causes crashes on iPhone
-  usePinch(
-    ({ direction: [xDir], memo, last }) => {
-      if (!isMobile) return memo
-
-      // Use ref for initial value (never stale), then track via memo
-      const currentCols = memo ?? mobileGridColumnsRef.current
-      const currentIndex = MOBILE_COLUMN_OPTIONS.indexOf(currentCols)
-
-      let newCols = currentCols
-      // Pinch out (zoom in) = fewer columns = move toward 4
-      if (xDir > 0 && currentIndex > 0) {
-        newCols = MOBILE_COLUMN_OPTIONS[currentIndex - 1]
-      }
-      // Pinch in (zoom out) = more columns = move toward 7
-      else if (xDir < 0 && currentIndex < MOBILE_COLUMN_OPTIONS.length - 1) {
-        newCols = MOBILE_COLUMN_OPTIONS[currentIndex + 1]
-      }
-
-      // Only update state when gesture ENDS - no mid-gesture reflows
-      if (last && newCols !== mobileGridColumnsRef.current) {
-        setMobileGridColumns(newCols)
-      }
-
-      return newCols  // Track intended value in memo for next frame
-    },
-    {
-      target: parentRef,
-      eventOptions: { passive: false },  // Required for gesture capture on iOS
-      threshold: 0.1,
-    }
-  )
-
-  debugLog('11-AFTER_USE_PINCH')
+  }, [])
 
   // Flatten all pages into a single array of photos
   const photos = useMemo(() => {
@@ -403,7 +291,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   // Calculate row count for virtualization
   const rowCount = Math.ceil(photos.length / columns)
-  debugLog('12-BEFORE_USE_VIRTUALIZER', { rowCount, columns, photosLength: photos.length })
 
   // Virtualizer for rows - uses dynamic measurement for accurate row heights
   const virtualizer = useVirtualizer({
@@ -412,8 +299,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     estimateSize: () => ESTIMATED_ROW_HEIGHT + GAP,
     overscan: 3, // Render 3 extra rows above/below viewport
   })
-
-  debugLog('13-AFTER_USE_VIRTUALIZER')
 
   // Scroll restoration: when returning from photo detail, scroll to the photo's row
   // Only re-run when photos load, not on column change (avoids re-triggering during pinch)
@@ -474,11 +359,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
-  debugLog('14-BEFORE_RENDER', { isLoading, hasError: !!error, photosLength: photos.length })
-
   // Loading skeleton - MUST use same column count as main grid to prevent layout shift crash
   if (isLoading) {
-    debugLog('15-RENDER_LOADING_SKELETON', { columns })
     return (
       <div
         className={cn("grid", getGapClass(columns, isMobile))}
@@ -562,8 +444,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
       </div>
     )
   }
-
-  debugLog('16-RENDER_MAIN_GRID', { virtualItemsCount: virtualizer.getVirtualItems().length })
 
   // Virtualized photo grid
   return (
