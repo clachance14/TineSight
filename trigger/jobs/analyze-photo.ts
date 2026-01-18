@@ -4,11 +4,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { detectDeer, classifyDeerCrop } from "@/lib/gemini/client";
 import type { GeminiMetrics } from "@/lib/gemini/client";
 import { cropToMemory, uploadCropBuffer } from "@/lib/image/crop";
+import { generateBlurDataUrl } from "@/lib/image/blurhash";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import type { DetectionOnlyBox } from "@/lib/gemini/types";
 import crypto from "crypto";
 import pLimit from "p-limit";
+import { generateFingerprint } from "./generate-fingerprint";
 
 /**
  * Analyze Photo Job
@@ -173,6 +175,15 @@ export const analyzePhoto = task({
         mimeType,
         sizeBytes: imageBuffer.byteLength,
       });
+
+      // Step 4b: Generate blur data URL for placeholder
+      const imageBufferNode = Buffer.from(imageBuffer);
+      const blurDataUrl = await generateBlurDataUrl(imageBufferNode);
+      if (blurDataUrl) {
+        logger.info("Blur data URL generated", { imageId, blurDataUrlLength: blurDataUrl.length });
+      } else {
+        logger.warn("Failed to generate blur data URL", { imageId });
+      }
 
       // Step 5: Stage 1 - Call Gemini for deer detection (bounding boxes only)
       logger.info("Stage 1: Calling Gemini for deer detection", { imageId });
@@ -551,6 +562,46 @@ export const analyzePhoto = task({
           imageId,
           recordCount: detectionRecords.length,
         });
+
+        // Step 7b: Queue fingerprint generation for trophy-tier bucks
+        // Get the inserted detection IDs to queue fingerprint jobs
+        const { data: insertedDetections } = await supabase
+          .from("detections")
+          .select("id, size_class")
+          .eq("image_id", imageId)
+          .in("size_class", ["trophy"]);
+
+        const trophyDetections = insertedDetections?.filter(d => d.size_class === "trophy") ?? [];
+
+        if (trophyDetections.length > 0) {
+          logger.info("Queuing fingerprint generation for trophy bucks", {
+            imageId,
+            trophyCount: trophyDetections.length,
+          });
+
+          // Queue fingerprint generation jobs for each trophy detection
+          // Using triggerAndWait would block, so we use trigger() for async queuing
+          const fingerprintPromises = trophyDetections.map((detection) =>
+            generateFingerprint.trigger({
+              detectionId: detection.id,
+              userId: imageRecord.user_id,
+            })
+          );
+
+          try {
+            await Promise.all(fingerprintPromises);
+            logger.info("Fingerprint generation jobs queued successfully", {
+              imageId,
+              count: trophyDetections.length,
+            });
+          } catch (fpError) {
+            // Don't fail the main job if fingerprint queuing fails
+            logger.warn("Failed to queue some fingerprint generation jobs", {
+              imageId,
+              error: fpError instanceof Error ? fpError.message : String(fpError),
+            });
+          }
+        }
       } else {
         logger.info("No deer detections to insert", { imageId });
       }
@@ -578,6 +629,7 @@ export const analyzePhoto = task({
           people_count: personDetections.length,
           vehicle_count: vehicleDetections.length,
           // Existing fields
+          blur_data_url: blurDataUrl,
           analysis_notes: detectionResult.analysis_notes,
           analyzed_at: new Date().toISOString(),
           classification: deerDetections.length > 0 ? "deer" :

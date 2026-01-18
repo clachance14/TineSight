@@ -1,12 +1,14 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getPhotos, getSignedViewUrls, type PhotoSortField, type OtherAnimalType } from '@/lib/services/photos'
+import { getPhotos, type PhotoSortField, type OtherAnimalType } from '@/lib/services/photos'
+import { getCachedSignedUrls } from '@/lib/cache/signed-url-cache'
 import type { Image } from '@/types/database'
 
 interface PhotoResponse extends Image {
   thumbnailUrl: string | null
   imageUrl: string | null
+  blurDataUrl: string | null
   bestQualityStatus: string | null
 }
 
@@ -404,13 +406,21 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
           .not('quality_status', 'is', null)
       : Promise.resolve({ data: null })
 
-    // Execute batch URL generation and quality query in parallel
-    const [urlResult, qualityResult] = await Promise.all([
-      getSignedViewUrls(allPaths),
+    // Execute cached URL generation and quality query in parallel
+    // Cache provides near-instant hits for previously fetched URLs (50-min TTL)
+    const [cachedUrls, qualityResult] = await Promise.all([
+      getCachedSignedUrls(allPaths),
       qualityPromise,
     ])
 
-    const urlMap = urlResult.data
+    // Convert array result to Map for downstream compatibility
+    const urlMap = new Map<string, string>()
+    allPaths.forEach((path, i) => {
+      const url = cachedUrls[i]
+      if (url !== null && url !== undefined && url !== '') {
+        urlMap.set(path, url)
+      }
+    })
 
     // Process quality status results into a map
     const qualityMap = new Map<string, string | null>()
@@ -438,6 +448,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
         ...photo,
         thumbnailUrl: photo.thumbnail_path ? urlMap.get(photo.thumbnail_path) ?? null : null,
         imageUrl: urlMap.get(photo.file_path) ?? null,
+        blurDataUrl: photo.blur_data_url ?? null,
         bestQualityStatus: qualityMap.get(photo.id) ?? null,
       }
     })

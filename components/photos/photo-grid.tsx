@@ -46,10 +46,14 @@ interface PhotoGridProps {
   }
 }
 
+// Static fallback blur placeholder for images without per-image blur data
+const STATIC_BLUR_DATA_URL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k="
+
 interface Photo {
   id: string
   thumbnailUrl: string | null
   imageUrl: string | null
+  blurDataUrl?: string | null
   detection_status: string
   bestQualityStatus: string | null
 }
@@ -108,7 +112,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
             {...(!priority && {
               placeholder: "blur" as const,
-              blurDataURL: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k=",
+              blurDataURL: photo.blurDataUrl ?? STATIC_BLUR_DATA_URL,
             })}
           />
         ) : photo.imageUrl ? (
@@ -121,7 +125,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
             {...(!priority && {
               placeholder: "blur" as const,
-              blurDataURL: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k=",
+              blurDataURL: photo.blurDataUrl ?? STATIC_BLUR_DATA_URL,
             })}
           />
         ) : (
@@ -473,6 +477,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
         style={{
           contain: 'layout',
           transform: 'translateZ(0)',
+          touchAction: 'pan-y',
         }}
       >
         <div

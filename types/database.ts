@@ -472,6 +472,7 @@ export type Database = {
           analysis_notes: string | null
           analyzed_at: string | null
           batch_id: string | null
+          blur_data_url: string | null
           camera_id: string | null
           captured_at: string | null
           classification: string | null
@@ -508,6 +509,7 @@ export type Database = {
           analysis_notes?: string | null
           analyzed_at?: string | null
           batch_id?: string | null
+          blur_data_url?: string | null
           camera_id?: string | null
           captured_at?: string | null
           classification?: string | null
@@ -544,6 +546,7 @@ export type Database = {
           analysis_notes?: string | null
           analyzed_at?: string | null
           batch_id?: string | null
+          blur_data_url?: string | null
           camera_id?: string | null
           captured_at?: string | null
           classification?: string | null
@@ -1387,18 +1390,27 @@ export const Constants = {
   },
 } as const
 
-// Convenience type aliases for backward compatibility
-export type Detection = Database['public']['Tables']['detections']['Row']
-export type DetectionInsert = Database['public']['Tables']['detections']['Insert']
-export type Deer = Database['public']['Tables']['deer']['Row']
-export type DeerEmbedding = Database['public']['Tables']['deer_embeddings']['Row']
+// Convenience type aliases for common table types
 export type Image = Database['public']['Tables']['images']['Row']
 export type ImageInsert = Database['public']['Tables']['images']['Insert']
 export type ImageUpdate = Database['public']['Tables']['images']['Update']
+
+export type Detection = Database['public']['Tables']['detections']['Row']
+export type DetectionInsert = Database['public']['Tables']['detections']['Insert']
+export type DetectionUpdate = Database['public']['Tables']['detections']['Update']
+
 export type Profile = Database['public']['Tables']['profiles']['Row']
-export type MatchCandidate = Database['public']['Tables']['match_candidates']['Row']
-export type TrophyCluster = Database['public']['Tables']['trophy_clusters']['Row']
-export type TrophyClusterMember = Database['public']['Tables']['trophy_cluster_members']['Row']
+export type ProfileInsert = Database['public']['Tables']['profiles']['Insert']
+export type ProfileUpdate = Database['public']['Tables']['profiles']['Update']
+
 export type ProcessingBatch = Database['public']['Tables']['processing_batches']['Row']
 export type ProcessingBatchInsert = Database['public']['Tables']['processing_batches']['Insert']
 export type ProcessingBatchUpdate = Database['public']['Tables']['processing_batches']['Update']
+
+export type Deer = Database['public']['Tables']['deer']['Row']
+export type DeerInsert = Database['public']['Tables']['deer']['Insert']
+export type DeerUpdate = Database['public']['Tables']['deer']['Update']
+
+export type DeerEmbedding = Database['public']['Tables']['deer_embeddings']['Row']
+export type DeerEmbeddingInsert = Database['public']['Tables']['deer_embeddings']['Insert']
+export type DeerEmbeddingUpdate = Database['public']['Tables']['deer_embeddings']['Update']

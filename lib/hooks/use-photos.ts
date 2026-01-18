@@ -46,6 +46,7 @@ interface PhotosResponse {
     updated_at: string
     thumbnailUrl: string | null
     imageUrl: string | null
+    blurDataUrl?: string | null
     thumbnail_path?: string | null
     bestQualityStatus: string | null
   }>
