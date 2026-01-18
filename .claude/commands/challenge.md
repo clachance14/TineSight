@@ -60,6 +60,28 @@ Based on the identified risks, propose a revised solution that:
 
 Present the revised solution clearly, highlighting what changed and why.
 
+### Step 5: Apply Changes to Plan (Auto-Update)
+
+After proposing the revised solution, **automatically update the plan file** with your improvements:
+
+1. **Locate the plan file**:
+   - Check if a plan file was discussed in the conversation context
+   - If not found, search for `specs/*/plan.md` files
+   - If multiple plans exist, select the most recently modified one
+
+2. **Decide whether to update**:
+   - **DO update** if: You identified medium/high likelihood failure modes OR fragile assumptions with significant consequences
+   - **SKIP update** if: All issues are low-likelihood edge cases, or no plan file exists
+
+3. **Apply the revised solution**:
+   - Use the Edit tool to modify the plan file directly
+   - Integrate your mitigations and guards into the existing plan structure
+   - Preserve the plan's overall format while enhancing affected sections
+   - Add any new considerations, edge cases, or safeguards
+
+4. **Document what changed**:
+   - Track each edit you make to report in the output
+
 $ARGUMENTS
 
 ## Output Format
@@ -93,4 +115,15 @@ Structure your response as:
 
 ### Trade-offs
 - [What this costs in complexity/performance/etc.]
+
+## Changes Applied
+
+**Plan file**: `[path/to/plan.md]`
+
+| Section | Change | Rationale |
+|---------|--------|-----------|
+| [Section name] | [Summary of edit] | Addresses [failure mode/assumption] |
+| ... | ... | ... |
+
+*[Or: "No changes applied - all identified issues were low-likelihood edge cases" / "No plan file found in context"]*
 ```

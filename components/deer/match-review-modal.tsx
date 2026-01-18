@@ -15,6 +15,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Check, X, SkipForward, Plus, ArrowRight, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { MeasurementComparison } from '@/components/trophy/measurement-comparison'
+import type { AntlerFingerprint } from '@/types/fingerprint'
 
 interface MatchReview {
   id: string
@@ -27,14 +29,18 @@ interface MatchReview {
     size_class: string | null
     estimated_point_range: string | null
     age_class: string | null
+    antler_fingerprint?: AntlerFingerprint | null
   }
   suggested_deer: {
     id: string
     name: string
     reference_image_url?: string
+    antler_fingerprint?: AntlerFingerprint | null
   } | null
   gemini_confidence: number
   gemini_reasoning: string | null
+  antler_print_similarity?: number | null // 0-1 scale
+  possible_broken_tine?: boolean
   other_possibilities: Array<{
     deer_id: string
     deer_name: string
@@ -237,6 +243,16 @@ export function MatchReviewModal({
               <h4 className="text-sm font-medium mb-2">AI Reasoning</h4>
               <p className="text-sm text-muted-foreground">{match.gemini_reasoning}</p>
             </div>
+          )}
+
+          {/* Measurement comparison - show when fingerprints available */}
+          {match.detection.antler_fingerprint && match.suggested_deer?.antler_fingerprint && (
+            <MeasurementComparison
+              detection={match.detection.antler_fingerprint}
+              reference={match.suggested_deer.antler_fingerprint}
+              {...(match.antler_print_similarity !== null && match.antler_print_similarity !== undefined && { similarity: match.antler_print_similarity })}
+              {...(match.possible_broken_tine && { possibleBrokenTine: match.possible_broken_tine })}
+            />
           )}
 
           {/* New deer form */}

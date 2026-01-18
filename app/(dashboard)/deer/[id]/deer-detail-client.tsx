@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { SightingsGrid } from '@/components/deer/sightings-grid'
+import { AntlerPrintCard } from '@/components/deer/antler-print-card'
+import { AntlerFingerprint } from '@/types/fingerprint'
 
 interface ReferenceBbox {
   x: number | null
@@ -29,6 +31,7 @@ interface DeerDetailClientProps {
     sighting_count: number
     reference_image_url?: string | null
     reference_bbox?: ReferenceBbox | null
+    antler_fingerprint?: unknown
   }
 }
 
@@ -255,6 +258,9 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
             </div>
           </CardContent>
         </Card>
+
+        {/* Antler Print Card */}
+        <AntlerPrintCard fingerprint={initialDeer.antler_fingerprint as AntlerFingerprint | null} />
 
         {/* Sightings grid */}
         <Card>

@@ -1,8 +1,10 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { useCameras } from "@/lib/hooks/use-cameras"
 import { useBatches } from "@/lib/hooks/use-batches"
 import { useUploadSessions } from "@/lib/hooks/use-upload-sessions"
@@ -25,7 +27,19 @@ function omitProperties<T, K extends keyof T>(
   return result as Omit<T, K>
 }
 
+const MAX_MOBILE_CHIPS = 2
+
 export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsProps) {
+  const [expanded, setExpanded] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
   const { data: camerasData } = useCameras()
   const { data: batchesData } = useBatches()
   const { data: sessionsData } = useUploadSessions()
@@ -295,13 +309,20 @@ export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsP
     return null
   }
 
+  // Calculate visible chips for mobile
+  const visibleChips = isMobile && !expanded ? chips.slice(0, MAX_MOBILE_CHIPS) : chips
+  const hiddenCount = isMobile && !expanded ? Math.max(0, chips.length - MAX_MOBILE_CHIPS) : 0
+
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {chips.map((chip, index) => (
+      {visibleChips.map((chip, index) => (
         <Badge
           key={index}
           variant="secondary"
-          className="gap-1.5 pr-1 pl-2.5 text-xs"
+          className={cn(
+            "gap-1 pr-1",
+            isMobile ? "pl-2 py-0.5 text-[11px]" : "pl-2.5 text-xs gap-1.5"
+          )}
         >
           <span>{chip.label}</span>
           <button
@@ -309,10 +330,28 @@ export function PhotoFilterChips({ filters, onFiltersChange }: PhotoFilterChipsP
             className="rounded-full p-0.5 hover:bg-slate-600 transition-colors"
             aria-label={`Remove ${chip.label} filter`}
           >
-            <X className="size-3" />
+            <X className={cn(isMobile ? "size-2.5" : "size-3")} />
           </button>
         </Badge>
       ))}
+
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="text-xs text-copper hover:text-copper-light font-medium shrink-0"
+        >
+          +{hiddenCount} more
+        </button>
+      )}
+
+      {isMobile && expanded && chips.length > MAX_MOBILE_CHIPS && (
+        <button
+          onClick={() => setExpanded(false)}
+          className="text-xs text-cream-dark hover:text-cream font-medium shrink-0"
+        >
+          Show less
+        </button>
+      )}
 
       {chips.length > 0 && (
         <Button

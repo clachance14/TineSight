@@ -43,14 +43,15 @@ export default async function DeerDetailPage({ params }: DeerDetailPageProps) {
     notFound()
   }
 
-  // Get reference detection image URL and bbox if available
+  // Get reference detection image URL, bbox, and fingerprint if available
   let referenceImageUrl: string | null = null
   let referenceBbox: { x: number | null; y: number | null; width: number | null; height: number | null } | null = null
+  let antlerFingerprint: unknown = null
   if (deer.reference_detection_id) {
-    // Fetch reference detection with image info and bbox
+    // Fetch reference detection with image info, bbox, and fingerprint
     const { data: refDetection } = await supabase
       .from('detections')
-      .select('image_id, bbox_x, bbox_y, bbox_width, bbox_height, images!inner(file_path)')
+      .select('image_id, bbox_x, bbox_y, bbox_width, bbox_height, antler_fingerprint, images!inner(file_path)')
       .eq('id', deer.reference_detection_id)
       .single()
 
@@ -61,6 +62,7 @@ export default async function DeerDetailPage({ params }: DeerDetailPageProps) {
         bbox_y: number | null
         bbox_width: number | null
         bbox_height: number | null
+        antler_fingerprint: unknown
       }
       const { data: urlData } = await supabase
         .storage
@@ -74,6 +76,7 @@ export default async function DeerDetailPage({ params }: DeerDetailPageProps) {
         width: imageData.bbox_width,
         height: imageData.bbox_height,
       }
+      antlerFingerprint = imageData.antler_fingerprint
     }
   }
 
@@ -81,6 +84,7 @@ export default async function DeerDetailPage({ params }: DeerDetailPageProps) {
     ...deer,
     reference_image_url: referenceImageUrl,
     reference_bbox: referenceBbox,
+    antler_fingerprint: antlerFingerprint,
   }
 
   return (

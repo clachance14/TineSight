@@ -9,29 +9,38 @@ import pLimit from "p-limit";
 /**
  * Batch Process Job
  *
- * Orchestrates the processing of a batch of images by:
+ * Orchestrates the processing of a batch of uploaded photos by:
  * 1. Updating batch status to 'processing'
  * 2. Triggering individual analyze-photo jobs for each image (fan-out pattern)
- * 3. Updating batch status to 'completed' or 'failed'
+ * 3. Tracking progress via batch and session counters
  *
  * This job uses the fan-out pattern to enable parallel processing of images.
  * Each image is processed independently by the analyze-photo job.
+ *
+ * Called after each chunk (typically 25 files) completes uploading during
+ * bulk upload sessions. Supports both legacy single-batch uploads and new
+ * multi-batch upload sessions.
  *
  * @module trigger/jobs/batch-process
  */
 
 interface BatchProcessPayload {
+  /** ID of the processing_batch record */
   batchId: string;
+  /** IDs of uploaded images to process */
   imageIds: string[];
+  /** Optional: ID of the parent upload session for progress tracking */
+  sessionId?: string;
 }
 
 export const batchProcess = task({
   id: "batch-process",
   run: async (payload: BatchProcessPayload) => {
-    const { batchId, imageIds } = payload;
+    const { batchId, imageIds, sessionId } = payload;
 
     logger.info("Starting batch processing", {
       batchId,
+      sessionId: sessionId || "none",
       imageCount: imageIds.length,
     });
 
@@ -92,7 +101,9 @@ export const batchProcess = task({
             });
 
             await analyzePhoto.batchTrigger(
-              chunk.map(imageId => ({ payload: { imageId, batchId } }))
+              chunk.map(imageId => ({
+                payload: { imageId, batchId, sessionId }
+              }))
             );
           })
         )
@@ -100,25 +111,30 @@ export const batchProcess = task({
 
       logger.info("All analyze-photo jobs triggered", {
         batchId,
+        sessionId: sessionId || "none",
         imageCount: imageIds.length,
       });
 
       // Note: batch status will remain 'processing' - individual jobs update counters
       // The batch will be marked 'completed' when all jobs finish (tracked via counters)
+      // Session counters are updated by individual analyze-photo jobs if sessionId provided
       logger.info("Batch fan-out completed - jobs are processing", {
         batchId,
+        sessionId: sessionId || "none",
         triggeredJobs: imageIds.length,
       });
 
       return {
         success: true,
         batchId,
+        sessionId: sessionId || null,
         processedImages: imageIds.length,
       };
     } catch (error) {
       // Update batch status to 'failed'
       logger.error("Batch processing failed", {
         batchId,
+        sessionId: sessionId || "none",
         error: error instanceof Error ? error.message : String(error),
       });
 
@@ -133,6 +149,7 @@ export const batchProcess = task({
       if (failError) {
         logger.error("Failed to mark batch as failed", {
           batchId,
+          sessionId: sessionId || "none",
           error: failError.message,
         });
       }

@@ -10,3 +10,6 @@ export { batchProcess } from './jobs/batch-process';
 export { cleanupCancelledImages } from './jobs/cleanup-cancelled-images';
 export { exportPhotosTask } from './jobs/export-photos';
 export { cleanupExportsSchedule } from './jobs/cleanup-exports';
+export { generateFingerprint } from './jobs/generate-fingerprint';
+export { postCreationScan } from './jobs/post-creation-scan';
+export { clusterTrophyDetections } from './jobs/cluster-trophy-detections';

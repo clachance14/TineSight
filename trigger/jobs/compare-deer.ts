@@ -1,6 +1,8 @@
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { compareDeers as compareWithGemini } from "@/lib/gemini/client";
+import { compareFingerprints, type FingerprintComparisonResult } from "@/lib/fingerprint/compare";
+import type { AntlerFingerprint } from "@/types/fingerprint";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
@@ -28,10 +30,10 @@ export const compareDeer = task({
     const supabase = createAdminClient() as SupabaseClient<Database>;
 
     try {
-      // Get detection and its crop image
+      // Get detection and its crop image, including antler fingerprint
       const { data: detection, error: detectionError } = await supabase
         .from("detections")
-        .select("id, image_id, crop_file_path")
+        .select("id, image_id, crop_file_path, antler_fingerprint")
         .eq("id", detectionId)
         .single();
 
@@ -42,6 +44,9 @@ export const compareDeer = task({
       if (!detection.crop_file_path) {
         throw new Error(`Detection ${detectionId} has no crop_file_path - run crop generation first`);
       }
+
+      // Cast antler_fingerprint from JSONB
+      const detectionFingerprint = detection.antler_fingerprint as AntlerFingerprint | null;
 
       // Generate signed URL for detection crop
       const { data: detectionCropUrl, error: cropUrlError } = await supabase.storage
@@ -62,18 +67,19 @@ export const compareDeer = task({
       const detectionBase64 = Buffer.from(cropBuffer).toString("base64");
       const detectionMimeType = "image/jpeg"; // Crops are saved as JPEG
 
-      // Get reference crop images for all catalog deer
+      // Get reference crop images and fingerprints for all catalog deer
       const catalogDeerWithImages: Array<{
         id: string;
         name: string;
         referenceImageBase64: string;
         referenceImageMimeType: string;
+        fingerprint: AntlerFingerprint | null;
       }> = [];
 
       for (const deer of catalogDeer) {
         const { data: refDetection, error: refError } = await supabase
           .from("detections")
-          .select("id, crop_file_path")
+          .select("id, crop_file_path, antler_fingerprint")
           .eq("id", deer.reference_detection_id)
           .single();
 
@@ -124,6 +130,7 @@ export const compareDeer = task({
           name: deer.name,
           referenceImageBase64,
           referenceImageMimeType: "image/jpeg", // Crops are saved as JPEG
+          fingerprint: refDetection.antler_fingerprint as AntlerFingerprint | null,
         });
       }
 
@@ -149,24 +156,67 @@ export const compareDeer = task({
         isNewDeer: result.is_likely_new_deer,
       });
 
-      // Store match candidates
+      // Calculate fingerprint similarities for all catalog deer
+      const fingerprintResults = new Map<string, FingerprintComparisonResult>();
+
+      if (detectionFingerprint) {
+        for (const catalogDeer of catalogDeerWithImages) {
+          if (catalogDeer.fingerprint) {
+            try {
+              const fpResult = compareFingerprints(detectionFingerprint, catalogDeer.fingerprint);
+              fingerprintResults.set(catalogDeer.id, fpResult);
+
+              logger.info("Fingerprint comparison completed", {
+                detectionId,
+                catalogDeerId: catalogDeer.id,
+                similarity: fpResult.overall_similarity,
+                possibleBrokenTine: fpResult.flags.possible_broken_tine,
+              });
+            } catch (fpError) {
+              logger.warn("Fingerprint comparison failed", {
+                detectionId,
+                catalogDeerId: catalogDeer.id,
+                error: fpError instanceof Error ? fpError.message : String(fpError),
+              });
+            }
+          }
+        }
+      }
+
+      // Store match candidates with fingerprint similarity
       if (result.best_match) {
+        const fpResult = fingerprintResults.get(result.best_match.deer_id);
+        const antlerPrintSimilarity = fpResult ? fpResult.overall_similarity / 100 : null; // Convert 0-100 to 0-1
+
         await supabase.from("match_candidates").insert({
           detection_id: detectionId,
           candidate_deer_id: result.best_match.deer_id,
           gemini_confidence: result.best_match.confidence,
           gemini_reasoning: result.best_match.reasoning,
+          antler_print_similarity: antlerPrintSimilarity,
           status: "pending",
         } as never);
+
+        if (fpResult?.flags.possible_broken_tine) {
+          logger.info("Possible broken tine detected in best match", {
+            detectionId,
+            candidateDeerId: result.best_match.deer_id,
+            reasoning: fpResult.reasoning,
+          });
+        }
       }
 
-      // Store other possibilities
+      // Store other possibilities with fingerprint similarity
       for (const other of result.other_possibilities) {
+        const fpResult = fingerprintResults.get(other.deer_id);
+        const antlerPrintSimilarity = fpResult ? fpResult.overall_similarity / 100 : null;
+
         await supabase.from("match_candidates").insert({
           detection_id: detectionId,
           candidate_deer_id: other.deer_id,
           gemini_confidence: other.confidence,
           gemini_reasoning: null,
+          antler_print_similarity: antlerPrintSimilarity,
           status: "pending",
         } as never);
       }
@@ -176,6 +226,7 @@ export const compareDeer = task({
         detectionId,
         bestMatch: result.best_match?.deer_name ?? null,
         isNewDeer: result.is_likely_new_deer,
+        fingerprintComparisons: fingerprintResults.size,
       };
     } catch (error) {
       logger.error("Deer comparison failed", {

@@ -1,0 +1,415 @@
+openapi: 3.0.3
+info:
+  title: TineSight Bulk Upload API
+  description: |
+    API endpoints for 10K photo bulk upload feature.
+    Supports batch signed URL generation, duplicate detection, and session management.
+  version: 1.0.0
+
+servers:
+  - url: /api
+    description: Next.js API Routes
+
+tags:
+  - name: Upload
+    description: Photo upload operations
+  - name: Session
+    description: Upload session management
+
+paths:
+  /photos/signed-urls:
+    post:
+      tags: [Upload]
+      summary: Generate batch signed upload URLs
+      description: |
+        Generates signed upload URLs for a batch of files.
+        Called per chunk (25 files) to ensure fresh URLs.
+        Each URL is valid for 2 hours (Supabase default).
+      operationId: generateSignedUrls
+      security:
+        - supabaseAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files, sessionId]
+              properties:
+                sessionId:
+                  type: string
+                  format: uuid
+                  description: Parent upload session ID
+                files:
+                  type: array
+                  maxItems: 25
+                  items:
+                    type: object
+                    required: [filename, size, mimeType]
+                    properties:
+                      filename:
+                        type: string
+                        maxLength: 255
+                        description: Original filename
+                      size:
+                        type: integer
+                        minimum: 1
+                        description: File size in bytes
+                      mimeType:
+                        type: string
+                        enum: [image/jpeg, image/png, image/heic, image/webp]
+                        description: MIME type
+                      exifData:
+                        type: object
+                        nullable: true
+                        description: EXIF metadata extracted by Web Worker
+                        properties:
+                          make:
+                            type: string
+                          model:
+                            type: string
+                          dateTime:
+                            type: string
+                            format: date-time
+            example:
+              sessionId: "123e4567-e89b-12d3-a456-426614174000"
+              files:
+                - filename: "DCIM_0001.jpg"
+                  size: 3145728
+                  mimeType: "image/jpeg"
+                  exifData:
+                    make: "MUDDY"
+                    model: "MUD_MTC16"
+                    dateTime: "2024-11-15T06:23:45Z"
+      responses:
+        '200':
+          description: Signed URLs generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  urls:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        filename:
+                          type: string
+                        imageId:
+                          type: string
+                          format: uuid
+                          description: Pre-created image record ID
+                        signedUrl:
+                          type: string
+                          format: uri
+                          description: Supabase Storage signed upload URL
+                        storagePath:
+                          type: string
+                          description: Full storage path
+              example:
+                urls:
+                  - filename: "DCIM_0001.jpg"
+                    imageId: "789e0123-e89b-12d3-a456-426614174000"
+                    signedUrl: "https://xxx.supabase.co/storage/v1/object/sign/..."
+                    storagePath: "user123/uploads/batch456/DCIM_0001.jpg"
+        '400':
+          description: Invalid request (missing fields, invalid file types)
+        '401':
+          description: Unauthorized (missing or invalid auth token)
+        '429':
+          description: Rate limited (too many requests)
+
+  /photos/check-duplicates:
+    post:
+      tags: [Upload]
+      summary: Check for duplicate files
+      description: |
+        Checks if files already exist in the user's library by filename + size.
+        Used to skip duplicates when re-uploading after page refresh.
+      operationId: checkDuplicates
+      security:
+        - supabaseAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [filename, size]
+                    properties:
+                      filename:
+                        type: string
+                        maxLength: 255
+                      size:
+                        type: integer
+                        minimum: 1
+            example:
+              files:
+                - filename: "DCIM_0001.jpg"
+                  size: 3145728
+                - filename: "DCIM_0002.jpg"
+                  size: 2897152
+      responses:
+        '200':
+          description: Duplicate check complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  existing:
+                    type: array
+                    items:
+                      type: string
+                    description: Filenames that already exist (skip these)
+                  toUpload:
+                    type: array
+                    items:
+                      type: string
+                    description: Filenames to upload (not duplicates)
+                  totalChecked:
+                    type: integer
+                  duplicateCount:
+                    type: integer
+              example:
+                existing: ["DCIM_0001.jpg"]
+                toUpload: ["DCIM_0002.jpg"]
+                totalChecked: 2
+                duplicateCount: 1
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+
+  /photos/upload-session:
+    post:
+      tags: [Session]
+      summary: Create new upload session
+      description: |
+        Creates a new upload session to group batches.
+        Returns session ID used for subsequent signed URL requests.
+      operationId: createUploadSession
+      security:
+        - supabaseAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [totalFiles]
+              properties:
+                totalFiles:
+                  type: integer
+                  minimum: 1
+                  maximum: 50000
+                  description: Total files to be uploaded
+                locationId:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Optional camera location ID
+            example:
+              totalFiles: 10000
+              locationId: null
+      responses:
+        '201':
+          description: Upload session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [uploading]
+                  totalFiles:
+                    type: integer
+              example:
+                sessionId: "123e4567-e89b-12d3-a456-426614174000"
+                status: "uploading"
+                totalFiles: 10000
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+
+  /photos/upload-session/{sessionId}:
+    get:
+      tags: [Session]
+      summary: Get upload session status
+      description: Returns current progress and status of upload session
+      operationId: getUploadSession
+      security:
+        - supabaseAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSession'
+        '404':
+          description: Session not found
+        '401':
+          description: Unauthorized
+
+    patch:
+      tags: [Session]
+      summary: Update upload session progress
+      description: |
+        Updates session counters and status.
+        Called by client to report upload progress.
+      operationId: updateUploadSession
+      security:
+        - supabaseAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                uploadedCount:
+                  type: integer
+                  minimum: 0
+                failedCount:
+                  type: integer
+                  minimum: 0
+                skippedCount:
+                  type: integer
+                  minimum: 0
+                status:
+                  type: string
+                  enum: [uploading, processing, completed, partial_error, failed]
+            example:
+              uploadedCount: 2500
+              failedCount: 3
+              status: "uploading"
+      responses:
+        '200':
+          description: Session updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSession'
+        '400':
+          description: Invalid update
+        '401':
+          description: Unauthorized
+        '404':
+          description: Session not found
+
+  /photos/{imageId}/refresh-url:
+    post:
+      tags: [Upload]
+      summary: Refresh signed URL for failed upload
+      description: |
+        Generates a fresh signed URL for retrying a failed upload.
+        Image record must exist from previous signed-urls call.
+      operationId: refreshSignedUrl
+      security:
+        - supabaseAuth: []
+      parameters:
+        - name: imageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Fresh URL generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signedUrl:
+                    type: string
+                    format: uri
+                  expiresAt:
+                    type: string
+                    format: date-time
+              example:
+                signedUrl: "https://xxx.supabase.co/storage/v1/object/sign/..."
+                expiresAt: "2024-12-26T14:30:00Z"
+        '404':
+          description: Image not found
+        '401':
+          description: Unauthorized
+
+components:
+  securitySchemes:
+    supabaseAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase Auth JWT token
+
+  schemas:
+    UploadSession:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        totalImages:
+          type: integer
+        uploadedCount:
+          type: integer
+        processedCount:
+          type: integer
+        failedCount:
+          type: integer
+        skippedCount:
+          type: integer
+        status:
+          type: string
+          enum: [uploading, processing, completed, partial_error, failed]
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+      example:
+        id: "123e4567-e89b-12d3-a456-426614174000"
+        userId: "456e7890-e89b-12d3-a456-426614174000"
+        totalImages: 10000
+        uploadedCount: 7500
+        processedCount: 6200
+        failedCount: 12
+        skippedCount: 450
+        status: "processing"
+        createdAt: "2024-12-26T10:00:00Z"
+        completedAt: null

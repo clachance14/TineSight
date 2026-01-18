@@ -15,6 +15,10 @@ export type UploadSession = {
   user_id: string
   total_batches: number
   total_images: number
+  uploaded_count: number
+  processed_count: number
+  failed_count: number
+  skipped_count: number
   status: UploadSessionStatus
   created_at: string
   completed_at: string | null
@@ -25,6 +29,10 @@ export type UploadSessionInsert = {
   user_id: string
   total_batches?: number
   total_images?: number
+  uploaded_count?: number
+  processed_count?: number
+  failed_count?: number
+  skipped_count?: number
   status?: UploadSessionStatus
   created_at?: string
   completed_at?: string | null
@@ -35,6 +43,10 @@ export type UploadSessionUpdate = {
   user_id?: string
   total_batches?: number
   total_images?: number
+  uploaded_count?: number
+  processed_count?: number
+  failed_count?: number
+  skipped_count?: number
   status?: UploadSessionStatus
   created_at?: string
   completed_at?: string | null
@@ -56,9 +68,12 @@ export type CancelSessionResult = {
 
 /**
  * Create a new upload session
+ * @param userId - User ID
+ * @param totalImages - Total number of images to be uploaded (optional)
  */
 export async function createUploadSession(
-  userId: string
+  userId: string,
+  totalImages?: number
 ): Promise<{
   data: UploadSession | null
   error: Error | null
@@ -68,6 +83,7 @@ export async function createUploadSession(
   const insertData: UploadSessionInsert = {
     user_id: userId,
     status: 'uploading',
+    ...(totalImages !== undefined && { total_images: totalImages }),
   }
 
   const { data, error } = await supabase
@@ -124,6 +140,62 @@ export async function getUploadSessions(
   const { data, error } = await query
 
   return { data: data as UploadSession[] | null, error }
+}
+
+/**
+ * Update an upload session with partial data
+ * Used for updating progress counters and status
+ */
+export async function updateUploadSession(
+  sessionId: string,
+  updates: {
+    uploadedCount?: number
+    processedCount?: number
+    failedCount?: number
+    skippedCount?: number
+    status?: UploadSessionStatus
+  }
+): Promise<{
+  data: UploadSession | null
+  error: Error | null
+}> {
+  const supabase = await createClient()
+
+  const updateData: Record<string, unknown> = {}
+
+  if (updates.uploadedCount !== undefined) {
+    updateData['uploaded_count'] = updates.uploadedCount
+  }
+  if (updates.processedCount !== undefined) {
+    updateData['processed_count'] = updates.processedCount
+  }
+  if (updates.failedCount !== undefined) {
+    updateData['failed_count'] = updates.failedCount
+  }
+  if (updates.skippedCount !== undefined) {
+    updateData['skipped_count'] = updates.skippedCount
+  }
+  if (updates.status !== undefined) {
+    updateData['status'] = updates.status
+    // Set completed_at when transitioning to a terminal state
+    if (updates.status === 'completed' || updates.status === 'failed' || updates.status === 'partial_error' || updates.status === 'cancelled') {
+      updateData['completed_at'] = new Date().toISOString()
+    }
+  }
+
+  // No updates to make
+  if (Object.keys(updateData).length === 0) {
+    return { data: null, error: new Error('No valid fields to update') }
+  }
+
+  const { data, error } = await supabase
+    .from('upload_sessions')
+    .update(updateData as never)
+    .eq('id', sessionId)
+    .select()
+    .single()
+
+  return { data: data as UploadSession | null, error }
 }
 
 /**

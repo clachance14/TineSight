@@ -5,7 +5,7 @@
  * We cache them for 50 minutes to ensure a 10-minute safety buffer.
  */
 
-import { getSignedViewUrl } from '@/lib/services/photos'
+import { getSignedViewUrl, getSignedViewUrls } from '@/lib/services/photos'
 
 interface CachedUrl {
   url: string
@@ -86,22 +86,22 @@ export async function getCachedSignedUrls(
     }
   }
 
-  // Fetch uncached URLs in parallel
+  // Fetch uncached URLs using batch API (single request instead of N individual calls)
   if (uncachedPaths.length > 0) {
-    const fetchPromises = uncachedPaths.map((path) => getSignedViewUrl(path))
-    const fetchResults = await Promise.all(fetchPromises)
+    const { data: urlMap } = await getSignedViewUrls(uncachedPaths)
 
     // Update cache and results
     const fetchTime = Date.now()
-    for (let j = 0; j < fetchResults.length; j++) {
-      const { data, error } = fetchResults[j]!
-      const originalIndex = uncachedIndices[j]!
-      const filePath = uncachedPaths[j]!
+    for (let j = 0; j < uncachedPaths.length; j++) {
+      const originalIndex = uncachedIndices[j]
+      const filePath = uncachedPaths[j]
+      if (originalIndex === undefined || filePath === undefined) continue
 
-      if (!error && data) {
-        results[originalIndex] = data
+      const signedUrl = urlMap.get(filePath)
+      if (signedUrl !== undefined && signedUrl !== '') {
+        results[originalIndex] = signedUrl
         urlCache.set(filePath, {
-          url: data,
+          url: signedUrl,
           expiresAt: fetchTime + CACHE_TTL_MS,
         })
       }

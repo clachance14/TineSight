@@ -372,13 +372,15 @@ function PhotosContent(): React.JSX.Element {
         }}
       />
 
-      {/* Selection Toolbar - appears when photos are selected */}
-      <SelectionToolbar
-        visiblePhotoIds={photos.map(p => p.id)}
-        locations={locationsList}
-        totalMatchingCount={total}
-        currentFilters={serviceFilters}
-      />
+      {/* Selection Toolbar - appears when photos are selected (desktop only) */}
+      <div className="hidden md:block">
+        <SelectionToolbar
+          visiblePhotoIds={photos.map(p => p.id)}
+          locations={locationsList}
+          totalMatchingCount={total}
+          currentFilters={serviceFilters}
+        />
+      </div>
     </div>
   )
 }

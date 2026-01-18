@@ -1,0 +1,414 @@
+openapi: 3.0.3
+info:
+  title: TineSight Trophy API
+  description: API endpoints for trophy fingerprinting and clustering
+  version: 1.0.0
+
+paths:
+  /api/trophy/dashboard:
+    get:
+      summary: Get trophy dashboard data
+      description: Returns summary stats and categorized trophy detections
+      tags: [Trophy Dashboard]
+      security:
+        - supabaseAuth: []
+      responses:
+        '200':
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
+
+  /api/trophy/batch-confirm:
+    post:
+      summary: Batch confirm matches
+      description: Confirm multiple match candidates at once
+      tags: [Batch Operations]
+      security:
+        - supabaseAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                match_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+              required: [match_ids]
+      responses:
+        '200':
+          description: Confirmation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  confirmed_count:
+                    type: integer
+
+  /api/trophy/batch-reject:
+    post:
+      summary: Batch reject matches
+      description: Reject multiple match candidates at once
+      tags: [Batch Operations]
+      security:
+        - supabaseAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                match_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+              required: [match_ids]
+      responses:
+        '200':
+          description: Rejection result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rejected_count:
+                    type: integer
+
+  /api/deer/clusters:
+    get:
+      summary: List pending clusters
+      description: Get all pending trophy clusters for the user
+      tags: [Clusters]
+      security:
+        - supabaseAuth: []
+      responses:
+        '200':
+          description: Cluster list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clusters:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TrophyCluster'
+
+  /api/deer/clusters/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    patch:
+      summary: Update cluster
+      description: Merge, split, or dismiss a cluster
+      tags: [Clusters]
+      security:
+        - supabaseAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  properties:
+                    action:
+                      type: string
+                      enum: [merge]
+                    target_cluster_id:
+                      type: string
+                      format: uuid
+                  required: [action, target_cluster_id]
+                - type: object
+                  properties:
+                    action:
+                      type: string
+                      enum: [split]
+                    detection_ids:
+                      type: array
+                      items:
+                        type: string
+                        format: uuid
+                  required: [action, detection_ids]
+                - type: object
+                  properties:
+                    action:
+                      type: string
+                      enum: [dismiss]
+                    reason:
+                      type: string
+                  required: [action]
+      responses:
+        '200':
+          description: Update result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+    delete:
+      summary: Delete/dismiss cluster
+      description: Dismiss a cluster and return detections to unclustered
+      tags: [Clusters]
+      security:
+        - supabaseAuth: []
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /api/deer/clusters/{id}/name:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      summary: Name a cluster
+      description: Create a deer profile from a cluster
+      tags: [Clusters]
+      security:
+        - supabaseAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                notes:
+                  type: string
+              required: [name]
+      responses:
+        '200':
+          description: Created deer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deer:
+                    $ref: '#/components/schemas/Deer'
+                  linked_count:
+                    type: integer
+
+components:
+  securitySchemes:
+    supabaseAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    DashboardResponse:
+      type: object
+      properties:
+        stats:
+          $ref: '#/components/schemas/DashboardStats'
+        pendingGroups:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingMatchGroup'
+        clusters:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrophyCluster'
+        unclustered:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrophyDetection'
+
+    DashboardStats:
+      type: object
+      properties:
+        totalTrophyDetections:
+          type: integer
+        assignedCount:
+          type: integer
+        pendingMatchCount:
+          type: integer
+        clusterCount:
+          type: integer
+        unclusteredCount:
+          type: integer
+
+    PendingMatchGroup:
+      type: object
+      properties:
+        deer:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            reference_image_url:
+              type: string
+            antler_print:
+              $ref: '#/components/schemas/AntlerFingerprint'
+        pending_matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnhancedMatchCandidate'
+        total_count:
+          type: integer
+
+    EnhancedMatchCandidate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        detection:
+          $ref: '#/components/schemas/TrophyDetection'
+        visual_confidence:
+          type: number
+          minimum: 0
+          maximum: 100
+        antler_print_similarity:
+          type: number
+          minimum: 0
+          maximum: 1
+        gemini_reasoning:
+          type: string
+        possible_broken_tine:
+          type: boolean
+
+    TrophyDetection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        image_id:
+          type: string
+          format: uuid
+        thumbnail_url:
+          type: string
+        captured_at:
+          type: string
+          format: date-time
+        size_class:
+          type: string
+          enum: [trophy]
+        estimated_point_range:
+          type: string
+        antler_print:
+          $ref: '#/components/schemas/AntlerFingerprint'
+        deer_id:
+          type: string
+          format: uuid
+
+    TrophyCluster:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        representative_detection_id:
+          type: string
+          format: uuid
+        representative_crop_url:
+          type: string
+        status:
+          type: string
+          enum: [pending, named, merged, split, dismissed]
+        member_count:
+          type: integer
+        avg_similarity:
+          type: number
+        min_similarity:
+          type: number
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrophyDetection'
+
+    AntlerFingerprint:
+      type: object
+      properties:
+        version:
+          type: string
+        scores:
+          type: object
+          properties:
+            gross_score:
+              type: number
+            net_score:
+              type: number
+            score_class:
+              type: string
+              enum: [120s, 140s, 160s, 180s, 200s, world_class, unknown]
+        measurements:
+          type: object
+          properties:
+            inside_spread:
+              type: number
+            total_points:
+              type: integer
+        ratios:
+          type: object
+          properties:
+            g2_to_g3:
+              type: number
+            beam_symmetry:
+              type: number
+        features:
+          type: object
+          properties:
+            has_drop_tine:
+              type: boolean
+            has_split_g2:
+              type: boolean
+        confidence:
+          type: object
+          properties:
+            overall:
+              type: number
+
+    Deer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        notes:
+          type: string
+        reference_detection_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Sheet,
   SheetContent,
@@ -59,6 +59,14 @@ export function PhotoFilterDrawer({
   const { data: camerasData } = useCameras()
   const [localFilters, setLocalFilters] = useState(filters)
   const [confidenceEnabled, setConfidenceEnabled] = useState(filters.minConfidence !== undefined)
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Helper to get current points selection
   const getActivePointsFilter = () => {
@@ -191,12 +199,29 @@ export function PhotoFilterDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md bg-slate-deep border-slate">
+      <SheetContent
+        side={isMobile ? "bottom" : "right"}
+        className={cn(
+          "bg-slate-deep border-slate",
+          isMobile
+            ? "h-[85vh] rounded-t-xl"
+            : "w-full sm:max-w-md"
+        )}
+      >
+        {isMobile && (
+          <div className="flex justify-center pt-2 pb-4">
+            <div className="w-12 h-1 rounded-full bg-slate" />
+          </div>
+        )}
+
         <SheetHeader>
           <SheetTitle className="text-cream">Filter Photos</SheetTitle>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto space-y-6 py-6">
+        <div className={cn(
+          "flex-1 overflow-y-auto space-y-6 py-6",
+          isMobile && "pb-safe"
+        )}>
           {/* Animal Section */}
           <section className="space-y-4">
             <div className="flex items-center gap-2">

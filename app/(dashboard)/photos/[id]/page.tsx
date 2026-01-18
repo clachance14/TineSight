@@ -143,6 +143,21 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
     })
   }
 
+  const formatShortDate = (dateString: string | null) => {
+    if (!dateString) return 'Unknown'
+    return new Date(dateString).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  const formatFileSize = (bytes: number | null) => {
+    if (!bytes) return null
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  }
+
   const getStatusBadge = (status: string) => {
     const badges = {
       pending: { label: 'Pending', className: 'bg-slate text-cream-dark' },
@@ -179,27 +194,27 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
   }
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto space-y-6">
+    <div className="flex flex-col h-full overflow-y-auto space-y-4 md:space-y-6">
       {/* Header with back button and navigation */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
           <Button variant="outline" size="icon" asChild>
             <Link href={filterQueryString ? `/photos?${filterQueryString}` : '/photos'}>
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-cream">
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-cream">
               Photo Details
             </h1>
-            <p className="mt-1 text-sm text-cream-dark">
+            <p className="hidden md:block mt-1 text-sm text-cream-dark">
               ID: {id}
             </p>
           </div>
         </div>
 
         {/* Prev/Next navigation and actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 md:gap-2">
           {prevId ? (
             <Button variant="outline" size="icon" asChild>
               <Link href={filterQueryString ? `/photos/${prevId}?${filterQueryString}` : `/photos/${prevId}`}>
@@ -229,9 +244,9 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 md:gap-6 lg:grid-cols-3">
         {/* Main photo view with ROI selection */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-3 md:space-y-4">
           <PhotoDetailClient
             imageUrl={imageUrl ?? null}
             detections={detections}
@@ -243,11 +258,31 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
 
           {/* Photo metadata */}
           <Card>
-            <CardHeader>
+            <CardHeader className="hidden md:block">
               <CardTitle>Photo Information</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <CardContent className="p-3 md:p-6 pt-3">
+              {/* Mobile: Dense inline layout */}
+              <div className="md:hidden space-y-2">
+                <h3 className="text-base font-semibold text-cream mb-2">Photo Info</h3>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                  <span><span className="text-cream-dark">Captured:</span> <span className="text-cream">{formatShortDate(photo.captured_at)}</span></span>
+                  <span><span className="text-cream-dark">Imported:</span> <span className="text-cream">{formatShortDate(photo.imported_at)}</span></span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {getStatusBadge(photo.detection_status)}
+                  {getClassificationBadge(photo.classification)}
+                  {photo.confidence !== null && (
+                    <span className="text-sm text-cream">{Math.round(photo.confidence * 100)}%</span>
+                  )}
+                  {formatFileSize(photo.file_size_bytes) && (
+                    <span className="text-sm text-cream-dark">{formatFileSize(photo.file_size_bytes)}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Desktop: Original grid layout */}
+              <div className="hidden md:grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm font-medium text-cream-dark">Captured</p>
                   <p className="text-cream">{formatDate(photo.captured_at)}</p>
@@ -284,22 +319,22 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
         </div>
 
         {/* Detections panel */}
-        <div className="space-y-4">
+        <div className="space-y-2 md:space-y-4">
           {/* Detections list */}
           <Card>
-            <CardHeader>
-              <CardTitle>Detections ({detections.length})</CardTitle>
-              <CardDescription>
+            <CardHeader className="pb-2 md:pb-4 px-3 md:px-6 pt-3 md:pt-6">
+              <CardTitle className="text-base md:text-lg">Detections ({detections.length})</CardTitle>
+              <CardDescription className="hidden md:block">
                 Animals detected in this photo - click to select for ROI
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-3 md:px-6 pb-3 md:pb-6 pt-0">
               {detections.length === 0 ? (
-                <p className="text-sm text-cream-dark text-center py-4">
+                <p className="text-sm text-cream-dark text-center py-2 md:py-4">
                   No detections found
                 </p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2 md:space-y-3">
                   {detections.map((detection, index) => (
                     <DetectionCardWithFeedback
                       key={detection.id}

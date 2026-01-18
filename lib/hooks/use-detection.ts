@@ -1,6 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import type { AntlerFingerprint } from '@/types/fingerprint'
 
 interface DetectionResponse {
   id: string
@@ -21,6 +22,7 @@ interface DetectionResponse {
   geminiConfidence: number | null
   deerId: string | null
   createdAt: string
+  antlerFingerprint: AntlerFingerprint | null
 }
 
 interface UpdateDetectionInput {

@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useQueryClient } from '@tanstack/react-query'
 import { PhotoUploader } from '@/components/photos/photo-uploader'
+import { BulkUploader } from '@/components/upload/BulkUploader'
 import { UploadProgressPanel } from '@/components/photos/upload-progress-panel'
 import { LocationPickerModal, type LocationData } from '@/components/photos/location-picker-modal'
 import { useUploadStore, batchedUpdateProgress } from '@/lib/stores/upload'
@@ -12,9 +13,19 @@ import { useLocations } from '@/lib/hooks/use-locations'
 import { useAdaptiveThrottle } from '@/lib/hooks/use-adaptive-throttle'
 import { classifyXHRError } from '@/lib/throttle'
 import { ThrottleMetricsPanel } from '@/components/debug/throttle-metrics-panel'
-import { Card, CardContent } from '@/components/ui/card'
+import { UploadLogsPanel } from '@/components/debug/upload-logs-panel'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
-import { Image } from 'lucide-react'
+import { Image, FolderUp, Upload } from 'lucide-react'
+import {
+  createUploadLogger,
+  createUploadMetrics,
+  getUploadLogger,
+  getUploadMetrics,
+  removeUploadLogger,
+  removeUploadMetrics,
+} from '@/lib/upload'
 
 const PROGRESS_THROTTLE_MS = 100 // Max 10 updates per second per file for smoother progress
 const MAX_RETRIES = 3
@@ -35,6 +46,7 @@ interface FailedUpload {
   filename: string
   file: File
   uploadUrl: string
+  imageId: string
   attempt: number
 }
 
@@ -44,6 +56,12 @@ export default function UploadPage() {
   const failedUploadsRef = useRef<FailedUpload[]>([])
   const uploadStartTimes = useRef<Map<string, number>>(new Map())
 
+  // Debug logging state
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
+
+  // Upload mode state - default to bulk for 10K upload feature
+  const [uploadMode, setUploadMode] = useState<'bulk' | 'simple'>('bulk')
+
   // Initialize adaptive throttler for upload operations
   const throttle = useAdaptiveThrottle('upload')
 
@@ -52,12 +70,20 @@ export default function UploadPage() {
     fileId: string,
     filename: string,
     file: File,
-    uploadUrl: string
+    uploadUrl: string,
+    sessionId?: string
   ): Promise<{ success: true } | { success: false; error: string }> => {
+    // Get logger and metrics for this session
+    const logger = sessionId ? getUploadLogger(sessionId) : null
+    const metrics = sessionId ? getUploadMetrics(sessionId) : null
+
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest()
       const startTime = Date.now()
       uploadStartTimes.current.set(fileId, startTime)
+
+      // Log file start
+      logger?.fileStart(fileId, filename, file.size)
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
@@ -79,33 +105,48 @@ export default function UploadPage() {
         if (xhr.status >= 200 && xhr.status < 300) {
           // Record success with duration
           throttle.recordSuccess(duration)
+          // Log and record metrics
+          logger?.fileComplete(fileId, duration, file.size)
+          metrics?.recordUpload(fileId, file.size, duration)
           resolve({ success: true })
         } else {
+          const errorMsg = `Upload failed: ${xhr.status} ${xhr.statusText}`
           console.error(`[Upload Failed] ${filename}`, {
             status: xhr.status,
             statusText: xhr.statusText,
             response: xhr.responseText?.slice(0, 500),
           })
           // Record failure with classified error type
-          throttle.recordFailure(classifyXHRError(xhr))
-          resolve({ success: false, error: `Upload failed: ${xhr.status} ${xhr.statusText}` })
+          const errorType = classifyXHRError(xhr)
+          throttle.recordFailure(errorType)
+          logger?.fileFailed(fileId, errorMsg)
+          metrics?.recordError(fileId, errorType)
+          resolve({ success: false, error: errorMsg })
         }
       }
 
       xhr.onerror = () => {
+        const duration = Date.now() - startTime
         uploadStartTimes.current.delete(fileId)
+        const errorMsg = 'Network error - browser connection failed'
         console.error(`[Network Error] ${filename}`, { readyState: xhr.readyState })
         // Record network failure
         throttle.recordFailure('network')
-        resolve({ success: false, error: 'Network error - browser connection failed' })
+        logger?.error('Network error', undefined, { fileId, filename, duration })
+        metrics?.recordError(fileId, 'network')
+        resolve({ success: false, error: errorMsg })
       }
 
       xhr.ontimeout = () => {
+        const duration = Date.now() - startTime
         uploadStartTimes.current.delete(fileId)
+        const errorMsg = 'Upload timeout'
         console.error(`[Timeout] ${filename}`)
         // Record network failure (timeout is a network issue)
         throttle.recordFailure('network')
-        resolve({ success: false, error: 'Upload timeout' })
+        logger?.error('Upload timeout', undefined, { fileId, filename, duration })
+        metrics?.recordError(fileId, 'timeout')
+        resolve({ success: false, error: errorMsg })
       }
 
       xhr.timeout = 120000
@@ -155,6 +196,12 @@ export default function UploadPage() {
     setShowLocationPicker(false)
   }, [setPendingLocation, setShowLocationPicker])
 
+  // Handle bulk upload complete
+  const handleBulkUploadComplete = useCallback((sessionId: string) => {
+    console.log(`[BulkUploader] Upload complete for session: ${sessionId}`)
+    setCurrentSessionId(sessionId)
+  }, [])
+
   const handleStartUpload = useCallback(async () => {
     const pendingFiles = uploadQueue.filter((f) => f.status === 'pending')
     if (pendingFiles.length === 0) return
@@ -172,6 +219,12 @@ export default function UploadPage() {
     // Clear failed uploads from previous runs
     failedUploadsRef.current = []
 
+    // Clean up any existing logger/metrics from previous session
+    if (currentSessionId) {
+      removeUploadLogger(currentSessionId)
+      removeUploadMetrics(currentSessionId)
+    }
+
     // Create upload session before chunking
     let sessionId: string | null = null
     try {
@@ -185,6 +238,14 @@ export default function UploadPage() {
         // Track this session for processing status bar (set once, not per-batch)
         if (sessionId) {
           setActiveUploadSessionId(sessionId)
+          setCurrentSessionId(sessionId)
+
+          // Initialize debug logger and metrics
+          const logger = createUploadLogger(sessionId)
+          const metrics = createUploadMetrics(sessionId)
+
+          logger.phase('init', { totalFiles: pendingFiles.length })
+          metrics.startSession()
         }
       }
     } catch (err) {
@@ -240,41 +301,59 @@ export default function UploadPage() {
     }
 
     // Upload files using pre-fetched signed URLs
-    const uploadBatch = async (batchData: { chunk: typeof pendingFiles; batchId: string; uploads: Array<{ fileId: string; uploadUrl: string; imageId: string }> }) => {
+    const uploadBatch = async (batchData: { chunk: typeof pendingFiles; batchId: string; uploads: Array<{ fileId: string; uploadUrl: string; imageId: string }> }, chunkIndex: number) => {
       const { chunk, batchId, uploads } = batchData
+      const logger = sessionId ? getUploadLogger(sessionId) : null
+      const chunkStartTime = Date.now()
+
+      // Log chunk start
+      logger?.chunkStart(chunkIndex, chunk.length)
 
       // Update store with upload URLs and mark as uploading
       startUpload(batchId, uploads)
+
+      // Track results for logging
+      let successCount = 0
+      let failCount = 0
 
       // Upload each file to its signed URL
       const uploadPromises = chunk.map(async (file) => {
         const uploadInfo = uploads.find((u) => u.fileId === file.id)
         if (!uploadInfo) {
           markFileFailed(file.id, 'No upload URL received')
+          failCount++
           return
         }
 
         if (!file.file) {
           markFileFailed(file.id, 'File data not available')
+          failCount++
           return
         }
 
-        const result = await uploadFile(file.id, file.filename, file.file, uploadInfo.uploadUrl)
+        const result = await uploadFile(file.id, file.filename, file.file, uploadInfo.uploadUrl, sessionId ?? undefined)
 
         if (result.success) {
           markFileCompleted(file.id)
+          successCount++
         } else {
           failedUploadsRef.current.push({
             fileId: file.id,
             filename: file.filename,
             file: file.file,
             uploadUrl: uploadInfo.uploadUrl,
+            imageId: uploadInfo.imageId,
             attempt: 1,
           })
+          failCount++
         }
       })
 
       await Promise.all(uploadPromises)
+
+      // Log chunk completion
+      const chunkDuration = Date.now() - chunkStartTime
+      logger?.chunkComplete(chunkIndex, successCount, failCount, chunkDuration)
 
       // Trigger processing for this chunk
       await fetch('/api/photos/upload/complete', {
@@ -285,6 +364,12 @@ export default function UploadPage() {
     }
 
     setIsPreparing(true)
+
+    // Get logger for phase tracking
+    const logger = sessionId ? getUploadLogger(sessionId) : null
+
+    // Log upload phase start
+    logger?.phase('upload', { totalChunks: chunks.length, chunkSize, parallelChunks })
 
     // Start session timer for metrics tracking
     throttle.startSession()
@@ -297,10 +382,12 @@ export default function UploadPage() {
     let currentRoundPromises = rounds[0]?.map((chunk) =>
       initializeBatch(chunk).catch((err) => {
         console.error('Batch init failed:', err)
+        logger?.error('Batch init failed', err instanceof Error ? err : undefined)
         return null
       })
     ) ?? []
 
+    let chunkIndex = 0
     for (let i = 0; i < rounds.length; i++) {
       // Wait for current round's init to complete
       const batchDataList = await Promise.all(currentRoundPromises)
@@ -310,6 +397,7 @@ export default function UploadPage() {
         currentRoundPromises = rounds[i + 1]!.map((chunk) =>
           initializeBatch(chunk).catch((err) => {
             console.error('Batch init failed:', err)
+            logger?.error('Batch init failed', err instanceof Error ? err : undefined)
             return null
           })
         )
@@ -320,16 +408,24 @@ export default function UploadPage() {
       await Promise.all(
         batchDataList
           .filter((data): data is NonNullable<typeof data> => data !== null)
-          .map((batchData) => uploadBatch(batchData))
+          .map((batchData) => {
+            const idx = chunkIndex++
+            return uploadBatch(batchData, idx)
+          })
       )
     }
 
     // Step 5: Retry failed uploads at the end
+    if (failedUploadsRef.current.length > 0) {
+      logger?.event('retry_phase_start', { failedCount: failedUploadsRef.current.length })
+    }
+
     while (failedUploadsRef.current.length > 0) {
       const toRetry = [...failedUploadsRef.current]
       failedUploadsRef.current = []
 
       console.log(`[Retry] Retrying ${toRetry.length} failed uploads...`)
+      logger?.event('retry_batch', { count: toRetry.length })
 
       // Add delay before retry batch
       await delay(RETRY_DELAY_MS)
@@ -338,6 +434,10 @@ export default function UploadPage() {
         if (failed.attempt >= MAX_RETRIES) {
           // Exhausted retries, mark as failed
           console.error(`[Upload Failed] ${failed.filename} after ${MAX_RETRIES} attempts`)
+          logger?.error(`Max retries exceeded for ${failed.filename}`, undefined, {
+            fileId: failed.fileId,
+            attempts: MAX_RETRIES,
+          })
           markFileFailed(failed.fileId, `Upload failed after ${MAX_RETRIES} attempts`)
           continue
         }
@@ -345,15 +445,52 @@ export default function UploadPage() {
         // Reset progress for retry
         batchedUpdateProgress(failed.fileId, 0)
 
-        const result = await uploadFile(failed.fileId, failed.filename, failed.file, failed.uploadUrl)
+        // Refresh the signed URL before retry attempt
+        let freshUploadUrl = failed.uploadUrl
+        try {
+          console.log(`[Retry] Refreshing signed URL for ${failed.filename}`)
+          logger?.event('url_refresh', { fileId: failed.fileId, attempt: failed.attempt + 1 })
+          const refreshRes = await fetch(`/api/photos/${failed.imageId}/refresh-url`, {
+            method: 'POST',
+          })
+
+          if (!refreshRes.ok) {
+            const errorData = await refreshRes.json().catch(() => ({ error: 'Unknown error' }))
+            console.error(`[Retry] Failed to refresh URL for ${failed.filename}:`, errorData.error)
+            logger?.error('URL refresh failed', undefined, { fileId: failed.fileId, error: errorData.error })
+            // Count this as a failed attempt and continue to next file
+            failedUploadsRef.current.push({
+              ...failed,
+              attempt: failed.attempt + 1,
+            })
+            continue
+          }
+
+          const { uploadUrl } = await refreshRes.json()
+          freshUploadUrl = uploadUrl
+          console.log(`[Retry] Successfully refreshed URL for ${failed.filename}`)
+        } catch (err) {
+          console.error(`[Retry] Error refreshing URL for ${failed.filename}:`, err)
+          logger?.error('URL refresh error', err instanceof Error ? err : undefined, { fileId: failed.fileId })
+          // Count this as a failed attempt and continue to next file
+          failedUploadsRef.current.push({
+            ...failed,
+            attempt: failed.attempt + 1,
+          })
+          continue
+        }
+
+        const result = await uploadFile(failed.fileId, failed.filename, failed.file, freshUploadUrl, sessionId ?? undefined)
 
         if (result.success) {
           console.log(`[Retry Success] ${failed.filename} succeeded on attempt ${failed.attempt + 1}`)
+          logger?.event('retry_success', { fileId: failed.fileId, attempt: failed.attempt + 1 })
           markFileCompleted(failed.fileId)
         } else {
-          // Queue for another retry
+          // Queue for another retry with the fresh URL
           failedUploadsRef.current.push({
             ...failed,
+            uploadUrl: freshUploadUrl, // Use the refreshed URL for next attempt
             attempt: failed.attempt + 1,
           })
         }
@@ -362,6 +499,28 @@ export default function UploadPage() {
 
     // Stop session timer for metrics tracking
     throttle.stopSession()
+
+    // Get final metrics summary
+    const metrics = sessionId ? getUploadMetrics(sessionId) : null
+    if (metrics) {
+      metrics.endSession()
+      const summary = metrics.getSummary()
+      logger?.phase('complete', {
+        totalFiles: summary.totalFiles,
+        successfulFiles: summary.successfulFiles,
+        failedFiles: summary.failedFiles,
+        totalBytes: summary.totalBytes,
+        averageThroughputBps: summary.averageThroughputBps,
+        peakThroughputBps: summary.peakThroughputBps,
+        filesPerSecond: summary.filesPerSecond,
+        peakMemoryMB: summary.peakMemoryMB,
+      })
+      logger?.metric('average_throughput', summary.averageThroughputBps / (1024 * 1024), 'MB/s')
+      logger?.metric('peak_throughput', summary.peakThroughputBps / (1024 * 1024), 'MB/s')
+      logger?.metric('files_per_second', summary.filesPerSecond)
+    } else {
+      logger?.phase('complete')
+    }
 
     // Step 6: Refresh photo list after all chunks and retries
     await queryClient.invalidateQueries({ queryKey: ['photos'] })
@@ -374,7 +533,7 @@ export default function UploadPage() {
       setPendingLocation(null)
     }
     setIsPreparing(false)
-  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient, pendingLocation, setPendingLocation, uploadFile, throttle])
+  }, [uploadQueue, setIsPreparing, startUpload, markFileCompleted, markFileFailed, queryClient, pendingLocation, setPendingLocation, uploadFile, throttle, currentSessionId])
 
   return (
     <div className="space-y-6">
@@ -396,20 +555,45 @@ export default function UploadPage() {
         </Button>
       </div>
 
-      {/* Upload Section */}
+      {/* Upload Section with Tabs */}
       <Card>
-        <CardContent className="pt-6">
-          <PhotoUploader
-            onStartUpload={handleStartUpload}
-            onFilesReady={handleFilesReady}
-          />
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg text-cream">Choose Upload Method</CardTitle>
+          <CardDescription className="text-cream-dark">
+            Use Bulk Upload for folders with many photos, or Simple Upload for drag-and-drop
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs value={uploadMode} onValueChange={(v: string) => setUploadMode(v as 'bulk' | 'simple')}>
+            <TabsList className="grid w-full grid-cols-2 mb-6">
+              <TabsTrigger value="bulk" className="gap-2">
+                <FolderUp className="h-4 w-4" />
+                Bulk Upload
+              </TabsTrigger>
+              <TabsTrigger value="simple" className="gap-2">
+                <Upload className="h-4 w-4" />
+                Simple Upload
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="bulk" className="mt-0">
+              <BulkUploader onUploadComplete={handleBulkUploadComplete} />
+            </TabsContent>
+
+            <TabsContent value="simple" className="mt-0">
+              <PhotoUploader
+                onStartUpload={handleStartUpload}
+                onFilesReady={handleFilesReady}
+              />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
 
-      {/* Progress Panel */}
-      <UploadProgressPanel />
+      {/* Progress Panel - shown for simple upload mode */}
+      {uploadMode === 'simple' && <UploadProgressPanel />}
 
-      {/* Location Picker Modal */}
+      {/* Location Picker Modal - used by simple upload */}
       <LocationPickerModal
         isOpen={showLocationPicker}
         onConfirm={handleLocationConfirm}
@@ -417,8 +601,9 @@ export default function UploadPage() {
         existingLocations={existingLocations}
       />
 
-      {/* Debug Panel - Only visible in development */}
+      {/* Debug Panels - Only visible in development */}
       <ThrottleMetricsPanel />
+      <UploadLogsPanel sessionId={currentSessionId} />
     </div>
   )
 }

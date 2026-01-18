@@ -19,6 +19,7 @@ interface UseRealtimePhotosOptions {
 
 interface UseRealtimePhotosReturn {
   isConnected: boolean
+  lastUpdate: Date | null
   error: Error | null
 }
 
@@ -62,6 +63,7 @@ export function useRealtimePhotos({
 
   // Use state for return values to trigger re-renders
   const [isConnected, setIsConnected] = useState(false)
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
 
@@ -90,6 +92,9 @@ export function useRealtimePhotos({
           if (update === null) {
             return
           }
+
+          // Track last update time
+          setLastUpdate(new Date())
 
           // Notify callback if provided
           if (onStatusChange) {
@@ -179,12 +184,14 @@ export function useRealtimePhotos({
         channelRef.current = null
       }
       setIsConnected(false)
+      setLastUpdate(null)
       setError(null)
     }
   }, [userId, enabled, onStatusChange, queryClient])
 
   return {
     isConnected,
+    lastUpdate,
     error,
   }
 }

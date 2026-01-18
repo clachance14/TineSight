@@ -19,6 +19,7 @@ import { useToast } from '@/lib/hooks/use-toast'
 import { DeleteConfirmationDialog } from './delete-confirmation-dialog'
 import { CreateDeerModal } from '@/components/deer/create-deer-modal'
 import { DeerProfileDropdown } from '@/components/deer/deer-profile-dropdown'
+import { AntlerPrintCard } from '@/components/deer/antler-print-card'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   detectionEditFormSchema,
@@ -175,7 +176,7 @@ export function DetectionEditPanel() {
 
   return (
     <>
-    <Sheet open={isOpen} onOpenChange={(open) => !open && closePanel()}>
+    <Sheet open={isOpen} onOpenChange={(open) => !open && closePanel()} modal={false}>
       <SheetContent
         side="right"
         className="w-full sm:w-[400px] sm:max-w-md bg-slate-deep border-l border-cream/20 flex flex-col"
@@ -371,6 +372,13 @@ export function DetectionEditPanel() {
               </div>
 
             </form>
+
+            {/* Antler Print for Trophy Detections */}
+            {detection?.sizeClass === 'trophy' && (
+              <div className="pt-4 border-t border-cream/10">
+                <AntlerPrintCard fingerprint={detection.antlerFingerprint} />
+              </div>
+            )}
           </div>
         )}
         </div>

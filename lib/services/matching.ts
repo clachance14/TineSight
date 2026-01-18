@@ -450,3 +450,117 @@ export async function createNewFromMatch(
     error: null,
   }
 }
+
+/**
+ * Batch confirm multiple match candidates
+ */
+export async function batchConfirmMatches(
+  matchIds: string[],
+  userId: string
+): Promise<{ data: { confirmed_count: number } | null; error: Error | null }> {
+  const supabase = await createClient()
+
+  if (matchIds.length === 0) {
+    return { data: { confirmed_count: 0 }, error: null }
+  }
+
+  // Get all match candidates
+  const { data: matches, error: fetchError } = await supabase
+    .from('match_candidates')
+    .select('id, detection_id, candidate_deer_id, detection:detections!detection_id(images!inner(user_id))')
+    .in('id', matchIds)
+    .eq('status', 'pending')
+
+  if (fetchError || !matches) {
+    return { data: null, error: new Error('Failed to fetch matches') }
+  }
+
+  // Verify all matches belong to the user
+  const matchesData = matches as Array<{
+    id: string
+    detection_id: string
+    candidate_deer_id: string
+    detection: { images: { user_id: string } }
+  }>
+
+  const unauthorized = matchesData.some(m => m.detection.images.user_id !== userId)
+  if (unauthorized) {
+    return { data: null, error: new Error('Unauthorized') }
+  }
+
+  let confirmedCount = 0
+
+  // Process each match
+  for (const match of matchesData) {
+    // Update detection to link to deer
+    await supabase
+      .from('detections')
+      .update({ deer_id: match.candidate_deer_id } as never)
+      .eq('id', match.detection_id)
+
+    // Update match status
+    await supabase
+      .from('match_candidates')
+      .update({ status: 'confirmed', reviewed_at: new Date().toISOString() } as never)
+      .eq('id', match.id)
+
+    // Reject other candidates for this detection
+    await supabase
+      .from('match_candidates')
+      .update({ status: 'rejected', reviewed_at: new Date().toISOString() } as never)
+      .eq('detection_id', match.detection_id)
+      .neq('id', match.id)
+
+    confirmedCount++
+  }
+
+  return { data: { confirmed_count: confirmedCount }, error: null }
+}
+
+/**
+ * Batch reject multiple match candidates
+ */
+export async function batchRejectMatches(
+  matchIds: string[],
+  userId: string
+): Promise<{ data: { rejected_count: number } | null; error: Error | null }> {
+  const supabase = await createClient()
+
+  if (matchIds.length === 0) {
+    return { data: { rejected_count: 0 }, error: null }
+  }
+
+  // Get all match candidates to verify ownership
+  const { data: matches, error: fetchError } = await supabase
+    .from('match_candidates')
+    .select('id, detection:detections!detection_id(images!inner(user_id))')
+    .in('id', matchIds)
+    .eq('status', 'pending')
+
+  if (fetchError || !matches) {
+    return { data: null, error: new Error('Failed to fetch matches') }
+  }
+
+  // Verify all matches belong to the user
+  const matchesData = matches as Array<{
+    id: string
+    detection: { images: { user_id: string } }
+  }>
+
+  const unauthorized = matchesData.some(m => m.detection.images.user_id !== userId)
+  if (unauthorized) {
+    return { data: null, error: new Error('Unauthorized') }
+  }
+
+  // Update all matches to rejected
+  const { error: updateError } = await supabase
+    .from('match_candidates')
+    .update({ status: 'rejected', reviewed_at: new Date().toISOString() } as never)
+    .in('id', matchIds)
+
+  if (updateError) {
+    return { data: null, error: updateError }
+  }
+
+  return { data: { rejected_count: matchesData.length }, error: null }
+}
