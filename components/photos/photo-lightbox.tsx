@@ -112,6 +112,31 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
     setIsDragging(false)
   }, [])
 
+  // Touch event handlers for mobile panning
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (scale > 1 && e.touches.length === 1) {
+      e.preventDefault()
+      const touch = e.touches[0]
+      setIsDragging(true)
+      setDragStart({ x: touch.clientX - position.x, y: touch.clientY - position.y })
+    }
+  }, [scale, position])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (isDragging && e.touches.length === 1) {
+      e.preventDefault()
+      const touch = e.touches[0]
+      setPosition({
+        x: touch.clientX - dragStart.x,
+        y: touch.clientY - dragStart.y,
+      })
+    }
+  }, [isDragging, dragStart])
+
+  const handleTouchEnd = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
   if (!isOpen) return null
 
   return (
@@ -157,19 +182,22 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
       {/* Zoom hint */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-cream/60 text-xs md:text-sm text-center px-4">
         <span className="hidden sm:inline">Scroll to zoom • Drag to pan • Click outside or press Esc to close</span>
-        <span className="sm:hidden">Pinch to zoom • Tap outside to close</span>
+        <span className="sm:hidden">Use +/- to zoom • Drag to pan • Tap outside to close</span>
       </div>
 
       {/* Image container */}
       <div
         ref={containerRef}
-        className="relative w-full h-full flex items-center justify-center overflow-hidden"
+        className="relative w-full h-full flex items-center justify-center overflow-hidden touch-none"
         onClick={(e) => e.stopPropagation()}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         style={{ cursor: scale > 1 ? (isDragging ? "grabbing" : "grab") : "default" }}
       >
         <div
