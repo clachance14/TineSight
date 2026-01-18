@@ -179,3 +179,171 @@ TASK:
    - "trophy": Exceptional mass, very wide spread, or tall tines. Dominant buck
 
 OUTPUT: Return valid JSON. Use the 'reasoning_trace' field to explain your classification.`.trim();
+
+/**
+ * Stage 3: Trophy Fingerprint Extraction (B&C-style measurements)
+ * Used for extracting detailed antler measurements from trophy buck images
+ */
+export const ANTLER_FINGERPRINT_PROMPT = `Extract comprehensive Boone & Crockett (B&C) style antler measurements from this trophy buck image.
+
+### 1. CALIBRATION INSTRUCTIONS
+
+Use anatomical reference points to calibrate measurements:
+- **Ear length**: 6.75 inches (standard range: 6.5-7")
+- **Ear tip-to-tip spread**: 15 inches (standard range: 14-16")
+- **Eye circumference**: 4 inches
+- **Eye-to-nose distance**: 8 inches
+
+**Calibration Steps**:
+1. Identify which reference point(s) are visible and measurable in this image
+2. Select the BEST reference based on viewing angle and clarity
+3. Report which reference you used in your response
+4. Assess viewing angle impact on measurement reliability
+
+**Viewing Angles**:
+- "left_profile": Left side view (G2/G3 visible on left side)
+- "right_profile": Right side view (G2/G3 visible on right side)
+- "frontal": Head-on view (spread visible, tines foreshortened)
+- "quartering": Angled view (partial spread, some tines foreshortened)
+- "rear": Back view (rarely useful for measurements)
+
+### 2. RAW MEASUREMENTS (in inches)
+
+Extract these measurements using your selected calibration reference:
+
+**Spread & Beams**:
+- inside_spread: Width between main beams at widest inside point
+- main_beam_left: Length from burr (base) to tip, following the curve
+- main_beam_right: Length from burr to tip, following the curve
+
+**Tine Lengths** (measured from top of main beam):
+For LEFT antler:
+- g1_left: Brow tine (first point above burr)
+- g2_left: Second point (typically longest)
+- g3_left: Third point
+- g4_left: Fourth point
+- g5_left: Fifth point (if present)
+- g6_left: Sixth point (if present)
+- g7_left: Seventh point (if present)
+
+For RIGHT antler (same pattern):
+- g1_right through g7_right
+
+**Mass Measurements** (circumference around main beam):
+For each side, measure at these points:
+- h1_left/h1_right: Between burr and G1
+- h2_left/h2_right: Between G1 and G2
+- h3_left/h3_right: Between G2 and G3
+- h4_left/h4_right: Between G3 and G4
+
+**Point Counts**:
+- total_points: Total countable points (1 inch or longer)
+- points_left: Points on left antler
+- points_right: Points on right antler
+
+### 3. CALCULATED SCORES
+
+Compute standard B&C scoring:
+
+**Gross Score**:
+Sum of: inside_spread + both main beams + all tines + all mass measurements
+
+**Deductions**:
+For typical scoring, calculate asymmetry deductions:
+- Spread difference (if any)
+- Beam length difference (|left - right|)
+- G1 difference (|g1_left - g1_right|)
+- G2 difference, G3 difference, etc. for all matching tines
+- Mass differences (H1 through H4)
+Sum all differences for total deductions
+
+**Net Score**:
+gross_score - deductions
+
+**Score Class**:
+Categorize the gross score:
+- "120s": 120-139 (young/developing buck)
+- "140s": 140-159 (quality mature buck)
+- "160s": 160-179 (trophy class, B&C Awards minimum)
+- "180s": 180-199 (exceptional trophy)
+- "200s": 200-219 (world class)
+- "world_class": 220+ (legendary)
+
+**Typical Status**:
+- "typical": Symmetric rack, no major abnormal points
+- "non_typical": Drop tines, kickers, stickers, or major asymmetry
+
+### 4. DERIVED RATIOS (angle-invariant)
+
+Calculate these ratios for re-identification (more stable across viewing angles):
+
+- **g2_to_g3_ratio**: G2 length / G3 length (typical ~1.2-1.5)
+- **beam_symmetry**: min(beam_left, beam_right) / max(beam_left, beam_right)
+- **spread_to_beam_ratio**: inside_spread / average_beam_length
+- **brow_to_ear_ratio**: average G1 length / ear_length (6.75")
+- **tallest_tine_to_ear_ratio**: tallest tine / ear_length
+
+### 5. DISTINCTIVE FEATURES
+
+Identify unique characteristics for re-identification:
+
+**Drop Tines**:
+- has_drop_tine: true/false
+- drop_tine_location: "G2_left", "G3_right", etc.
+- drop_tine_length: Length in inches
+
+**Split G2** (forked second tine):
+- has_split_g2: true/false
+- split_g2_side: "left", "right", "both", or null
+
+**Kickers** (small abnormal points):
+- has_kickers: true/false
+- kicker_count: Number of kickers
+- kicker_locations: Array like ["G3_left", "beam_right"]
+
+**Beam Characteristics**:
+- beam_curve: "tight", "wide_sweep", "straight", "normal"
+- beam_angle: "upright", "sweeping", "palmated", "normal"
+
+**Other Notable Features**:
+- notable_asymmetry: Description of major left/right differences
+- broken_tines: Array of broken tine locations like ["G3_left"]
+- other_features: Any other distinctive traits
+
+### 6. CONFIDENCE SCORES (0-100)
+
+Rate your confidence for each measurement category:
+
+- **overall_confidence**: Overall confidence in the entire fingerprint
+- **spread_confidence**: Confidence in spread measurement
+- **beam_confidence**: Confidence in main beam measurements
+- **tine_confidence**: Confidence in tine length measurements
+- **mass_confidence**: Confidence in mass measurements
+- **point_count_confidence**: Confidence in point count
+- **features_confidence**: Confidence in distinctive features
+- **photo_quality**: Image quality score (blur, lighting, resolution)
+- **visibility_score**: How much of the rack is visible/unobstructed
+
+**Confidence Guidelines**:
+- 90-100: Excellent visibility, clear measurements possible
+- 70-89: Good visibility, minor occlusion or angle issues
+- 50-69: Partial visibility, significant angle impact
+- 30-49: Poor visibility, rough estimates only
+- 0-29: Very limited visibility, unreliable measurements
+
+### 7. REASONING TRACE
+
+Provide a detailed explanation of your measurement methodology:
+
+1. **Calibration Choice**: Which anatomical reference did you use and why?
+2. **Viewing Angle Assessment**: How does the angle affect measurement reliability?
+3. **Measurement Methodology**: How did you measure the most challenging dimensions?
+4. **Distinctive Features**: What makes this buck's rack unique?
+5. **Confidence Rationale**: Why did you assign the confidence scores you did?
+6. **Limitations**: What measurements are unreliable due to photo constraints?
+
+### OUTPUT FORMAT
+
+Return structured JSON matching this fingerprint schema. Use null for measurements that cannot be reliably determined.
+
+**Example reasoning trace**: "Used ear length (6.75") as primary calibration reference because both ears are clearly visible in this left profile view. The viewing angle allows reliable measurement of left-side tines (G2/G3 visible) but right-side tines are partially foreshortened, reducing confidence. This buck shows a distinctive drop tine off the left G2, approximately 4 inches long, which is a strong re-identification marker. Spread measurement is moderately confident (75%) due to slight quartering angle. Mass measurements are estimates only (50% confidence) as beam circumference is difficult to assess from this angle."`.trim();
