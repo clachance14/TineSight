@@ -1,4 +1,7 @@
+import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
+import { generateFingerprint } from '@/trigger/jobs/generate-fingerprint'
+import { postCreationScan } from '@/trigger/jobs/post-creation-scan'
 
 export interface Deer {
   id: string
@@ -19,6 +22,7 @@ export interface CreateDeerData {
 export interface UpdateDeerData {
   name?: string
   notes?: string | null
+  reference_detection_id?: string
 }
 
 export interface DeerWithSightings extends Deer {
@@ -110,6 +114,40 @@ export async function createDeer(
     .from('detections')
     .update({ is_reference: true, deer_id: deer.id } as never)
     .eq('id', data.detection_id)
+
+  // Queue fingerprint generation if the reference detection doesn't have one yet
+  // This ensures all named bucks get fingerprints, not just trophy-tier
+  const { data: refDetection } = await supabase
+    .from('detections')
+    .select('id, antler_fingerprint')
+    .eq('id', data.detection_id)
+    .single()
+
+  if (refDetection && !refDetection.antler_fingerprint) {
+    try {
+      await generateFingerprint.trigger({
+        detectionId: refDetection.id,
+        userId,
+      })
+    } catch (fpError) {
+      // Don't fail deer creation if fingerprint queuing fails
+      // The fingerprint can be generated later
+      console.error('Failed to queue fingerprint generation:', fpError)
+    }
+  }
+
+  // Trigger post-creation scan to find matching unassigned detections
+  // This happens asynchronously and doesn't block deer creation
+  try {
+    await postCreationScan.trigger({
+      deerId: deer.id,
+      userId,
+    })
+  } catch (scanError) {
+    // Don't fail deer creation if scan queuing fails
+    // User can manually review matches later
+    console.error('Failed to queue post-creation scan:', scanError)
+  }
 
   return { data: deer as unknown as Deer, error: null }
 }
@@ -243,35 +281,37 @@ export async function getDeerCatalog(
 
 /**
  * Get a single deer profile by ID
+ * Wrapped with React.cache() for per-request deduplication
  */
-export async function getDeerById(
+export const getDeerById = cache(async (
   userId: string,
   deerId: string
-): Promise<{ data: DeerWithSightings | null; error: Error | null }> {
+): Promise<{ data: DeerWithSightings | null; error: Error | null }> => {
   const supabase = await createClient()
 
-  const { data: deer, error } = await supabase
-    .from('deer')
-    .select('*')
-    .eq('id', deerId)
-    .eq('user_id', userId)
-    .single()
+  // Parallelize the deer fetch and sighting count
+  const [deerResult, countResult] = await Promise.all([
+    supabase
+      .from('deer')
+      .select('*')
+      .eq('id', deerId)
+      .eq('user_id', userId)
+      .single(),
+    supabase
+      .from('detections')
+      .select('*', { count: 'exact', head: true })
+      .eq('deer_id', deerId),
+  ])
 
-  if (error) {
-    return { data: null, error }
+  if (deerResult.error) {
+    return { data: null, error: deerResult.error }
   }
-
-  // Get sighting count
-  const { count } = await supabase
-    .from('detections')
-    .select('*', { count: 'exact', head: true })
-    .eq('deer_id', deerId)
 
   return {
-    data: { ...(deer as unknown as Deer), sighting_count: count ?? 0 },
+    data: { ...(deerResult.data as unknown as Deer), sighting_count: countResult.count ?? 0 },
     error: null,
   }
-}
+})
 
 /**
  * Update a deer profile
@@ -301,9 +341,74 @@ export async function updateDeer(
     }
   }
 
+  // Handle reference photo change if provided
+  if (data.reference_detection_id !== undefined) {
+    // Get current deer record to check if reference is actually changing
+    const { data: currentDeer } = await supabase
+      .from('deer')
+      .select('reference_detection_id')
+      .eq('id', deerId)
+      .eq('user_id', userId)
+      .single()
+
+    if (currentDeer && currentDeer.reference_detection_id !== data.reference_detection_id) {
+      // Verify new detection exists and belongs to this deer
+      const { data: newDetection, error: detectionError } = await supabase
+        .from('detections')
+        .select('id, deer_id, antler_fingerprint')
+        .eq('id', data.reference_detection_id)
+        .single()
+
+      if (detectionError || !newDetection) {
+        return { data: null, error: new Error('New reference detection not found') }
+      }
+
+      if (newDetection.deer_id !== deerId) {
+        return {
+          data: null,
+          error: new Error('Reference detection must belong to this deer')
+        }
+      }
+
+      // Clear is_reference flag on old reference detection
+      if (currentDeer.reference_detection_id) {
+        await supabase
+          .from('detections')
+          .update({
+            is_reference: false,
+            antler_fingerprint: null // Clear old fingerprint
+          } as never)
+          .eq('id', currentDeer.reference_detection_id)
+      }
+
+      // Set is_reference flag on new reference detection
+      await supabase
+        .from('detections')
+        .update({
+          is_reference: true,
+          antler_fingerprint: null // Clear fingerprint to trigger regeneration
+        } as never)
+        .eq('id', data.reference_detection_id)
+
+      // Queue fingerprint generation for new reference detection
+      try {
+        await generateFingerprint.trigger({
+          detectionId: data.reference_detection_id,
+          userId,
+        })
+      } catch (fpError) {
+        // Don't fail the update if fingerprint queuing fails
+        console.error('Failed to queue fingerprint generation:', fpError)
+      }
+    }
+  }
+
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (data.name !== undefined) updateData['name'] = data.name
   if (data.notes !== undefined) updateData['notes'] = data.notes
+  if (data.reference_detection_id !== undefined) {
+    updateData['reference_detection_id'] = data.reference_detection_id
+  }
 
   const { data: deer, error } = await supabase
     .from('deer')

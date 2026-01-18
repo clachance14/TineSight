@@ -50,19 +50,16 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Get signed URL for the image
-    const { data: signedUrl } = await supabase.storage
-      .from('photos')
-      .createSignedUrl(image.file_path, 3600)
+    // Get signed URLs for image and crop in parallel
+    const [imageUrlResult, cropUrlResult] = await Promise.all([
+      supabase.storage.from('photos').createSignedUrl(image.file_path, 3600),
+      detection.crop_file_path
+        ? supabase.storage.from('photos').createSignedUrl(detection.crop_file_path, 3600)
+        : Promise.resolve({ data: null }),
+    ])
 
-    // Get signed URL for the crop image (if exists)
-    let cropUrl: string | null = null
-    if (detection.crop_file_path) {
-      const { data: cropSignedUrl } = await supabase.storage
-        .from('photos')
-        .createSignedUrl(detection.crop_file_path, 3600)
-      cropUrl = cropSignedUrl?.signedUrl || null
-    }
+    const signedUrl = imageUrlResult.data
+    const cropUrl = cropUrlResult.data?.signedUrl || null
 
     return NextResponse.json({
       id: detection.id,
@@ -83,6 +80,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       geminiConfidence: detection.gemini_confidence,
       deerId: detection.deer_id,
       createdAt: detection.created_at,
+      antlerFingerprint: detection.antler_fingerprint,
     })
   } catch (error) {
     console.error('GET detection error:', error)
