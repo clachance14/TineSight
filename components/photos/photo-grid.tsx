@@ -41,9 +41,6 @@ interface PhotoGridProps {
   }
 }
 
-// Static fallback blur placeholder for images without per-image blur data
-const STATIC_BLUR_DATA_URL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAMH/8QAIhAAAQMDBQEBAAAAAAAAAAAAAQIDBAAFEQYHEiExQVH/xAAVAQEBAAAAAAAAAAAAAAAAAAAAA//EABkRAAIDAQAAAAAAAAAAAAAAAAEhAAIDEf/aAAwDAQACEQMRAD8AqNr9O2+1Wi4Pzo0cREfbeKnFAFKPLkrOc4/apFN7f6JaSBpdgAD8AY/qUphsKmMxg7JP/9k="
-
 interface Photo {
   id: string
   thumbnailUrl: string | null
@@ -59,13 +56,11 @@ const PhotoGridItem = memo(function PhotoGridItem({
   onClick,
   priority = false,
   columns,
-  isMobile = false,
 }: {
   photo: Photo
   onClick: (id: string) => void
   priority?: boolean // Load above-fold images with higher priority
   columns: number
-  isMobile?: boolean // Skip blur placeholder on mobile to prevent iOS Safari crash
 }) {
   // Use separate selectors for better memoization
   const isSelectMode = usePhotoSelectionStore((state) => state.isSelectMode)
@@ -107,11 +102,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
             priority={priority}
             className="object-cover"
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-            {...(!priority && !isMobile && {
-              // Skip blur placeholder on mobile - causes iOS Safari crash (next.js #34455)
-              placeholder: "blur" as const,
-              blurDataURL: photo.blurDataUrl ?? STATIC_BLUR_DATA_URL,
-            })}
+            // Blur placeholders disabled - causes iOS Safari crash (next.js #34455)
           />
         ) : photo.imageUrl ? (
           <Image
@@ -121,11 +112,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
             priority={priority}
             className="object-cover"
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-            {...(!priority && !isMobile && {
-              // Skip blur placeholder on mobile - causes iOS Safari crash (next.js #34455)
-              placeholder: "blur" as const,
-              blurDataURL: photo.blurDataUrl ?? STATIC_BLUR_DATA_URL,
-            })}
+            // Blur placeholders disabled - causes iOS Safari crash (next.js #34455)
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-slate-700">
@@ -502,7 +489,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                       onClick={handlePhotoClick}
                       priority={isAboveFold}
                       columns={columns}
-                      isMobile={isMobile}
                     />
                   ))}
                 </div>
