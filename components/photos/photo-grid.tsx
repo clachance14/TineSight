@@ -59,11 +59,13 @@ const PhotoGridItem = memo(function PhotoGridItem({
   onClick,
   priority = false,
   columns,
+  isMobile = false,
 }: {
   photo: Photo
   onClick: (id: string) => void
   priority?: boolean // Load above-fold images with higher priority
   columns: number
+  isMobile?: boolean // Skip blur placeholder on mobile to prevent iOS Safari crash
 }) {
   // Use separate selectors for better memoization
   const isSelectMode = usePhotoSelectionStore((state) => state.isSelectMode)
@@ -105,7 +107,8 @@ const PhotoGridItem = memo(function PhotoGridItem({
             priority={priority}
             className="object-cover"
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-            {...(!priority && {
+            {...(!priority && !isMobile && {
+              // Skip blur placeholder on mobile - causes iOS Safari crash (next.js #34455)
               placeholder: "blur" as const,
               blurDataURL: photo.blurDataUrl ?? STATIC_BLUR_DATA_URL,
             })}
@@ -118,7 +121,8 @@ const PhotoGridItem = memo(function PhotoGridItem({
             priority={priority}
             className="object-cover"
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-            {...(!priority && {
+            {...(!priority && !isMobile && {
+              // Skip blur placeholder on mobile - causes iOS Safari crash (next.js #34455)
               placeholder: "blur" as const,
               blurDataURL: photo.blurDataUrl ?? STATIC_BLUR_DATA_URL,
             })}
@@ -498,6 +502,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                       onClick={handlePhotoClick}
                       priority={isAboveFold}
                       columns={columns}
+                      isMobile={isMobile}
                     />
                   ))}
                 </div>
