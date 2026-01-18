@@ -114,18 +114,18 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
 
   // Touch event handlers for mobile panning
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (scale > 1 && e.touches.length === 1) {
+    const touch = e.touches[0]
+    if (scale > 1 && e.touches.length === 1 && touch) {
       e.preventDefault()
-      const touch = e.touches[0]
       setIsDragging(true)
       setDragStart({ x: touch.clientX - position.x, y: touch.clientY - position.y })
     }
   }, [scale, position])
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (isDragging && e.touches.length === 1) {
+    const touch = e.touches[0]
+    if (isDragging && e.touches.length === 1 && touch) {
       e.preventDefault()
-      const touch = e.touches[0]
       setPosition({
         x: touch.clientX - dragStart.x,
         y: touch.clientY - dragStart.y,
