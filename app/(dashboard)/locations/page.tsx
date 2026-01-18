@@ -1,4 +1,17 @@
-import { LocationsMap } from '@/components/locations/locations-map'
+import { Suspense } from 'react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { LocationsMapWrapper } from './locations-map-wrapper'
+
+function MapSkeleton() {
+  return (
+    <div className="h-full w-full flex items-center justify-center bg-slate-deep">
+      <div className="flex flex-col items-center gap-4">
+        <Skeleton className="h-8 w-8 rounded-full" />
+        <Skeleton className="h-4 w-32" />
+      </div>
+    </div>
+  )
+}
 
 export const metadata = {
   title: 'Locations | TineSight',
@@ -15,7 +28,9 @@ export default function LocationsPage() {
         </p>
       </div>
       <div className="flex-1 min-h-0">
-        <LocationsMap />
+        <Suspense fallback={<MapSkeleton />}>
+          <LocationsMapWrapper />
+        </Suspense>
       </div>
     </div>
   )

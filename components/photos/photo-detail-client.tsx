@@ -2,17 +2,15 @@
 
 import { useState, useCallback, useRef } from "react"
 import Image from "next/image"
-import { ImageOff } from "lucide-react"
+import { ImageOff, Eye, EyeOff, ZoomIn } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { DetectionOverlay } from "./detection-overlay"
 import { PhotoLightbox } from "./photo-lightbox"
 import { DetectionEditPanel } from "./detection-edit-panel"
-import { CropLightbox } from "./crop-lightbox"
 import { useObjectContainBounds } from "@/lib/hooks/use-object-contain-bounds"
 import { useDetectionHover } from "@/lib/stores/detection-hover"
 import { useDetectionEdit } from "@/lib/stores/detection-edit"
 import { useUIStore } from "@/lib/stores/ui"
-import { useDetection } from "@/lib/hooks/use-detection"
 import { BLUR_DATA_URL } from "@/lib/constants/image"
 
 interface Detection {
@@ -70,15 +68,7 @@ export function PhotoDetailClient({
   const { hoveredDetectionId, setHoveredDetectionId } = useDetectionHover()
 
   // Detection edit panel state
-  const { openPanel, isOpen, selectedDetectionId } = useDetectionEdit()
-
-  // Fetch full detection data (includes cropUrl) when a detection is selected
-  const { data: fullDetection } = useDetection(selectedDetectionId || '')
-
-  // Find selected detection from props for bbox data
-  const selectedDetection = selectedDetectionId
-    ? detections.find(d => d.id === selectedDetectionId)
-    : null
+  const { openPanel } = useDetectionEdit()
 
   // Ref for container to calculate object-contain bounds
   const containerRef = useRef<HTMLDivElement>(null)
@@ -131,6 +121,14 @@ export function PhotoDetailClient({
                   }}
                 />
 
+                {/* Mobile tap-to-zoom overlay */}
+                <div
+                  className="absolute inset-0 z-10 md:hidden cursor-pointer"
+                  onClick={() => setIsLightboxOpen(true)}
+                  role="button"
+                  aria-label="Tap to zoom"
+                />
+
                 {/* Detection overlay */}
                 <DetectionOverlay
                   detections={detections}
@@ -145,20 +143,33 @@ export function PhotoDetailClient({
                 />
 
                 {/* Controls */}
-                <div className="absolute top-3 right-3 z-50 flex gap-2">
+                <div className="absolute top-2 right-2 md:top-3 md:right-3 z-50 flex gap-1.5 md:gap-2">
                   {detections.length > 0 && (
                     <button
                       onClick={toggleBoundingBoxes}
-                      className="px-3 py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
+                      className="p-2 md:px-3 md:py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
+                      aria-label={showBoundingBoxes ? "Hide detection boxes" : "Show detection boxes"}
                     >
-                      {showBoundingBoxes ? "Hide Boxes" : "Show Boxes"}
+                      {showBoundingBoxes ? (
+                        <>
+                          <EyeOff className="h-4 w-4 md:hidden" />
+                          <span className="hidden md:inline">Hide Boxes</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="h-4 w-4 md:hidden" />
+                          <span className="hidden md:inline">Show Boxes</span>
+                        </>
+                      )}
                     </button>
                   )}
                   <button
                     onClick={() => setIsLightboxOpen(true)}
-                    className="px-3 py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
+                    className="p-2 md:px-3 md:py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
+                    aria-label="Zoom in on photo"
                   >
-                    🔍 Zoom
+                    <ZoomIn className="h-4 w-4 md:hidden" />
+                    <span className="hidden md:inline">Zoom</span>
                   </button>
                 </div>
               </>
@@ -185,22 +196,7 @@ export function PhotoDetailClient({
       {/* Detection Edit Panel */}
       <DetectionEditPanel />
 
-      {/* Crop Lightbox for zoomed detection view (only render when image exists) */}
-      {imageUrl && (
-        <CropLightbox
-          isOpen={isOpen}
-          cropUrl={fullDetection?.cropUrl}
-          imageUrl={imageUrl}
-          detection={selectedDetection ? {
-            bboxX: selectedDetection.bboxX,
-            bboxY: selectedDetection.bboxY,
-            bboxWidth: selectedDetection.bboxWidth,
-            bboxHeight: selectedDetection.bboxHeight,
-          } : null}
-          imageWidth={imageWidth}
-          imageHeight={imageHeight}
-        />
-      )}
+      {/* Crop Lightbox removed - was covering main photo when edit panel opened */}
     </div>
   )
 }

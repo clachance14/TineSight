@@ -1,9 +1,11 @@
 'use client'
 
+import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Upload, Image, Crosshair, Camera, MapPin, Settings } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useUIStore } from '@/lib/stores/ui'
 import { cn } from '@/lib/utils'
 
@@ -41,16 +43,11 @@ const settingsItem = {
   icon: Settings,
 }
 
-export function Sidebar() {
+function SidebarContent() {
   const pathname = usePathname()
-  const sidebarOpen = useUIStore((state) => state.sidebarOpen)
-
-  if (!sidebarOpen) {
-    return null
-  }
 
   return (
-    <div className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
+    <div className="flex flex-col h-full">
       {/* Logo/Branding */}
       <div className="p-6">
         <Link href="/dashboard" className="flex items-center gap-2">
@@ -105,5 +102,36 @@ export function Sidebar() {
         </Link>
       </div>
     </div>
+  )
+}
+
+export function Sidebar() {
+  const pathname = usePathname()
+  const sidebarOpen = useUIStore((state) => state.sidebarOpen)
+  const setSidebarOpen = useUIStore((state) => state.setSidebarOpen)
+  const closeSidebar = useUIStore((state) => state.closeSidebar)
+
+  // Close sidebar on navigation (mobile only)
+  useEffect(() => {
+    closeSidebar()
+  }, [pathname, closeSidebar])
+
+  return (
+    <>
+      {/* Desktop sidebar - always visible */}
+      <div className="hidden md:flex w-64 bg-sidebar border-r border-sidebar-border flex-col">
+        <SidebarContent />
+      </div>
+
+      {/* Mobile sidebar - Sheet drawer */}
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent
+          side="left"
+          className="w-64 p-0 bg-sidebar border-sidebar-border md:hidden"
+        >
+          <SidebarContent />
+        </SheetContent>
+      </Sheet>
+    </>
   )
 }

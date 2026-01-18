@@ -321,6 +321,7 @@ export type Database = {
           analysis_source: string | null
           antler_bbox: Json | null
           antler_description: string | null
+          antler_fingerprint: Json | null
           bbox_height: number | null
           bbox_width: number | null
           bbox_x: number | null
@@ -352,6 +353,7 @@ export type Database = {
           analysis_source?: string | null
           antler_bbox?: Json | null
           antler_description?: string | null
+          antler_fingerprint?: Json | null
           bbox_height?: number | null
           bbox_width?: number | null
           bbox_x?: number | null
@@ -383,6 +385,7 @@ export type Database = {
           analysis_source?: string | null
           antler_bbox?: Json | null
           antler_description?: string | null
+          antler_fingerprint?: Json | null
           bbox_height?: number | null
           bbox_width?: number | null
           bbox_x?: number | null
@@ -494,6 +497,7 @@ export type Database = {
           is_archived: boolean
           is_cancelled: boolean
           location_id: string | null
+          original_filename: string | null
           people_count: number | null
           retry_count: number
           thumbnail_path: string | null
@@ -529,6 +533,7 @@ export type Database = {
           is_archived?: boolean
           is_cancelled?: boolean
           location_id?: string | null
+          original_filename?: string | null
           people_count?: number | null
           retry_count?: number
           thumbnail_path?: string | null
@@ -564,6 +569,7 @@ export type Database = {
           is_archived?: boolean
           is_cancelled?: boolean
           location_id?: string | null
+          original_filename?: string | null
           people_count?: number | null
           retry_count?: number
           thumbnail_path?: string | null
@@ -653,6 +659,7 @@ export type Database = {
       }
       match_candidates: {
         Row: {
+          antler_print_similarity: number | null
           candidate_deer_id: string
           created_at: string
           detection_id: string
@@ -664,6 +671,7 @@ export type Database = {
           status: string
         }
         Insert: {
+          antler_print_similarity?: number | null
           candidate_deer_id: string
           created_at?: string
           detection_id: string
@@ -675,6 +683,7 @@ export type Database = {
           status?: string
         }
         Update: {
+          antler_print_similarity?: number | null
           candidate_deer_id?: string
           created_at?: string
           detection_id?: string
@@ -907,35 +916,147 @@ export type Database = {
           },
         ]
       }
+      trophy_cluster_members: {
+        Row: {
+          added_at: string
+          cluster_id: string
+          detection_id: string
+          id: string
+          similarity_to_representative: number | null
+        }
+        Insert: {
+          added_at?: string
+          cluster_id: string
+          detection_id: string
+          id?: string
+          similarity_to_representative?: number | null
+        }
+        Update: {
+          added_at?: string
+          cluster_id?: string
+          detection_id?: string
+          id?: string
+          similarity_to_representative?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trophy_cluster_members_cluster_id_fkey"
+            columns: ["cluster_id"]
+            isOneToOne: false
+            referencedRelation: "trophy_clusters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trophy_cluster_members_detection_id_fkey"
+            columns: ["detection_id"]
+            isOneToOne: true
+            referencedRelation: "detections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trophy_clusters: {
+        Row: {
+          avg_similarity: number | null
+          created_at: string
+          created_deer_id: string | null
+          id: string
+          member_count: number
+          min_similarity: number | null
+          representative_detection_id: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avg_similarity?: number | null
+          created_at?: string
+          created_deer_id?: string | null
+          id?: string
+          member_count?: number
+          min_similarity?: number | null
+          representative_detection_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avg_similarity?: number | null
+          created_at?: string
+          created_deer_id?: string | null
+          id?: string
+          member_count?: number
+          min_similarity?: number | null
+          representative_detection_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trophy_clusters_created_deer_id_fkey"
+            columns: ["created_deer_id"]
+            isOneToOne: false
+            referencedRelation: "deer"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trophy_clusters_representative_detection_id_fkey"
+            columns: ["representative_detection_id"]
+            isOneToOne: false
+            referencedRelation: "detections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trophy_clusters_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       upload_sessions: {
         Row: {
           cancelled_at: string | null
           completed_at: string | null
           created_at: string
+          failed_count: number
           id: string
+          processed_count: number
+          skipped_count: number
           status: string
           total_batches: number
           total_images: number
+          uploaded_count: number
           user_id: string
         }
         Insert: {
           cancelled_at?: string | null
           completed_at?: string | null
           created_at?: string
+          failed_count?: number
           id?: string
+          processed_count?: number
+          skipped_count?: number
           status?: string
           total_batches?: number
           total_images?: number
+          uploaded_count?: number
           user_id: string
         }
         Update: {
           cancelled_at?: string | null
           completed_at?: string | null
           created_at?: string
+          failed_count?: number
           id?: string
+          processed_count?: number
+          skipped_count?: number
           status?: string
           total_batches?: number
           total_images?: number
+          uploaded_count?: number
           user_id?: string
         }
         Relationships: [
@@ -1100,6 +1221,15 @@ export type Database = {
               unknown_size_count: number
             }[]
           }
+      get_unassigned_trophy_detections: {
+        Args: { p_user_id: string }
+        Returns: {
+          captured_at: string
+          crop_file_path: string
+          detection_id: string
+          fingerprint: Json
+        }[]
+      }
       has_account_access: {
         Args: { account_owner_id: string }
         Returns: boolean
@@ -1110,6 +1240,14 @@ export type Database = {
           increment_failed?: number
           increment_processed?: number
           increment_successful?: number
+        }
+        Returns: undefined
+      }
+      increment_session_counters: {
+        Args: {
+          increment_failed?: number
+          increment_processed?: number
+          session_id: string
         }
         Returns: undefined
       }
@@ -1249,55 +1387,18 @@ export const Constants = {
   },
 } as const
 
-// Convenience type aliases for common tables
-export type Camera = Tables<'cameras'>
-export type CameraInsert = TablesInsert<'cameras'>
-export type CameraUpdate = TablesUpdate<'cameras'>
-
-export type Deer = Tables<'deer'>
-export type DeerInsert = TablesInsert<'deer'>
-export type DeerUpdate = TablesUpdate<'deer'>
-
-export type DeerEmbedding = Tables<'deer_embeddings'>
-export type DeerEmbeddingInsert = TablesInsert<'deer_embeddings'>
-
-export type Detection = Tables<'detections'>
-export type DetectionInsert = TablesInsert<'detections'>
-export type DetectionUpdate = TablesUpdate<'detections'>
-
-export type DetectionRoi = Tables<'detection_rois'>
-export type DetectionRoiInsert = TablesInsert<'detection_rois'>
-
-export type Image = Tables<'images'>
-export type ImageInsert = TablesInsert<'images'>
-export type ImageUpdate = TablesUpdate<'images'>
-
-export type Location = Tables<'locations'>
-export type LocationInsert = TablesInsert<'locations'>
-export type LocationUpdate = TablesUpdate<'locations'>
-
-export type MatchCandidate = Tables<'match_candidates'>
-export type MatchCandidateInsert = TablesInsert<'match_candidates'>
-
-export type ProcessingBatch = Tables<'processing_batches'>
-export type ProcessingBatchInsert = TablesInsert<'processing_batches'>
-export type ProcessingBatchUpdate = TablesUpdate<'processing_batches'>
-
-export type Profile = Tables<'profiles'>
-export type ProfileInsert = TablesInsert<'profiles'>
-export type ProfileUpdate = TablesUpdate<'profiles'>
-
-export type RoiFeedback = Tables<'roi_feedback'>
-export type RoiFeedbackInsert = TablesInsert<'roi_feedback'>
-
-export type TeamMember = Tables<'team_members'>
-export type TeamMemberInsert = TablesInsert<'team_members'>
-
-export type UploadSession = Tables<'upload_sessions'>
-export type UploadSessionInsert = TablesInsert<'upload_sessions'>
-
-export type FilterPreset = Tables<'filter_presets'>
-export type FilterPresetInsert = TablesInsert<'filter_presets'>
-
-export type BatchMetrics = Tables<'batch_metrics'>
-export type BatchMetricsInsert = TablesInsert<'batch_metrics'>
+// Convenience type aliases for backward compatibility
+export type Detection = Database['public']['Tables']['detections']['Row']
+export type DetectionInsert = Database['public']['Tables']['detections']['Insert']
+export type Deer = Database['public']['Tables']['deer']['Row']
+export type DeerEmbedding = Database['public']['Tables']['deer_embeddings']['Row']
+export type Image = Database['public']['Tables']['images']['Row']
+export type ImageInsert = Database['public']['Tables']['images']['Insert']
+export type ImageUpdate = Database['public']['Tables']['images']['Update']
+export type Profile = Database['public']['Tables']['profiles']['Row']
+export type MatchCandidate = Database['public']['Tables']['match_candidates']['Row']
+export type TrophyCluster = Database['public']['Tables']['trophy_clusters']['Row']
+export type TrophyClusterMember = Database['public']['Tables']['trophy_cluster_members']['Row']
+export type ProcessingBatch = Database['public']['Tables']['processing_batches']['Row']
+export type ProcessingBatchInsert = Database['public']['Tables']['processing_batches']['Insert']
+export type ProcessingBatchUpdate = Database['public']['Tables']['processing_batches']['Update']

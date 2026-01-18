@@ -297,6 +297,9 @@ export function usePhotosInfinite(
       if (filters?.sortBy !== undefined) {
         params.append('sortBy', filters.sortBy)
       }
+      if (filters?.sortDirection !== undefined) {
+        params.append('sortDirection', filters.sortDirection)
+      }
       if (filters?.limit !== undefined) {
         params.append('limit', String(filters.limit))
       } else {

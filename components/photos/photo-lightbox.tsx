@@ -112,6 +112,31 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
     setIsDragging(false)
   }, [])
 
+  // Touch event handlers for mobile panning
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0]
+    if (scale > 1 && e.touches.length === 1 && touch) {
+      e.preventDefault()
+      setIsDragging(true)
+      setDragStart({ x: touch.clientX - position.x, y: touch.clientY - position.y })
+    }
+  }, [scale, position])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0]
+    if (isDragging && e.touches.length === 1 && touch) {
+      e.preventDefault()
+      setPosition({
+        x: touch.clientX - dragStart.x,
+        y: touch.clientY - dragStart.y,
+      })
+    }
+  }, [isDragging, dragStart])
+
+  const handleTouchEnd = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
   if (!isOpen) return null
 
   return (
@@ -120,34 +145,34 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
       onClick={handleClose}
     >
       {/* Controls */}
-      <div className="absolute top-4 right-4 z-10 flex gap-2">
+      <div className="absolute top-3 md:top-4 right-3 md:right-4 z-10 flex gap-1.5 md:gap-2">
         <button
           onClick={(e) => { e.stopPropagation(); handleZoomOut() }}
-          className="p-2 bg-slate-deep/90 hover:bg-slate-deep text-cream rounded-md border border-cream/20 transition-colors"
+          className="p-2.5 md:p-2 bg-slate-deep/90 hover:bg-slate-deep text-cream rounded-md border border-cream/20 transition-colors min-h-[40px] min-w-[40px] md:min-h-0 md:min-w-0 flex items-center justify-center"
           title="Zoom out"
         >
           <ZoomOut className="h-5 w-5" />
         </button>
-        <span className="px-3 py-2 bg-slate-deep/90 text-cream rounded-md border border-cream/20 text-sm font-medium min-w-[60px] text-center">
+        <span className="px-2 md:px-3 py-2 bg-slate-deep/90 text-cream rounded-md border border-cream/20 text-xs md:text-sm font-medium min-w-[50px] md:min-w-[60px] text-center flex items-center justify-center">
           {Math.round(scale * 100)}%
         </span>
         <button
           onClick={(e) => { e.stopPropagation(); handleZoomIn() }}
-          className="p-2 bg-slate-deep/90 hover:bg-slate-deep text-cream rounded-md border border-cream/20 transition-colors"
+          className="p-2.5 md:p-2 bg-slate-deep/90 hover:bg-slate-deep text-cream rounded-md border border-cream/20 transition-colors min-h-[40px] min-w-[40px] md:min-h-0 md:min-w-0 flex items-center justify-center"
           title="Zoom in"
         >
           <ZoomIn className="h-5 w-5" />
         </button>
         <button
           onClick={(e) => { e.stopPropagation(); handleReset() }}
-          className="p-2 bg-slate-deep/90 hover:bg-slate-deep text-cream rounded-md border border-cream/20 transition-colors"
+          className="p-2.5 md:p-2 bg-slate-deep/90 hover:bg-slate-deep text-cream rounded-md border border-cream/20 transition-colors min-h-[40px] min-w-[40px] md:min-h-0 md:min-w-0 flex items-center justify-center hidden sm:flex"
           title="Reset zoom"
         >
           <RotateCcw className="h-5 w-5" />
         </button>
         <button
           onClick={handleClose}
-          className="p-2 bg-copper hover:bg-copper-light text-white rounded-md transition-colors"
+          className="p-2.5 md:p-2 bg-copper hover:bg-copper-light text-white rounded-md transition-colors min-h-[40px] min-w-[40px] md:min-h-0 md:min-w-0 flex items-center justify-center"
           title="Close"
         >
           <X className="h-5 w-5" />
@@ -155,20 +180,24 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
       </div>
 
       {/* Zoom hint */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-cream/60 text-sm">
-        Scroll to zoom • Drag to pan • Click outside or press Esc to close
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-cream/60 text-xs md:text-sm text-center px-4">
+        <span className="hidden sm:inline">Scroll to zoom • Drag to pan • Click outside or press Esc to close</span>
+        <span className="sm:hidden">Use +/- to zoom • Drag to pan • Tap outside to close</span>
       </div>
 
       {/* Image container */}
       <div
         ref={containerRef}
-        className="relative w-full h-full flex items-center justify-center overflow-hidden"
+        className="relative w-full h-full flex items-center justify-center overflow-hidden touch-none"
         onClick={(e) => e.stopPropagation()}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         style={{ cursor: scale > 1 ? (isDragging ? "grabbing" : "grab") : "default" }}
       >
         <div

@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import type { Image, ImageInsert, ImageUpdate, Detection, Json } from '@/types/database'
 
@@ -314,17 +315,20 @@ export async function getPhotos(
       query = query.in('id', filteredImageIds)
     }
 
-    // Apply dynamic ordering based on sortBy (default: imported_at)
+    // Apply dynamic ordering based on sortBy (default: imported_at) and sortDirection (default: desc)
     const sortField = filters?.sortBy ?? 'imported_at'
+    // Supabase ascending: true = smallest values first (oldest dates)
+    // desc (newest) needs ascending: false, asc (oldest) needs ascending: true
+    const ascending = filters?.sortDirection === 'asc'
     if (sortField === 'captured_at') {
-      // Photos without captured_at (null) should appear last
+      // Photos without captured_at (null) should appear last regardless of direction
       query = query
-        .order('captured_at', { ascending: false, nullsFirst: false })
-        .order('id', { ascending: false })
+        .order('captured_at', { ascending, nullsFirst: false })
+        .order('id', { ascending })
     } else {
       query = query
-        .order('imported_at', { ascending: false })
-        .order('id', { ascending: false })
+        .order('imported_at', { ascending })
+        .order('id', { ascending })
     }
 
     // Apply other filters
@@ -398,13 +402,11 @@ export async function getPhotos(
       }
     }
 
-    // Filter by other animals (OR logic) - show photos with ANY selected animal, excluding deer
+    // Filter by other animals (OR logic) - show photos with ANY selected animal
     if (filters?.otherAnimals?.length) {
       const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
       if (orFilter) {
         query = query.or(orFilter)
-        // Exclude deer when filtering by other animals
-        query = query.eq('has_deer', false)
       }
     }
 
@@ -430,12 +432,23 @@ export async function getPhotos(
     if (filters?.cursor !== undefined) {
       const [cursorTimestamp, cursorId] = filters.cursor.split('::')
       if (cursorTimestamp && cursorId) {
-        // Use the same field we're sorting by
-        const cursorField = sortField
-        // Filter for photos that come after the cursor (descending order)
-        query = query.or(
-          `${cursorField}.lt.${cursorTimestamp},and(${cursorField}.eq.${cursorTimestamp},id.lt.${cursorId})`
-        )
+        // Filter for photos that come after the cursor
+        // Use .lt for descending (smaller values after), .gt for ascending (larger values after)
+        const cmp = ascending ? 'gt' : 'lt'
+        // Special handling for captured_at which can be NULL - cursor uses imported_at as fallback
+        if (sortField === 'captured_at') {
+          // Handle NULL captured_at: compare against both captured_at AND imported_at (for NULL cases)
+          query = query.or(
+            `captured_at.${cmp}.${cursorTimestamp},` +
+            `and(captured_at.eq.${cursorTimestamp},id.${cmp}.${cursorId}),` +
+            `and(captured_at.is.null,imported_at.${cmp}.${cursorTimestamp}),` +
+            `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
+          )
+        } else {
+          query = query.or(
+            `${sortField}.${cmp}.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
+          )
+        }
       }
     }
 
@@ -454,8 +467,9 @@ export async function getPhotos(
   }
 
   // Standard query without detection-based filters
-  // Apply dynamic ordering based on sortBy (default: imported_at)
+  // Apply dynamic ordering based on sortBy (default: imported_at) and sortDirection (default: desc)
   const sortField = filters?.sortBy ?? 'imported_at'
+  const ascending = filters?.sortDirection === 'asc'
 
   let query = supabase
     .from('images')
@@ -463,14 +477,14 @@ export async function getPhotos(
     .eq('user_id', userId)
 
   if (sortField === 'captured_at') {
-    // Photos without captured_at (null) should appear last
+    // Photos without captured_at (null) should appear last regardless of direction
     query = query
-      .order('captured_at', { ascending: false, nullsFirst: false })
-      .order('id', { ascending: false })
+      .order('captured_at', { ascending, nullsFirst: false })
+      .order('id', { ascending })
   } else {
     query = query
-      .order('imported_at', { ascending: false })
-      .order('id', { ascending: false })
+      .order('imported_at', { ascending })
+      .order('id', { ascending })
   }
 
   // Apply filters
@@ -544,13 +558,11 @@ export async function getPhotos(
     }
   }
 
-  // Filter by other animals (OR logic) - show photos with ANY selected animal, excluding deer
+  // Filter by other animals (OR logic) - show photos with ANY selected animal
   if (filters?.otherAnimals?.length) {
     const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
     if (orFilter) {
       query = query.or(orFilter)
-      // Exclude deer when filtering by other animals
-      query = query.eq('has_deer', false)
     }
   }
 
@@ -576,12 +588,23 @@ export async function getPhotos(
   if (filters?.cursor !== undefined) {
     const [cursorTimestamp, cursorId] = filters.cursor.split('::')
     if (cursorTimestamp && cursorId) {
-      // Use the same field we're sorting by
-      const cursorField = sortField
-      // Filter for photos that come after the cursor (descending order)
-      query = query.or(
-        `${cursorField}.lt.${cursorTimestamp},and(${cursorField}.eq.${cursorTimestamp},id.lt.${cursorId})`
-      )
+      // Filter for photos that come after the cursor
+      // Use .lt for descending (smaller values after), .gt for ascending (larger values after)
+      const cmp = ascending ? 'gt' : 'lt'
+      // Special handling for captured_at which can be NULL - cursor uses imported_at as fallback
+      if (sortField === 'captured_at') {
+        // Handle NULL captured_at: compare against both captured_at AND imported_at (for NULL cases)
+        query = query.or(
+          `captured_at.${cmp}.${cursorTimestamp},` +
+          `and(captured_at.eq.${cursorTimestamp},id.${cmp}.${cursorId}),` +
+          `and(captured_at.is.null,imported_at.${cmp}.${cursorTimestamp}),` +
+          `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
+        )
+      } else {
+        query = query.or(
+          `${sortField}.${cmp}.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
+        )
+      }
     }
   }
 
@@ -847,45 +870,46 @@ export async function getPhotoIds(
 
 /**
  * Get a single photo by ID with its detections
+ * Wrapped with React.cache() for per-request deduplication
  */
-export async function getPhoto(
+export const getPhoto = cache(async (
   userId: string,
   photoId: string
 ): Promise<{
   data: PhotoWithDetections | null
   error: Error | null
-}> {
+}> => {
   const supabase = await createClient()
 
-  // Get photo
-  const { data: photo, error: photoError } = await supabase
-    .from('images')
-    .select('*')
-    .eq('id', photoId)
-    .eq('user_id', userId)
-    .single()
+  // Parallelize photo and detections fetch
+  const [photoResult, detectionsResult] = await Promise.all([
+    supabase
+      .from('images')
+      .select('*')
+      .eq('id', photoId)
+      .eq('user_id', userId)
+      .single(),
+    supabase
+      .from('detections')
+      .select('*, deer:deer_id(id, name)')
+      .eq('image_id', photoId),
+  ])
 
-  if (photoError !== null) {
-    return { data: null, error: photoError }
+  if (photoResult.error !== null) {
+    return { data: null, error: photoResult.error }
   }
 
-  // Get detections for this photo (with deer name if linked)
-  const { data: detections, error: detectionsError } = await supabase
-    .from('detections')
-    .select('*, deer:deer_id(id, name)')
-    .eq('image_id', photoId)
-
-  if (detectionsError !== null) {
-    return { data: null, error: detectionsError }
+  if (detectionsResult.error !== null) {
+    return { data: null, error: detectionsResult.error }
   }
 
   const photoWithDetections: PhotoWithDetections = {
-    ...(photo as Image),
-    detections: detections ?? [],
+    ...(photoResult.data as Image),
+    detections: detectionsResult.data ?? [],
   }
 
   return { data: photoWithDetections, error: null }
-}
+})
 
 /**
  * Get adjacent photo IDs (prev/next) for navigation
@@ -1246,7 +1270,7 @@ export async function getSignedUploadUrl(
   // Construct storage path: user_id/batch_id/filename
   const path = `${userId}/${batchId}/${filename}`
 
-  // Get signed upload URL (valid for 1 hour)
+  // Get signed upload URL (valid for 60 seconds - Supabase default)
   const { data, error } = await supabase.storage
     .from('photos')
     .createSignedUploadUrl(path)
@@ -1560,6 +1584,280 @@ export async function deletePhotos(
     },
     error: null,
   }
+}
+
+// ============================================================================
+// BULK UPLOAD OPERATIONS
+// ============================================================================
+
+// Type for images with original_filename column (added via migration 036)
+// This column may not exist in database.types.ts yet, so we define it here
+interface ImageWithOriginalFilename {
+  original_filename: string | null
+  file_size_bytes: number | null
+}
+
+/**
+ * Check for duplicate files by filename + size
+ * Uses idx_images_dedup index for fast lookups
+ */
+export async function checkDuplicates(
+  userId: string,
+  files: Array<{ filename: string; size: number }>
+): Promise<{
+  existing: string[]
+  toUpload: string[]
+  duplicateCount: number
+}> {
+  if (files.length === 0) {
+    return { existing: [], toUpload: [], duplicateCount: 0 }
+  }
+
+  const supabase = await createClient()
+
+  // Extract unique filenames for lookup
+  const filenames = files.map(f => f.filename)
+
+  // Query for existing files with matching filename AND size
+  // The idx_images_dedup index makes this efficient
+  // Note: original_filename column is added via migration 036_bulk_upload_support.sql
+  const { data, error } = await supabase
+    .from('images')
+    .select('original_filename, file_size_bytes')
+    .eq('user_id', userId)
+    .in('original_filename' as never, filenames)
+
+  if (error !== null) {
+    console.error('Error checking duplicates:', error)
+    // On error, assume no duplicates to allow upload to proceed
+    return {
+      existing: [],
+      toUpload: filenames,
+      duplicateCount: 0
+    }
+  }
+
+  // Cast to the expected type (original_filename may not be in generated types yet)
+  const existingImages = data as unknown as ImageWithOriginalFilename[]
+
+  // Build a Set of existing filename+size combinations for O(1) lookups
+  const existingSet = new Set<string>()
+  for (const img of existingImages ?? []) {
+    if (img.original_filename && img.file_size_bytes !== null) {
+      existingSet.add(`${img.original_filename}::${img.file_size_bytes}`)
+    }
+  }
+
+  // Partition files into existing (duplicates) and toUpload (new)
+  const existing: string[] = []
+  const toUpload: string[] = []
+
+  for (const file of files) {
+    const key = `${file.filename}::${file.size}`
+    if (existingSet.has(key)) {
+      existing.push(file.filename)
+    } else {
+      toUpload.push(file.filename)
+    }
+  }
+
+  return {
+    existing,
+    toUpload,
+    duplicateCount: existing.length
+  }
+}
+
+// Type for bulk insert response (includes original_filename added via migration 036)
+interface BulkInsertResult {
+  id: string
+  file_path: string
+  original_filename: string | null
+}
+
+/**
+ * Create pending image records and generate signed upload URLs
+ * Called per chunk (25 files) during bulk upload
+ */
+export async function createBulkPhotoRecords(
+  userId: string,
+  sessionId: string,
+  files: Array<{
+    filename: string
+    size: number
+    mimeType: string
+    exifData?: { make?: string; model?: string; dateTime?: string }
+  }>
+): Promise<{
+  records: Array<{
+    imageId: string
+    filename: string
+    signedUrl: string
+    storagePath: string
+  }>
+  error: Error | null
+}> {
+  if (files.length === 0) {
+    return { records: [], error: null }
+  }
+
+  const supabase = await createClient()
+
+  // Prepare image records for bulk insert
+  // Note: original_filename column is added via migration 036_bulk_upload_support.sql
+  const imageRecords = files.map(file => {
+    // Parse captured_at from EXIF dateTime if available
+    let capturedAt: string | null = null
+    if (file.exifData?.dateTime) {
+      try {
+        // EXIF dateTime format: "YYYY:MM:DD HH:MM:SS"
+        const exifDate = file.exifData.dateTime.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')
+        capturedAt = new Date(exifDate).toISOString()
+      } catch {
+        // Ignore parse errors, leave capturedAt null
+      }
+    }
+
+    // Build EXIF data object if we have any metadata
+    const exifData: Json | null = file.exifData
+      ? {
+          make: file.exifData.make ?? null,
+          model: file.exifData.model ?? null,
+          dateTime: file.exifData.dateTime ?? null
+        }
+      : null
+
+    // Storage path format: {userId}/{sessionId}/{filename}
+    const storagePath = `${userId}/${sessionId}/${file.filename}`
+
+    return {
+      user_id: userId,
+      file_path: storagePath,
+      original_filename: file.filename,
+      file_size_bytes: file.size,
+      captured_at: capturedAt,
+      exif_data: exifData,
+      detection_status: 'pending',
+    }
+  })
+
+  // Bulk insert image records
+  const { data, error: insertError } = await supabase
+    .from('images')
+    .insert(imageRecords as never[])
+    .select('id, file_path, original_filename')
+
+  if (insertError !== null) {
+    return { records: [], error: insertError }
+  }
+
+  // Cast to expected type (original_filename may not be in generated types yet)
+  const insertedImages = data as unknown as BulkInsertResult[]
+
+  if (!insertedImages || insertedImages.length === 0) {
+    return { records: [], error: new Error('No images were inserted') }
+  }
+
+  // Generate signed upload URLs for each image
+  const records: Array<{
+    imageId: string
+    filename: string
+    signedUrl: string
+    storagePath: string
+  }> = []
+
+  for (const img of insertedImages) {
+    const { data: signedData, error: signedError } = await supabase.storage
+      .from('photos')
+      .createSignedUploadUrl(img.file_path)
+
+    if (signedError !== null) {
+      console.error(`Failed to create signed URL for ${img.file_path}:`, signedError)
+      // Continue with other files rather than failing the entire batch
+      continue
+    }
+
+    records.push({
+      imageId: img.id,
+      filename: img.original_filename ?? '',
+      signedUrl: signedData.signedUrl,
+      storagePath: img.file_path
+    })
+  }
+
+  return { records, error: null }
+}
+
+/**
+ * Generate fresh signed upload URL for a specific image
+ * Used when retrying failed uploads (original URL may have expired)
+ */
+export async function refreshUploadUrl(
+  userId: string,
+  imageId: string
+): Promise<{
+  signedUrl: string
+  expiresAt: string
+} | null> {
+  const supabase = await createClient()
+
+  // Get the image record to retrieve the file path
+  const { data: image, error: fetchError } = await supabase
+    .from('images')
+    .select('file_path')
+    .eq('id', imageId)
+    .eq('user_id', userId)
+    .single()
+
+  if (fetchError !== null || !image) {
+    console.error('Failed to fetch image for refresh:', fetchError)
+    return null
+  }
+
+  // Generate a new signed upload URL (60 seconds validity)
+  const { data: signedData, error: signedError } = await supabase.storage
+    .from('photos')
+    .createSignedUploadUrl(image.file_path)
+
+  if (signedError !== null) {
+    console.error('Failed to create signed URL:', signedError)
+    return null
+  }
+
+  // Calculate expiration (Supabase default is 60 seconds for upload URLs)
+  const expiresAt = new Date(Date.now() + 60 * 1000).toISOString()
+
+  return {
+    signedUrl: signedData.signedUrl,
+    expiresAt
+  }
+}
+
+/**
+ * Mark multiple photos as uploaded (status: pending -> processing)
+ * Called after each chunk completes uploading
+ */
+export async function markPhotosUploaded(
+  imageIds: string[]
+): Promise<{ count: number; error: Error | null }> {
+  if (imageIds.length === 0) {
+    return { count: 0, error: null }
+  }
+
+  const supabase = await createClient()
+
+  // Update detection_status from 'pending' to 'processing' for uploaded images
+  const { error, count } = await supabase
+    .from('images')
+    .update({ detection_status: 'processing' } as never)
+    .in('id', imageIds)
+    .eq('detection_status', 'pending')
+
+  if (error !== null) {
+    return { count: 0, error }
+  }
+
+  return { count: count ?? imageIds.length, error: null }
 }
 
 /**

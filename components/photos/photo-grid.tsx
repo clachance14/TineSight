@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useMemo, useState, memo } from 'react'
 import Image from 'next/image'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { usePinch } from '@use-gesture/react'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
 import { Badge } from '@/components/ui/badge'
@@ -10,10 +11,26 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { Loader2, Check } from 'lucide-react'
 import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
+import { useUIStore, type MobileGridColumns } from '@/lib/stores/ui'
+import { SmartBadge } from './smart-badge'
 
 // Constants for virtualization
 const GAP = 16 // gap-4 = 1rem = 16px
 const ESTIMATED_ROW_HEIGHT = 250 // Conservative estimate for initial render
+
+// Mobile breakpoint (matches Tailwind's md:)
+const MOBILE_BREAKPOINT = 768
+
+// Available mobile column options
+const MOBILE_COLUMN_OPTIONS: MobileGridColumns[] = [4, 5, 6, 7]
+
+// Helper function for responsive gap calculation
+const getGapClass = (columns: number, isMobile: boolean) => {
+  if (!isMobile) return 'gap-4'  // Desktop: 16px
+  if (columns >= 6) return 'gap-1'  // Mobile 6-7 cols: 4px
+  if (columns >= 5) return 'gap-1.5'  // Mobile 5 cols: 6px
+  return 'gap-2'  // Mobile 4 cols: 8px
+}
 
 interface PhotoGridProps {
   filters?: Omit<PhotoFilters, 'offset'>
@@ -42,35 +59,17 @@ const PhotoGridItem = memo(function PhotoGridItem({
   photo,
   onClick,
   priority = false,
+  columns,
 }: {
   photo: Photo
   onClick: (id: string) => void
   priority?: boolean // Load above-fold images with higher priority
+  columns: number
 }) {
   // Use separate selectors for better memoization
   const isSelectMode = usePhotoSelectionStore((state) => state.isSelectMode)
   const selected = usePhotoSelectionStore((state) => state.selectedPhotoIds.has(photo.id))
   const togglePhotoSelection = usePhotoSelectionStore((state) => state.togglePhotoSelection)
-
-  // Status badge variant mapping
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return 'secondary'
-      case 'processing':
-        return 'processing'
-      case 'completed':
-        return 'success'
-      case 'failed':
-        return 'destructive'
-      default:
-        return 'outline'
-    }
-  }
-
-  const formatStatus = (status: string) => {
-    return status.charAt(0).toUpperCase() + status.slice(1)
-  }
 
   const handleClick = useCallback(() => {
     // If in select mode, toggle selection instead of navigating
@@ -90,7 +89,9 @@ const PhotoGridItem = memo(function PhotoGridItem({
   return (
     <div
       className={cn(
-        'group relative aspect-square cursor-pointer overflow-hidden rounded-lg bg-slate',
+        'group relative aspect-square cursor-pointer overflow-hidden bg-slate',
+        columns >= 6 ? 'rounded-md' : 'rounded-lg',  // Adaptive border radius
+        'active:scale-[0.97] transition-transform duration-100',  // Touch feedback
         !isSelectMode && 'hover:ring-2 hover:ring-copper',
         selected && 'ring-2 ring-copper'
       )}
@@ -141,10 +142,11 @@ const PhotoGridItem = memo(function PhotoGridItem({
           </div>
         )}
 
-        {/* Checkbox overlay - visible on hover or in select mode */}
+        {/* Checkbox overlay - visible on hover or in select mode, hidden on mobile */}
         <div
           className={cn(
             'absolute top-2 left-2 z-10',
+            'hidden md:block',  // Hide on mobile
             'transition-opacity duration-150',
             isSelectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           )}
@@ -164,21 +166,28 @@ const PhotoGridItem = memo(function PhotoGridItem({
           </button>
         </div>
 
-        {/* Selection overlay */}
+        {/* Selection overlay - hidden on mobile */}
         {selected && (
-          <div className="absolute inset-0 bg-copper/10 pointer-events-none" />
+          <div className="absolute inset-0 bg-copper/10 pointer-events-none hidden md:block" />
         )}
 
-        {/* Status badge overlay */}
-        <div className="absolute right-2 top-2">
-          <Badge variant={getStatusBadgeVariant(photo.detection_status)}>
-            {formatStatus(photo.detection_status)}
-          </Badge>
-        </div>
+        {/* Status badge overlay - only show for non-completed status */}
+        {photo.detection_status !== 'completed' && (
+          <div className="absolute right-2 top-2">
+            <SmartBadge
+              status={photo.detection_status}
+              iconOnly={columns >= 5}
+            />
+          </div>
+        )}
 
-        {/* Quality status badge (if present) */}
+        {/* Quality status badge - hidden on mobile, tap to reveal */}
         {photo.bestQualityStatus && photo.bestQualityStatus !== 'pending' && (
-          <div className="absolute bottom-2 right-2">
+          <div className={cn(
+            "absolute bottom-2 right-2",
+            "md:opacity-100",
+            "opacity-0 group-hover:opacity-100 transition-opacity"
+          )}>
             <Badge
               variant={
                 photo.bestQualityStatus === 'high_quality'
@@ -233,20 +242,64 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   const parentRef = useRef<HTMLDivElement>(null)
   const [columns, setColumns] = useState(5)
+  const [isMobile, setIsMobile] = useState(false)
 
-  // Calculate columns based on viewport width (matching grid breakpoints)
+  // Get mobile grid columns preference from store
+  const mobileGridColumns = useUIStore((state) => state.mobileGridColumns)
+  const setMobileGridColumns = useUIStore((state) => state.setMobileGridColumns)
+
+  // Track if we're on mobile and calculate columns
   useEffect(() => {
     const updateColumns = () => {
       const width = window.innerWidth
-      if (width < 640) setColumns(2)       // grid-cols-2
-      else if (width < 1024) setColumns(3) // sm:grid-cols-3
-      else if (width < 1280) setColumns(4) // lg:grid-cols-4
-      else setColumns(5)                   // xl:grid-cols-5
+      const mobile = width < MOBILE_BREAKPOINT
+      setIsMobile(mobile)
+
+      if (mobile) {
+        // Mobile: use user-selected column count
+        setColumns(mobileGridColumns)
+      } else {
+        // Desktop: use normal responsive behavior
+        if (width < 1024) setColumns(3)      // tablet
+        else if (width < 1280) setColumns(4) // desktop
+        else setColumns(5)                    // large desktop
+      }
     }
     updateColumns()
     window.addEventListener('resize', updateColumns)
     return () => window.removeEventListener('resize', updateColumns)
-  }, [])
+  }, [mobileGridColumns])
+
+  // Pinch-to-zoom gesture handler (mobile only)
+  usePinch(
+    ({ direction: [xDir], memo = mobileGridColumns }) => {
+      if (!isMobile) return memo
+
+      const currentIndex = MOBILE_COLUMN_OPTIONS.indexOf(mobileGridColumns)
+
+      // Pinch out (zoom in) = fewer columns = move toward 4
+      if (xDir > 0 && currentIndex > 0) {
+        const newColumns = MOBILE_COLUMN_OPTIONS[currentIndex - 1]
+        if (newColumns !== undefined) {
+          setMobileGridColumns(newColumns)
+        }
+      }
+      // Pinch in (zoom out) = more columns = move toward 7
+      else if (xDir < 0 && currentIndex < MOBILE_COLUMN_OPTIONS.length - 1) {
+        const newColumns = MOBILE_COLUMN_OPTIONS[currentIndex + 1]
+        if (newColumns !== undefined) {
+          setMobileGridColumns(newColumns)
+        }
+      }
+
+      return mobileGridColumns
+    },
+    {
+      target: parentRef,
+      eventOptions: { passive: false },
+      threshold: 0.1,
+    }
+  )
 
   // Flatten all pages into a single array of photos
   const photos = useMemo(() => {
@@ -330,8 +383,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   // Loading skeleton
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {Array.from({ length: 12 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-2 sm:gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="aspect-square">
             <Skeleton className="h-full w-full" />
           </div>
@@ -447,7 +500,10 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                 }}
               >
                 <div
-                  className="grid gap-4 pb-4"
+                  className={cn(
+                    "grid pb-4",
+                    getGapClass(columns, isMobile)
+                  )}
                   style={{
                     gridTemplateColumns: `repeat(${columns}, 1fr)`,
                   }}
@@ -458,6 +514,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                       photo={photo}
                       onClick={handlePhotoClick}
                       priority={isAboveFold}
+                      columns={columns}
                     />
                   ))}
                 </div>

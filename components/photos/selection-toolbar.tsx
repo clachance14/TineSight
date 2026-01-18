@@ -113,9 +113,10 @@ export function SelectionToolbar({
       {/* Floating toolbar - fixed at bottom */}
       <div
         className={cn(
-          'fixed bottom-6 left-1/2 -translate-x-1/2 z-50',
-          'flex items-center gap-4 px-6 py-3',
-          'bg-slate-deep/95 border border-slate backdrop-blur-sm rounded-xl shadow-xl'
+          'fixed bottom-4 md:bottom-6 left-1/2 -translate-x-1/2 z-50',
+          'flex items-center gap-2 md:gap-4 px-3 md:px-6 py-2 md:py-3',
+          'bg-slate-deep/95 border border-slate backdrop-blur-sm rounded-xl shadow-xl',
+          'max-w-[95vw] overflow-x-auto'
         )}
       >
         {/* Selection count and "select all matching" banner */}
@@ -151,14 +152,15 @@ export function SelectionToolbar({
           variant="ghost"
           size="sm"
           onClick={handleSelectAll}
-          className="text-cream-dark hover:text-cream hover:bg-slate"
+          className="text-cream-dark hover:text-cream hover:bg-slate h-9 min-h-[36px]"
         >
-          <CheckSquare className="h-4 w-4 mr-2" />
-          {allSelected ? 'Deselect All' : 'Select All'}
+          <CheckSquare className="h-4 w-4 mr-1 md:mr-2 shrink-0" />
+          <span className="hidden sm:inline">{allSelected ? 'Deselect All' : 'Select All'}</span>
+          <span className="sm:hidden">{allSelected ? 'None' : 'All'}</span>
         </Button>
 
         {/* Divider */}
-        <div className="h-6 w-px bg-slate" />
+        <div className="h-6 w-px bg-slate hidden sm:block" />
 
         {/* Action buttons */}
         <Button
@@ -166,41 +168,42 @@ export function SelectionToolbar({
           size="sm"
           onClick={() => setShowLocationPicker(true)}
           disabled={locationMutation.isPending}
-          className="text-cream-dark hover:text-cream hover:bg-slate"
+          className="text-cream-dark hover:text-cream hover:bg-slate h-9 min-h-[36px]"
         >
-          <MapPin className="h-4 w-4 mr-2" />
-          Set Location
+          <MapPin className="h-4 w-4 mr-1 md:mr-2 shrink-0" />
+          <span className="hidden sm:inline">Set Location</span>
+          <span className="sm:hidden">Loc</span>
         </Button>
 
         <Button
           variant="ghost"
           size="sm"
           onClick={() => setShowDeleteModal(true)}
-          className="text-red-400 hover:text-red-300 hover:bg-red-950/50"
+          className="text-red-400 hover:text-red-300 hover:bg-red-950/50 h-9 min-h-[36px]"
         >
-          <Trash2 className="h-4 w-4 mr-2" />
-          Delete
+          <Trash2 className="h-4 w-4 mr-1 md:mr-2 shrink-0" />
+          <span className="hidden sm:inline">Delete</span>
         </Button>
 
         <Button
           variant="ghost"
           size="sm"
           onClick={() => setShowExportModal(true)}
-          className="text-cream-dark hover:text-cream hover:bg-slate"
+          className="text-cream-dark hover:text-cream hover:bg-slate h-9 min-h-[36px]"
         >
-          <Download className="h-4 w-4 mr-2" />
-          Export
+          <Download className="h-4 w-4 mr-1 md:mr-2 shrink-0" />
+          <span className="hidden sm:inline">Export</span>
         </Button>
 
         {/* Divider */}
-        <div className="h-6 w-px bg-slate" />
+        <div className="h-6 w-px bg-slate hidden sm:block" />
 
         {/* Cancel */}
         <Button
           variant="ghost"
           size="icon"
           onClick={exitSelectMode}
-          className="text-cream-dark hover:text-cream hover:bg-slate"
+          className="text-cream-dark hover:text-cream hover:bg-slate h-9 w-9 min-h-[36px] min-w-[36px]"
         >
           <X className="h-4 w-4" />
         </Button>

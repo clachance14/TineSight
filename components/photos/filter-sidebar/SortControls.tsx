@@ -55,7 +55,7 @@ export function SortControls({
             <SelectItem
               key={value}
               value={value}
-              className="text-cream-dark hover:bg-slate focus:bg-slate"
+              className="text-cream-dark hover:bg-slate focus:bg-slate focus:text-cream-dark"
             >
               {label}
             </SelectItem>

@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { X, Link2, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -88,6 +89,16 @@ function omitProperties<T, K extends keyof T>(
 }
 
 export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList = [], areaList = [], totalFailedCount }: PhotoFiltersProps) {
+  // Mobile detection state
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
   // Fetch upload sessions and cameras for dropdown
   const { data: sessionsData } = useUploadSessions()
   const sessions = sessionsData?.sessions ?? []
@@ -213,6 +224,12 @@ export function PhotoFilters({ filters, onFiltersChange, onOpenDrawer, deerList 
   const isDoesActive = filters.sex === 'doe'
   const isTrophyActive = filters.sex === 'buck' && filters.sizeClass === 'trophy'
 
+  // Render only active filter chips on mobile (filter button is in page header)
+  if (isMobile) {
+    return <PhotoFilterChips filters={filters} onFiltersChange={onFiltersChange} />
+  }
+
+  // Desktop filter bar
   return (
     <div className="space-y-3">
       {/* Quick Filter Bar */}

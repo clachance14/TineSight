@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
-import { analysisSchema, comparisonSchema, detectionOnlySchema, deerAnalysisSchema, type AnalysisResult, type ComparisonResult, type DetectionOnlyResult, type DeerAnalysisResult } from "./types";
-import { PHOTO_ANALYSIS_PROMPT, buildComparisonPromptWithCatalog, DEER_CLASSIFICATION_PROMPT, DETECTION_ONLY_PROMPT, DEER_ANALYSIS_PROMPT } from "./prompts";
-import { DETECTION_SCHEMA, CLASSIFICATION_SCHEMA, COMPARISON_SCHEMA, ANALYSIS_SCHEMA, DEER_ANALYSIS_SCHEMA } from "./schemas";
+import { analysisSchema, comparisonSchema, detectionOnlySchema, deerAnalysisSchema, antlerFingerprintSchema, type AnalysisResult, type ComparisonResult, type DetectionOnlyResult, type DeerAnalysisResult, type AntlerFingerprintResult } from "./types";
+import { PHOTO_ANALYSIS_PROMPT, buildComparisonPromptWithCatalog, DEER_CLASSIFICATION_PROMPT, DETECTION_ONLY_PROMPT, DEER_ANALYSIS_PROMPT, ANTLER_FINGERPRINT_PROMPT } from "./prompts";
+import { DETECTION_SCHEMA, CLASSIFICATION_SCHEMA, COMPARISON_SCHEMA, ANALYSIS_SCHEMA, DEER_ANALYSIS_SCHEMA, ANTLER_FINGERPRINT_SCHEMA } from "./schemas";
 
 /**
  * Metrics captured from a Gemini API call
@@ -604,4 +604,128 @@ export async function analyzeDeer(
   }
 
   throw lastError || new Error("All Gemini models failed for deer analysis");
+}
+
+/**
+ * Result from extractAntlerFingerprint including metrics
+ */
+export interface ExtractFingerprintResult {
+  result: AntlerFingerprintResult;
+  metrics: GeminiMetrics;
+}
+
+/**
+ * Extract detailed B&C-style antler fingerprint from a trophy buck image
+ *
+ * This function uses Gemini with Thinking enabled to carefully analyze
+ * antler measurements, ratios, and distinctive features for trophy-tier bucks.
+ * The resulting fingerprint is used for enhanced deer re-identification.
+ *
+ * @param imageBuffer - Buffer containing the cropped deer image (JPEG)
+ * @returns Detailed antler fingerprint with measurements, scores, ratios, features, and confidence
+ */
+export async function extractAntlerFingerprint(
+  imageBuffer: Buffer
+): Promise<ExtractFingerprintResult> {
+  const ai = getGeminiClient();
+  const imageBase64 = imageBuffer.toString("base64");
+  const startTime = Date.now();
+
+  let lastError: Error | null = null;
+  let totalRetryCount = 0;
+  let wasRateLimited = false;
+
+  for (const model of MODEL_FALLBACK_CHAIN) {
+    try {
+      console.log(`Extracting antler fingerprint with model: ${model} (Thinking enabled)`);
+
+      const { result: response, retryCount, wasRateLimited: rateLimited } = await withRetry(async () => {
+        return await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: ANTLER_FINGERPRINT_PROMPT },
+                { inlineData: { data: imageBase64, mimeType: "image/jpeg" } }
+              ]
+            }
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: ANTLER_FINGERPRINT_SCHEMA,
+            temperature: 0.1,
+            thinkingConfig: {
+              includeThoughts: false,
+              thinkingBudget: 2048 // Higher budget for detailed measurements
+            }
+          }
+        });
+      });
+
+      totalRetryCount += retryCount;
+      wasRateLimited = wasRateLimited || rateLimited;
+      const durationMs = Date.now() - startTime;
+
+      const text = response.text;
+      if (!text) {
+        throw new Error("Gemini returned empty response");
+      }
+
+      // Parse JSON response
+      const parsed = JSON.parse(text);
+
+      // Extract token usage
+      const promptTokens = response.usageMetadata?.promptTokenCount ?? 0;
+      const responseTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+      const totalTokens = response.usageMetadata?.totalTokenCount ?? 0;
+
+      // Log token usage including thinking tokens
+      console.log(`Gemini antler fingerprint token usage:`, {
+        promptTokens,
+        responseTokens,
+        totalTokens,
+      });
+
+      // Validate against Zod schema
+      const validated = antlerFingerprintSchema.parse(parsed);
+
+      console.log(`Antler fingerprint extraction complete:`, {
+        score_class: validated.scores.score_class,
+        gross_score: validated.scores.gross_score,
+        net_score: validated.scores.net_score,
+        total_points: validated.measurements.total_points,
+        has_drop_tine: validated.features.has_drop_tine,
+        overall_confidence: validated.confidence.overall,
+      });
+
+      return {
+        result: validated,
+        metrics: {
+          promptTokens,
+          responseTokens,
+          totalTokens,
+          modelUsed: model,
+          wasRateLimited,
+          retryCount: totalRetryCount,
+          durationMs,
+        }
+      };
+
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const isOverloaded = lastError.message.includes("503") ||
+                           lastError.message.includes("overloaded") ||
+                           lastError.message.includes("UNAVAILABLE");
+
+      if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
+        console.log(`Model ${model} overloaded for fingerprint extraction, trying next fallback...`);
+        continue;
+      }
+
+      throw lastError;
+    }
+  }
+
+  throw lastError || new Error("All Gemini models failed for fingerprint extraction");
 }

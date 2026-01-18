@@ -212,6 +212,20 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       }
     }
 
+    // Parse sortDirection filter
+    const sortDirectionParam = searchParams.get('sortDirection')
+    let sortDirection: 'asc' | 'desc' | undefined
+    if (sortDirectionParam !== null) {
+      if (sortDirectionParam === 'asc' || sortDirectionParam === 'desc') {
+        sortDirection = sortDirectionParam
+      } else {
+        return NextResponse.json(
+          { error: 'Invalid sortDirection: must be "asc" or "desc"' },
+          { status: 400 }
+        )
+      }
+    }
+
     // Build query to get photos
     // First, get one extra photo to determine if there's a next page
     const fetchLimit = limit + 1
@@ -236,6 +250,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       areaName?: string
       otherAnimals?: OtherAnimalType[]
       sortBy?: PhotoSortField
+      sortDirection?: 'asc' | 'desc'
       cursor?: string
       limit: number
       offset: number
@@ -320,6 +335,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
 
     if (sortBy !== undefined) {
       filters.sortBy = sortBy
+    }
+
+    if (sortDirection !== undefined) {
+      filters.sortDirection = sortDirection
     }
 
     // Apply cursor for pagination
