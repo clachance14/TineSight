@@ -278,11 +278,29 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   debugLog('4-DATA_DESTRUCTURED', { isLoading, hasData: !!data, photoCount: externalData?.photos?.length })
 
   const parentRef = useRef<HTMLDivElement>(null)
-  const [columns, setColumns] = useState(5)
+  // Track if initial mount is complete - prevents column changes during hydration
+  const [mountComplete, setMountComplete] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  debugLog('5-REFS_AND_STATE_INIT')
 
-  // Get mobile grid columns preference from store
+  // Calculate initial columns based on screen width - NO state changes during mount
+  const getColumnsForWidth = useCallback((width: number, mobile: boolean): number => {
+    if (mobile) return 5 // Fixed 5 columns on mobile - no dynamic changes
+    if (width < 1024) return 3
+    if (width < 1280) return 4
+    return 5
+  }, [])
+
+  // Initialize columns synchronously to avoid flicker
+  const [columns, setColumns] = useState(() => {
+    if (typeof window === 'undefined') return 5
+    const width = window.innerWidth
+    const mobile = width < MOBILE_BREAKPOINT
+    return getColumnsForWidth(width, mobile)
+  })
+
+  debugLog('5-REFS_AND_STATE_INIT', { columns, mountComplete })
+
+  // Get mobile grid columns preference from store - but DON'T use it during initial mount
   const mobileGridColumns = useUIStore((state) => state.mobileGridColumns)
   const setMobileGridColumns = useUIStore((state) => state.setMobileGridColumns)
   debugLog('6-UI_STORE_READ', { mobileGridColumns })
@@ -297,16 +315,31 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     mobileGridColumnsRef.current = mobileGridColumns
   }, [mobileGridColumns])
 
-  // Track if we're on mobile and calculate columns
+  // Mark mount as complete after a delay - only then allow column changes
   useEffect(() => {
-    debugLog('9-EFFECT_UPDATE_COLUMNS_START')
+    const timer = setTimeout(() => {
+      debugLog('MOUNT_COMPLETE')
+      setMountComplete(true)
+    }, 1000) // Wait 1 second after mount before allowing column changes
+    return () => clearTimeout(timer)
+  }, [])
+
+  // Track if we're on mobile and calculate columns - but only after mount complete
+  useEffect(() => {
+    debugLog('9-EFFECT_UPDATE_COLUMNS_START', { mountComplete })
     const updateColumns = () => {
       const width = window.innerWidth
       const mobile = width < MOBILE_BREAKPOINT
       setIsMobile(mobile)
 
+      // Don't change columns during initial mount - prevents iOS crash
+      if (!mountComplete) {
+        debugLog('9-SKIPPING_COLUMN_UPDATE_MOUNT_NOT_COMPLETE')
+        return
+      }
+
       if (mobile) {
-        // Mobile: use user-selected column count
+        // Mobile: use user-selected column count (only after mount complete)
         setColumns(mobileGridColumns)
       } else {
         // Desktop: use normal responsive behavior
@@ -318,7 +351,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     updateColumns()
     window.addEventListener('resize', updateColumns)
     return () => window.removeEventListener('resize', updateColumns)
-  }, [mobileGridColumns])
+  }, [mobileGridColumns, mountComplete, getColumnsForWidth])
 
   debugLog('10-BEFORE_USE_PINCH', { isMobile })
 
