@@ -3,6 +3,8 @@
 import React, { Suspense, useState, useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
+import { SlidersHorizontal } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { PhotoGrid } from '@/components/photos/photo-grid'
 import { PhotoFilters, type PhotoFilters as PhotoFiltersType } from '@/components/photos/photo-filters'
 import { PhotoFilterDrawer } from '@/components/photos/photo-filter-drawer'
@@ -209,6 +211,26 @@ function PhotosContent(): React.JSX.Element {
     (filters.otherAnimals && filters.otherAnimals.length > 0) ||
     filters.sortBy === 'captured_at' // Only count as active if non-default
 
+  // Count active filters for mobile badge
+  const activeFilterCount = [
+    filters.status !== 'all' && filters.status !== undefined,
+    filters.hasDeer !== null,
+    filters.hasDetections !== null,
+    filters.qualityStatus !== 'all' && filters.qualityStatus !== undefined,
+    filters.sex !== 'all' && filters.sex !== undefined,
+    filters.sizeClass !== 'all' && filters.sizeClass !== undefined,
+    filters.minConfidence !== undefined,
+    filters.minPoints !== undefined || filters.maxPoints !== undefined,
+    filters.dateFrom !== undefined || filters.dateTo !== undefined || filters.datePreset !== undefined,
+    filters.cameraId !== undefined,
+    filters.deerId !== undefined,
+    filters.batchId !== undefined,
+    filters.uploadSessionId !== undefined,
+    filters.areaName !== undefined,
+    filters.otherAnimals && filters.otherAnimals.length > 0,
+    filters.sortBy === 'captured_at' || filters.sortDirection === 'asc',
+  ].filter(Boolean).length
+
   // Flatten paginated data
   const photos = data?.pages?.flatMap(page => page.photos) ?? []
   const total = data?.pages?.[0]?.total ?? 0
@@ -224,11 +246,51 @@ function PhotosContent(): React.JSX.Element {
   }
 
   return (
-    <div className="flex flex-col h-full space-y-4">
+    <div className="flex flex-col h-full space-y-2 sm:space-y-4">
       {/* Header with Stats */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+      <div className="flex flex-col gap-2 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
+        {/* Mobile: Title row with filter button */}
+        <div className="flex items-center justify-between sm:hidden">
           <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-cream">
+              Photos
+            </h1>
+            {isUpdatingFilters && (
+              <span className="text-xs text-copper animate-pulse">
+                updating...
+              </span>
+            )}
+            {/* Processing/failed counts inline on mobile */}
+            {(stats.processing > 0 || stats.failed > 0) && (
+              <div className="flex items-center gap-2 text-xs">
+                {stats.processing > 0 && (
+                  <span className="text-blue-400">{stats.processing} processing</span>
+                )}
+                {stats.failed > 0 && (
+                  <span className="text-red-400">{stats.failed} failed</span>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Filter button with badge */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setDrawerOpen(true)}
+            className="relative h-8 px-2"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 rounded-full bg-copper text-white text-[10px] font-medium flex items-center justify-center">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
+        </div>
+
+        {/* Desktop: Original header layout */}
+        <div className="hidden sm:block">
+          <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold tracking-tight text-cream">
               Photos
             </h1>
