@@ -1,21 +1,17 @@
-import dynamic from 'next/dynamic'
+import { Suspense } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { LocationsMapWrapper } from './locations-map-wrapper'
 
-// Lazy-load the map component - Google Maps is heavy (~50KB+)
-const LocationsMap = dynamic(
-  () => import('@/components/locations/locations-map').then(m => m.LocationsMap),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="h-full w-full flex items-center justify-center bg-slate-deep">
-        <div className="flex flex-col items-center gap-4">
-          <Skeleton className="h-8 w-8 rounded-full" />
-          <Skeleton className="h-4 w-32" />
-        </div>
+function MapSkeleton() {
+  return (
+    <div className="h-full w-full flex items-center justify-center bg-slate-deep">
+      <div className="flex flex-col items-center gap-4">
+        <Skeleton className="h-8 w-8 rounded-full" />
+        <Skeleton className="h-4 w-32" />
       </div>
-    ),
-  }
-)
+    </div>
+  )
+}
 
 export const metadata = {
   title: 'Locations | TineSight',
@@ -32,7 +28,9 @@ export default function LocationsPage() {
         </p>
       </div>
       <div className="flex-1 min-h-0">
-        <LocationsMap />
+        <Suspense fallback={<MapSkeleton />}>
+          <LocationsMapWrapper />
+        </Suspense>
       </div>
     </div>
   )
