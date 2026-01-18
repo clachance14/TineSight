@@ -59,8 +59,9 @@ export const useUIStore = create<UIState>()(
       skipHydration: true, // Prevents auto-hydration crash on iOS Safari
       partialize: (state) => ({
         // Persist these preferences
+        // NOTE: mobileGridColumns intentionally NOT persisted - hydrating it
+        // after render causes iOS Safari to crash from layout thrashing
         showBoundingBoxes: state.showBoundingBoxes,
-        mobileGridColumns: state.mobileGridColumns,
         filterSidebarOpen: state.filterSidebarOpen,
         filterSidebarExpandedSections: state.filterSidebarExpandedSections,
       }),
