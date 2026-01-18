@@ -476,14 +476,17 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   debugLog('14-BEFORE_RENDER', { isLoading, hasError: !!error, photosLength: photos.length })
 
-  // Loading skeleton
+  // Loading skeleton - MUST use same column count as main grid to prevent layout shift crash
   if (isLoading) {
-    debugLog('15-RENDER_LOADING_SKELETON')
+    debugLog('15-RENDER_LOADING_SKELETON', { columns })
     return (
-      <div className="grid grid-cols-2 gap-2 sm:gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {Array.from({ length: 8 }).map((_, i) => (
+      <div
+        className={cn("grid", getGapClass(columns, isMobile))}
+        style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}
+      >
+        {Array.from({ length: columns * 2 }).map((_, i) => (
           <div key={i} className="aspect-square">
-            <Skeleton className="h-full w-full" />
+            <Skeleton className="h-full w-full rounded-lg" />
           </div>
         ))}
       </div>
