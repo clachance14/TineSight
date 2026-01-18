@@ -56,6 +56,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'tinesight-ui-preferences',
+      version: 1, // Bump version to trigger migration
       skipHydration: true, // Prevents auto-hydration crash on iOS Safari
       partialize: (state) => ({
         // Persist these preferences
@@ -65,6 +66,16 @@ export const useUIStore = create<UIState>()(
         filterSidebarOpen: state.filterSidebarOpen,
         filterSidebarExpandedSections: state.filterSidebarExpandedSections,
       }),
+      // Migration: remove mobileGridColumns from old stored state
+      migrate: (persistedState: unknown) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const state = persistedState as any
+        // Delete the old mobileGridColumns to prevent hydration crash
+        if (state && 'mobileGridColumns' in state) {
+          delete state.mobileGridColumns
+        }
+        return state
+      },
     }
   )
 )
