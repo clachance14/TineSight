@@ -14,6 +14,35 @@ import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
 import { useUIStore, type MobileGridColumns } from '@/lib/stores/ui'
 import { SmartBadge } from './smart-badge'
 
+// Debug logging helper - sends logs to server for Vercel visibility
+// DELETE AFTER DEBUGGING
+const debugLog = (step: string, data?: Record<string, unknown>) => {
+  try {
+    const payload = JSON.stringify({
+      step,
+      data,
+      timestamp: new Date().toISOString(),
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+    })
+    // Use sendBeacon for reliability during crashes, fall back to fetch
+    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      navigator.sendBeacon('/api/debug-log', payload)
+    } else {
+      fetch('/api/debug-log', {
+        method: 'POST',
+        body: payload,
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
+      }).catch(() => {})
+    }
+  } catch {
+    // Silently fail
+  }
+}
+
+// Log module load
+debugLog('1-MODULE_LOAD', { message: 'photo-grid.tsx module loaded' })
+
 // Constants for virtualization
 const GAP = 16 // gap-4 = 1rem = 16px
 const ESTIMATED_ROW_HEIGHT = 250 // Conservative estimate for initial render
@@ -223,8 +252,11 @@ const PhotoGridItem = memo(function PhotoGridItem({
  * Uses @tanstack/react-virtual for performance with large datasets.
  */
 export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProps) {
+  debugLog('2-COMPONENT_START', { hasExternalData: !!externalData })
+
   // Use external data if provided (single source of truth), otherwise fetch internally
   const internalQuery = usePhotosInfinite(externalData ? undefined : filters)
+  debugLog('3-AFTER_QUERY_HOOK')
 
   const {
     data,
@@ -243,25 +275,31 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
         isFetchingNextPage: externalData.isFetchingNextPage,
       }
     : internalQuery
+  debugLog('4-DATA_DESTRUCTURED', { isLoading, hasData: !!data, photoCount: externalData?.photos?.length })
 
   const parentRef = useRef<HTMLDivElement>(null)
   const [columns, setColumns] = useState(5)
   const [isMobile, setIsMobile] = useState(false)
+  debugLog('5-REFS_AND_STATE_INIT')
 
   // Get mobile grid columns preference from store
   const mobileGridColumns = useUIStore((state) => state.mobileGridColumns)
   const setMobileGridColumns = useUIStore((state) => state.setMobileGridColumns)
+  debugLog('6-UI_STORE_READ', { mobileGridColumns })
 
   // Ref to avoid stale closures in usePinch handler
   const mobileGridColumnsRef = useRef(mobileGridColumns)
+  debugLog('7-MOBILE_COLS_REF_INIT')
 
   // Keep ref in sync with state
   useEffect(() => {
+    debugLog('8-EFFECT_SYNC_REF_START')
     mobileGridColumnsRef.current = mobileGridColumns
   }, [mobileGridColumns])
 
   // Track if we're on mobile and calculate columns
   useEffect(() => {
+    debugLog('9-EFFECT_UPDATE_COLUMNS_START')
     const updateColumns = () => {
       const width = window.innerWidth
       const mobile = width < MOBILE_BREAKPOINT
@@ -281,6 +319,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     window.addEventListener('resize', updateColumns)
     return () => window.removeEventListener('resize', updateColumns)
   }, [mobileGridColumns])
+
+  debugLog('10-BEFORE_USE_PINCH', { isMobile })
 
   // Pinch-to-zoom gesture handler (mobile only)
   // Uses ref to avoid stale closures and only updates state on gesture END
@@ -317,6 +357,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     }
   )
 
+  debugLog('11-AFTER_USE_PINCH')
+
   // Flatten all pages into a single array of photos
   const photos = useMemo(() => {
     if (!data?.pages) return []
@@ -328,6 +370,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   // Calculate row count for virtualization
   const rowCount = Math.ceil(photos.length / columns)
+  debugLog('12-BEFORE_USE_VIRTUALIZER', { rowCount, columns, photosLength: photos.length })
 
   // Virtualizer for rows - uses dynamic measurement for accurate row heights
   const virtualizer = useVirtualizer({
@@ -336,6 +379,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     estimateSize: () => ESTIMATED_ROW_HEIGHT + GAP,
     overscan: 3, // Render 3 extra rows above/below viewport
   })
+
+  debugLog('13-AFTER_USE_VIRTUALIZER')
 
   // Scroll restoration: when returning from photo detail, scroll to the photo's row
   // Only re-run when photos load, not on column change (avoids re-triggering during pinch)
@@ -396,8 +441,11 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
+  debugLog('14-BEFORE_RENDER', { isLoading, hasError: !!error, photosLength: photos.length })
+
   // Loading skeleton
   if (isLoading) {
+    debugLog('15-RENDER_LOADING_SKELETON')
     return (
       <div className="grid grid-cols-2 gap-2 sm:gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {Array.from({ length: 8 }).map((_, i) => (
@@ -478,6 +526,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
       </div>
     )
   }
+
+  debugLog('16-RENDER_MAIN_GRID', { virtualItemsCount: virtualizer.getVirtualItems().length })
 
   // Virtualized photo grid
   return (
