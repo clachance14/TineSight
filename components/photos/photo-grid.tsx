@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useCallback, useMemo, useState, memo } from 'react'
 import Image from 'next/image'
-import { useVirtualizer } from '@tanstack/react-virtual'
+// REMOVED: import { useVirtualizer } from '@tanstack/react-virtual'
+// Virtualization causes iOS Safari crashes - using simple CSS grid instead
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
 import { Badge } from '@/components/ui/badge'
@@ -11,10 +12,6 @@ import { cn } from '@/lib/utils'
 import { Loader2, Check } from 'lucide-react'
 import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
 import { SmartBadge } from './smart-badge'
-
-// Constants for virtualization
-const GAP = 16 // gap-4 = 1rem = 16px
-const ESTIMATED_ROW_HEIGHT = 250 // Conservative estimate for initial render
 
 // Mobile breakpoint (matches Tailwind's md:)
 const MOBILE_BREAKPOINT = 768
@@ -204,9 +201,11 @@ const PhotoGridItem = memo(function PhotoGridItem({
 })
 
 /**
- * PhotoGrid component displays a virtualized responsive grid of photos
+ * PhotoGrid component displays a responsive grid of photos
  * with infinite scroll, status badges, and loading states.
- * Uses @tanstack/react-virtual for performance with large datasets.
+ *
+ * NOTE: Virtualization removed due to iOS Safari crashes.
+ * Using simple CSS grid with scroll-based infinite loading instead.
  */
 export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProps) {
   // Use external data if provided (single source of truth), otherwise fetch internally
@@ -230,12 +229,12 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
       }
     : internalQuery
 
-  const parentRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [isMobile, setIsMobile] = useState(false)
 
-  // Calculate initial columns based on screen width - NO state changes during mount
+  // Calculate initial columns based on screen width
   const getColumnsForWidth = useCallback((width: number, mobile: boolean): number => {
-    if (mobile) return 5 // Fixed 5 columns on mobile - no dynamic changes
+    if (mobile) return 5 // Fixed 5 columns on mobile
     if (width < 1024) return 3
     if (width < 1280) return 4
     return 5
@@ -257,13 +256,11 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
       setIsMobile(mobile)
 
       if (mobile) {
-        // Mobile: fixed 5 columns
         setColumns(5)
       } else {
-        // Desktop: responsive behavior
-        if (width < 1024) setColumns(3)      // tablet
-        else if (width < 1280) setColumns(4) // desktop
-        else setColumns(5)                    // large desktop
+        if (width < 1024) setColumns(3)
+        else if (width < 1280) setColumns(4)
+        else setColumns(5)
       }
     }
     updateColumns()
@@ -280,40 +277,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   // Get total count from first page
   const total = data?.pages?.[0]?.total ?? 0
 
-  // Calculate row count for virtualization
-  const rowCount = Math.ceil(photos.length / columns)
-
-  // Virtualizer for rows - uses dynamic measurement for accurate row heights
-  const virtualizer = useVirtualizer({
-    count: rowCount,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ESTIMATED_ROW_HEIGHT + GAP,
-    overscan: 1, // REDUCED from 3 - testing iOS Safari memory crash
-  })
-
-  // Scroll restoration: when returning from photo detail, scroll to the photo's row
-  // Only re-run when photos load, not on column change (avoids re-triggering during pinch)
-  useEffect(() => {
-    if (photos.length === 0) return
-
-    const scrollToId = sessionStorage.getItem('photos:scrollToId')
-    if (!scrollToId) return
-
-    sessionStorage.removeItem('photos:scrollToId')  // Clear immediately
-
-    // Find the photo's index in the list
-    const photoIndex = photos.findIndex((p) => p.id === scrollToId)
-    if (photoIndex === -1) return
-
-    // Calculate which row this photo is in
-    const rowIndex = Math.floor(photoIndex / columns)
-
-    // Scroll to that row with a small delay to ensure virtualizer is ready
-    requestAnimationFrame(() => {
-      virtualizer.scrollToIndex(rowIndex, { align: 'start' })
-    })
-  }, [photos.length])  // eslint-disable-line react-hooks/exhaustive-deps
-
   // Handle photo click
   const handlePhotoClick = useCallback(
     (photoId: string) => {
@@ -324,9 +287,9 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     [onPhotoClick]
   )
 
-  // Check if we're near the bottom to trigger infinite scroll
+  // Scroll-based infinite loading (without virtualization)
   useEffect(() => {
-    const scrollElement = parentRef.current
+    const scrollElement = scrollContainerRef.current
     if (!scrollElement) return
 
     const checkShouldLoadMore = () => {
@@ -339,10 +302,8 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
     scrollElement.addEventListener('scroll', checkShouldLoadMore, { passive: true })
 
-    // Check after layout completes - use RAF to ensure dimensions are calculated
-    const rafId = requestAnimationFrame(() => {
-      checkShouldLoadMore()
-    })
+    // Check once after mount
+    const rafId = requestAnimationFrame(checkShouldLoadMore)
 
     return () => {
       scrollElement.removeEventListener('scroll', checkShouldLoadMore)
@@ -350,7 +311,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
-  // Loading skeleton - MUST use same column count as main grid to prevent layout shift crash
+  // Loading skeleton
   if (isLoading) {
     return (
       <div
@@ -380,7 +341,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   // Empty state
   if (photos.length === 0) {
-    // Check if any filters are applied
     const hasFilters = filters && (
       filters.status !== undefined ||
       filters.cameraId !== undefined ||
@@ -400,7 +360,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
             viewBox="0 0 24 24"
           >
             {hasFilters ? (
-              // Filter icon for filtered empty state
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -408,7 +367,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                 d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
               />
             ) : (
-              // Image icon for no photos uploaded
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -436,78 +394,45 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     )
   }
 
-  // Virtualized photo grid
+  // Simple CSS grid - NO virtualization (causes iOS Safari crash)
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Virtualized scroll container */}
+      {/* Scroll container */}
       <div
-        ref={parentRef}
+        ref={scrollContainerRef}
         className="flex-1 min-h-0 overflow-auto"
         style={{
+          // CSS containment for performance (but not the problematic virtualization)
           contain: 'layout',
-          transform: 'translateZ(0)',
-          touchAction: 'pan-y',
         }}
       >
+        {/* Simple CSS grid */}
         <div
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-            width: '100%',
-            position: 'relative',
-          }}
+          className={cn("grid", getGapClass(columns, isMobile))}
+          style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}
         >
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const startIndex = virtualRow.index * columns
-            const rowPhotos = photos.slice(startIndex, startIndex + columns)
-            // First 2 rows get priority loading for above-fold images
-            const isAboveFold = virtualRow.index < 2
-
-            return (
-              <div
-                key={virtualRow.key}
-                ref={virtualizer.measureElement}
-                data-index={virtualRow.index}
-                className="absolute left-0 top-0 w-full"
-                style={{
-                  transform: `translateY(${virtualRow.start}px)`,
-                  zIndex: 0,
-                }}
-              >
-                <div
-                  className={cn(
-                    "grid pb-4",
-                    getGapClass(columns, isMobile)
-                  )}
-                  style={{
-                    gridTemplateColumns: `repeat(${columns}, 1fr)`,
-                  }}
-                >
-                  {rowPhotos.map((photo) => (
-                    <PhotoGridItem
-                      key={photo.id}
-                      photo={photo}
-                      onClick={handlePhotoClick}
-                      priority={isAboveFold}
-                      columns={columns}
-                    />
-                  ))}
-                </div>
-              </div>
-            )
-          })}
+          {photos.map((photo, index) => (
+            <PhotoGridItem
+              key={photo.id}
+              photo={photo}
+              onClick={handlePhotoClick}
+              priority={index < columns * 2} // First 2 rows get priority
+              columns={columns}
+            />
+          ))}
         </div>
+
+        {/* Loading more indicator */}
+        {isFetchingNextPage && (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="h-6 w-6 animate-spin text-copper" />
+          </div>
+        )}
       </div>
-
-      {/* Loading more indicator */}
-      {isFetchingNextPage && (
-        <div className="flex items-center justify-center py-4">
-          <Loader2 className="h-6 w-6 animate-spin text-copper" />
-        </div>
-      )}
 
       {/* Total count info */}
       {total > 0 && (
-        <div className="text-center text-sm text-cream-dark">
+        <div className="text-center text-sm text-cream-dark py-2">
           Showing {photos.length} of {total} photos
         </div>
       )}
