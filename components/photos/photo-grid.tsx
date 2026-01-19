@@ -5,12 +5,6 @@ import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
 import { Skeleton } from '@/components/ui/skeleton'
 
-// iOS Safari crash investigation:
-// REMOVED: All useEffect hooks (resize listener, scroll listener)
-// REMOVED: useRef (scroll container ref)
-// REMOVED: useState for columns/isMobile (using fixed values)
-// Testing if useEffect hooks cause the crash
-
 interface PhotoGridProps {
   filters?: Omit<PhotoFilters, 'offset'>
   onPhotoClick?: (photoId: string) => void
@@ -33,7 +27,7 @@ interface Photo {
   bestQualityStatus: string | null
 }
 
-// TEST 2: Removed memo() wrapper - testing if memo() causes Safari crash
+// Note: memo() intentionally omitted - causes iOS Safari JavaScriptCore crash
 function PhotoGridItem({
   photo,
   onClick,
@@ -153,7 +147,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     )
   }
 
-  // SUPER SIMPLE: Just a grid, no scroll container, no effects
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="grid grid-cols-5 gap-1.5 overflow-auto flex-1">
