@@ -1,11 +1,11 @@
 'use client'
 
 import React, { Suspense } from 'react'
+import Image from 'next/image'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 
-// TEST VERSION 2: Data fetching + simple CSS grid
-// NO next/image, NO virtualization
-// Using CSS background-image instead of next/image component
+// TEST VERSION 3: next/image component (NO virtualization)
+// Testing if next/image itself causes the iOS Safari crash
 
 function PhotosContent(): React.JSX.Element {
   // Fetch photos - minimal config
@@ -43,25 +43,29 @@ function PhotosContent(): React.JSX.Element {
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold text-cream mb-4">
-        Photos Test v2 ({photos.length} loaded)
+        Photos Test v3 ({photos.length} loaded)
       </h1>
       <p className="text-cream-dark mb-4 text-sm">
-        Using CSS background-image (NO next/image, NO virtualization)
+        Using next/image component (NO virtualization, NO blur placeholder)
       </p>
 
-      {/* Simple CSS grid - no virtualization */}
+      {/* Simple CSS grid with next/image - no virtualization */}
       <div className="grid grid-cols-5 gap-2">
         {photos.map((photo, i) => (
           <div
             key={photo.id}
-            className="aspect-square bg-slate rounded-lg overflow-hidden"
-            style={{
-              backgroundImage: photo.thumbnailUrl ? `url(${photo.thumbnailUrl})` : undefined,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-            }}
+            className="relative aspect-square bg-slate rounded-lg overflow-hidden"
           >
-            {!photo.thumbnailUrl && (
+            {photo.thumbnailUrl ? (
+              <Image
+                src={photo.thumbnailUrl}
+                alt={`Photo ${i + 1}`}
+                fill
+                className="object-cover"
+                sizes="20vw"
+                // NO blur placeholder - already confirmed that causes issues
+              />
+            ) : (
               <div className="w-full h-full flex items-center justify-center text-cream-dark">
                 {i + 1}
               </div>
@@ -71,7 +75,8 @@ function PhotosContent(): React.JSX.Element {
       </div>
 
       <p className="text-cream-dark mt-4 text-sm">
-        If this works, next/image or virtualization is the problem.
+        If this crashes, next/image is the problem (even without blur).
+        If this works, virtualization is the problem.
       </p>
     </div>
   )
