@@ -3,23 +3,47 @@
 import React, { Suspense } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
+import { useQuery } from '@tanstack/react-query'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
+import { useDeerCatalog } from '@/lib/hooks/use-deer'
+import { useAreas } from '@/lib/hooks/use-areas'
+import { useLocations } from '@/lib/hooks/use-locations'
 
-// MINIMAL VERSION - testing iOS Safari crash
-// Matching test v3 structure that WORKED
+// TEST: Adding extra queries back
+// Previous: minimal page with just usePhotosInfinite - WORKED
+// Now testing: + stats query, deer catalog, areas, locations
 
 function PhotosContent(): React.JSX.Element {
   const router = useRouter()
 
-  // Single hook - minimal config
+  // Primary data
   const {
     data,
     isLoading,
     error,
   } = usePhotosInfinite({ limit: 15 })
 
+  // ADDING BACK: Extra queries
+  const { data: statsData } = useQuery({
+    queryKey: ['photos', 'stats'],
+    queryFn: async () => {
+      const res = await fetch('/api/photos/stats')
+      if (!res.ok) return null
+      return res.json()
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: deerData } = useDeerCatalog()
+  const { data: areasData } = useAreas()
+  const { data: locationsData } = useLocations()
+
   // Flatten pages
   const photos = data?.pages?.flatMap(p => p.photos) ?? []
+  const deerCount = deerData?.deer?.length ?? 0
+  const areasCount = areasData?.areas?.length ?? 0
+  const locationsCount = locationsData?.locations?.length ?? 0
+  const totalPhotos = statsData?.total_photos ?? photos.length
 
   if (isLoading) {
     return (
@@ -47,7 +71,9 @@ function PhotosContent(): React.JSX.Element {
     <div className="flex flex-col h-full">
       <div className="mb-4">
         <h1 className="text-xl font-bold text-cream">Photos</h1>
-        <p className="text-sm text-cream-dark">{photos.length} photos loaded</p>
+        <p className="text-sm text-cream-dark">
+          {photos.length} of {totalPhotos} photos | {deerCount} deer | {areasCount} areas | {locationsCount} locations
+        </p>
       </div>
 
       {/* Simple CSS grid - no virtualization, no complex components */}
