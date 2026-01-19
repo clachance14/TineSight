@@ -14,8 +14,9 @@ import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import { useDeerCatalog } from '@/lib/hooks/use-deer'
 import { useAreas } from '@/lib/hooks/use-areas'
 import { useLocations } from '@/lib/hooks/use-locations'
-import { useRealtimePhotos } from '@/lib/hooks/use-realtime-photos'
-import { useCurrentUser } from '@/lib/hooks/use-current-user'
+// DISABLED - causes iOS Safari crash
+// import { useRealtimePhotos } from '@/lib/hooks/use-realtime-photos'
+// import { useCurrentUser } from '@/lib/hooks/use-current-user'
 import { usePhotoSelectionStore } from '@/lib/stores/photo-selection'
 import type { PhotoFilters as ServicePhotoFilters, OtherAnimalType } from '@/lib/services/photos'
 
@@ -23,14 +24,8 @@ function PhotosContent(): React.JSX.Element {
   const searchParams = useSearchParams()
   const router = useRouter()
 
-  // Get current user for realtime subscription
-  const { userId } = useCurrentUser()
-
-  // Subscribe to realtime photo updates
-  const { isConnected } = useRealtimePhotos({
-    userId,
-    enabled: userId.length > 0
-  })
+  // DISABLED - causes iOS Safari crash
+  const isConnected = false
 
   // Initialize filters from URL params
   const getInitialFilters = (): PhotoFiltersType => {
@@ -128,12 +123,13 @@ function PhotosContent(): React.JSX.Element {
     return params.toString()
   }
 
+  // DISABLED - causes iOS Safari crash
   // Sync filters to URL params for shareability
-  useEffect(() => {
-    const queryString = buildFilterQueryString(filters)
-    const newUrl = queryString ? `?${queryString}` : '/photos'
-    router.replace(newUrl, { scroll: false })
-  }, [filters, router])
+  // useEffect(() => {
+  //   const queryString = buildFilterQueryString(filters)
+  //   const newUrl = queryString ? `?${queryString}` : '/photos'
+  //   router.replace(newUrl, { scroll: false })
+  // }, [filters, router])
 
   // Clear photo selection when filters change
   useEffect(() => {
