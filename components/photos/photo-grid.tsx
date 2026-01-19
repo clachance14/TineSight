@@ -5,7 +5,6 @@ import Image from 'next/image'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
 import { Skeleton } from '@/components/ui/skeleton'
-import { cn } from '@/lib/utils'
 
 // iOS Safari crash investigation:
 // REMOVED: All useEffect hooks (resize listener, scroll listener)
