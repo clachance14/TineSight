@@ -100,9 +100,6 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
       }
     : internalQuery
 
-  // FIXED values - no useState, no useEffect
-  const columns = 5
-
   const photos = useMemo(() => {
     if (!data?.pages) return []
     return data.pages.flatMap((page) => page.photos)
