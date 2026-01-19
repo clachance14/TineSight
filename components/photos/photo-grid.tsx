@@ -288,7 +288,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     count: rowCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ESTIMATED_ROW_HEIGHT + GAP,
-    overscan: 3, // Render 3 extra rows above/below viewport
+    overscan: 1, // REDUCED from 3 - testing iOS Safari memory crash
   })
 
   // Scroll restoration: when returning from photo detail, scroll to the photo's row

@@ -157,7 +157,8 @@ function PhotosContent(): React.JSX.Element {
     ...(filters.sortBy !== undefined ? { sortBy: filters.sortBy } : {}),
     ...(filters.sortDirection !== undefined ? { sortDirection: filters.sortDirection } : {}),
     ...(filters.otherAnimals?.length ? { otherAnimals: filters.otherAnimals } : {}),
-    limit: 50,
+    // REDUCED from 50 - testing iOS Safari memory crash
+    limit: 15,
   }
 
   // Fetch photos with filters - single data source for both stats and grid
