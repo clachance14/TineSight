@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, memo } from 'react'
+import { useCallback, useMemo } from 'react'
 import Image from 'next/image'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
@@ -34,8 +34,8 @@ interface Photo {
   bestQualityStatus: string | null
 }
 
-// SIMPLIFIED: No hooks inside, just render
-const PhotoGridItem = memo(function PhotoGridItem({
+// TEST 2: Removed memo() wrapper - testing if memo() causes Safari crash
+function PhotoGridItem({
   photo,
   onClick,
   priority = false,
@@ -83,7 +83,7 @@ const PhotoGridItem = memo(function PhotoGridItem({
       </div>
     </div>
   )
-})
+}
 
 export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProps) {
   const internalQuery = usePhotosInfinite(externalData ? undefined : filters)
