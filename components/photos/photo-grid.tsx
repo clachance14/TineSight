@@ -61,6 +61,14 @@ function PhotoGridItem({
             className="absolute inset-0 h-full w-full object-cover"
             loading={priority ? 'eager' : 'lazy'}
           />
+        ) : photo.imageUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={photo.imageUrl}
+            alt="Trail camera photo"
+            className="absolute inset-0 h-full w-full object-cover"
+            loading={priority ? 'eager' : 'lazy'}
+          />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-slate-700">
             <svg
