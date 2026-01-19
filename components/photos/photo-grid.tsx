@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useMemo } from 'react'
-import Image from 'next/image'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -55,13 +54,12 @@ function PhotoGridItem({
     >
       <div className="relative h-full w-full">
         {photo.thumbnailUrl ? (
-          <Image
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
             src={photo.thumbnailUrl}
             alt="Trail camera photo"
-            fill
-            priority={priority}
-            className="object-cover"
-            sizes="20vw"
+            className="absolute inset-0 h-full w-full object-cover"
+            loading={priority ? 'eager' : 'lazy'}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-slate-700">
