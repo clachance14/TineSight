@@ -5,6 +5,8 @@
  */
 
 export { analyzePhoto } from './jobs/analyze-photo';
+export { generateImageVariantsJob } from './jobs/generate-image-variants';
+export { backfillVariants } from './jobs/backfill-variants';
 export { compareDeer } from './jobs/compare-deer';
 export { batchProcess } from './jobs/batch-process';
 export { cleanupCancelledImages } from './jobs/cleanup-cancelled-images';

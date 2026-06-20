@@ -7,6 +7,7 @@ import type { Image } from '@/types/database'
 
 interface PhotoResponse extends Image {
   thumbnailUrl: string | null
+  mediumUrl: string | null
   imageUrl: string | null
   blurDataUrl: string | null
   bestQualityStatus: string | null
@@ -393,6 +394,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
         thumbnailPaths.push(photo.thumbnail_path)
         allPaths.push(photo.thumbnail_path)
       }
+      if (photo.medium_path) {
+        allPaths.push(photo.medium_path)
+      }
       allPaths.push(photo.file_path)
       imagePaths.push(photo.file_path)
     }
@@ -447,6 +451,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       return {
         ...photo,
         thumbnailUrl: photo.thumbnail_path ? urlMap.get(photo.thumbnail_path) ?? null : null,
+        mediumUrl: photo.medium_path ? urlMap.get(photo.medium_path) ?? null : null,
         imageUrl: urlMap.get(photo.file_path) ?? null,
         blurDataUrl: photo.blur_data_url ?? null,
         bestQualityStatus: qualityMap.get(photo.id) ?? null,

@@ -500,9 +500,12 @@ export type Database = {
           location_id: string | null
           original_filename: string | null
           people_count: number | null
+          medium_path: string | null
           retry_count: number
           thumbnail_path: string | null
           user_id: string
+          variant_error: string | null
+          variant_status: string
           vehicle_count: number | null
         }
         Insert: {
@@ -537,9 +540,12 @@ export type Database = {
           location_id?: string | null
           original_filename?: string | null
           people_count?: number | null
+          medium_path?: string | null
           retry_count?: number
           thumbnail_path?: string | null
           user_id: string
+          variant_error?: string | null
+          variant_status?: string
           vehicle_count?: number | null
         }
         Update: {
@@ -574,9 +580,12 @@ export type Database = {
           location_id?: string | null
           original_filename?: string | null
           people_count?: number | null
+          medium_path?: string | null
           retry_count?: number
           thumbnail_path?: string | null
           user_id?: string
+          variant_error?: string | null
+          variant_status?: string
           vehicle_count?: number | null
         }
         Relationships: [

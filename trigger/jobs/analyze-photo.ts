@@ -11,6 +11,7 @@ import type { DetectionOnlyBox } from "@/lib/gemini/types";
 import crypto from "crypto";
 import pLimit from "p-limit";
 import { generateFingerprint } from "./generate-fingerprint";
+import { generateImageVariantsJob } from "./generate-image-variants";
 
 /**
  * Analyze Photo Job
@@ -98,7 +99,7 @@ export const analyzePhoto = task({
 
       const { data: imageRecord, error: fetchError } = await supabase
         .from("images")
-        .select("id, file_path, user_id")
+        .select("id, file_path, user_id, thumbnail_path")
         .eq("id", imageId)
         .single();
 
@@ -116,6 +117,20 @@ export const analyzePhoto = task({
         imageId,
         filePath: imageRecord.file_path,
       });
+
+      // Defensive: ensure display variants exist even if the on-upload fan-out
+      // missed this image. Idempotent (the job claims only pending/failed rows),
+      // decoupled from analysis so a Gemini failure never blocks thumbnails.
+      if (!imageRecord.thumbnail_path) {
+        try {
+          await generateImageVariantsJob.trigger({ imageId });
+        } catch (variantErr) {
+          logger.warn("Failed to enqueue variant generation (non-fatal)", {
+            imageId,
+            error: variantErr instanceof Error ? variantErr.message : String(variantErr),
+          });
+        }
+      }
 
       // Step 2: Update image status to 'processing'
       const { error: statusError } = await supabase

@@ -2,6 +2,7 @@
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { analyzePhoto } from "./analyze-photo";
+import { generateImageVariantsJob } from "./generate-image-variants";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import pLimit from "p-limit";
@@ -103,6 +104,15 @@ export const batchProcess = task({
             await analyzePhoto.batchTrigger(
               chunk.map(imageId => ({
                 payload: { imageId, batchId, sessionId }
+              }))
+            );
+
+            // Fan-out variant generation in parallel with analysis. Variants are
+            // decoupled from analysis (ADR 0003): the grid gets thumbnails even
+            // if Gemini detection fails for an image.
+            await generateImageVariantsJob.batchTrigger(
+              chunk.map(imageId => ({
+                payload: { imageId }
               }))
             );
           })

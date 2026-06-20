@@ -37,6 +37,30 @@ differentiator. The North Star event is the **First Buck Re-Identified**.
 The collection of distinct Bucks an account has identified — the browsable
 roster of individual trophy deer, each with its history of Photos.
 
+### Trophy buck
+A **Buck whose antler Score crosses the threshold** that makes it worth
+showcasing to attract a lease deal — the individuals the product exists to
+surface. Trophy status is decided by **Score**, not by a glance. A Buck below
+the threshold is still a Buck and still catalogued; it is simply not a Trophy.
+
+### Score
+The numeric measure of antler quality (Boone & Crockett-style gross/net inches),
+used to decide whether a Buck is a **Trophy buck**. The Score is what "identifies
+a trophy." Distinct from a **Size impression** (below), which is a cheap
+qualitative glance, not a measurement. A Score is measured per **Detection**; a
+**Buck's** Score is the *highest* Score across all its Detections (its best rack
+view), so a poorer later photo never lowers a Buck's standing. The Trophy
+threshold is per-account.
+
+### Size impression
+A coarse, cheap qualitative read of a Buck's rack ("spike / basket / standard /
+trophy-looking", judged by rack width relative to the ears). Used only as an
+early filter to decide which Bucks are worth the cost of full **Scoring** — it
+is *not* the Trophy determination. **Naming drift:** persisted/returned in code
+as `size_class`, whose `"trophy"` value is a size *impression*, not a confirmed
+Trophy. The confirmed numeric measure is `score` / `score_class`. These are two
+different things and the code currently conflates them at the Trophy gate.
+
 ### Trophy fingerprint
 The distinguishing visual signature of a Buck (antler structure, markings) used
 to drive Re-identification and matching between Detections.

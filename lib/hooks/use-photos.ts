@@ -45,9 +45,11 @@ interface PhotosResponse {
     created_at: string
     updated_at: string
     thumbnailUrl: string | null
+    mediumUrl?: string | null
     imageUrl: string | null
     blurDataUrl?: string | null
     thumbnail_path?: string | null
+    medium_path?: string | null
     bestQualityStatus: string | null
   }>
   total: number
