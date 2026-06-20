@@ -2,6 +2,7 @@
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractAntlerFingerprint } from "@/lib/gemini/client";
+import { isTrophyScore, DEFAULT_TROPHY_THRESHOLD_INCHES } from "@/lib/scoring/gates";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
@@ -168,13 +169,35 @@ export const generateFingerprint = task({
         retryCount: metrics.retryCount,
       });
 
-      // Step 5: Save fingerprint to detections.antler_fingerprint (JSONB column)
+      // Step 5: Authoritative trophy decision on the fingerprint's gross score.
+      // This is the automatic promote/demote: the estimate only gated entry to
+      // the fingerprint; the fingerprint's gross score is the final word.
+      // See docs/adr/0004-trophy-gated-ai-cost-cascade.md.
+      const { data: ownerProfile } = await supabase
+        .from("profiles")
+        .select("trophy_threshold")
+        .eq("id", userId)
+        .single();
+      const trophyThreshold = ownerProfile?.trophy_threshold ?? DEFAULT_TROPHY_THRESHOLD_INCHES;
+      const grossScore = fingerprint.scores.gross_score;
+      const trophy = isTrophyScore(grossScore, trophyThreshold);
+
+      logger.info("Authoritative trophy decision", {
+        detectionId,
+        grossScore,
+        trophyThreshold,
+        isTrophy: trophy,
+      });
+
+      // Step 5b: Save fingerprint + authoritative score + trophy flag
       logger.info("Saving antler fingerprint to database", { detectionId });
 
       const { error: updateError } = await supabase
         .from("detections")
         .update({
           antler_fingerprint: fingerprint as any, // JSONB column
+          score_gross: grossScore,
+          is_trophy: trophy,
         })
         .eq("id", detectionId);
 
