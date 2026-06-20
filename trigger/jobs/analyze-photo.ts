@@ -12,6 +12,8 @@ import crypto from "crypto";
 import pLimit from "p-limit";
 import { generateFingerprint } from "./generate-fingerprint";
 import { generateImageVariantsJob } from "./generate-image-variants";
+import { estimateAntlerScore } from "@/lib/gemini/client";
+import { passesCoarseCut, passesScoreEstimateBand, DEFAULT_TROPHY_THRESHOLD_INCHES } from "@/lib/scoring/gates";
 
 /**
  * Analyze Photo Job
@@ -133,6 +135,16 @@ export const analyzePhoto = task({
           });
         }
       }
+
+      // Fetch the account's trophy threshold (gross inches) for the score gate.
+      const { data: ownerProfile } = await supabase
+        .from("profiles")
+        .select("trophy_threshold")
+        .eq("id", imageRecord.user_id)
+        .single();
+      const trophyThreshold = ownerProfile?.trophy_threshold ?? DEFAULT_TROPHY_THRESHOLD_INCHES;
+
+      logger.info("Trophy threshold resolved", { imageId, trophyThreshold });
 
       // Step 2: Update image status to 'processing'
       const { error: statusError } = await supabase
@@ -372,6 +384,43 @@ export const analyzePhoto = task({
             tokenUsage: classifyMetrics.totalTokens,
           });
 
+          // Step 2b: Score estimate (Step 2 of the trophy gate) — only for bucks
+          // that pass the coarse cut (drop spikes). See lib/scoring/gates.ts.
+          let scoreEstimate: { gross_score_estimate: number; confidence: number } | null = null;
+          if (passesCoarseCut(classification.size_class)) {
+            try {
+              const { result: estimate, metrics: estimateMetrics } = await estimateAntlerScore(
+                cropBase64,
+                "image/jpeg"
+              );
+              scoreEstimate = estimate;
+              classificationMetrics.push({
+                batch_id: batchId,
+                image_id: imageId,
+                gemini_call_type: "score_estimate",
+                model_used: estimateMetrics.modelUsed,
+                prompt_tokens: estimateMetrics.promptTokens,
+                response_tokens: estimateMetrics.responseTokens,
+                total_tokens: estimateMetrics.totalTokens,
+                is_rate_limited: estimateMetrics.wasRateLimited,
+                retry_count: estimateMetrics.retryCount,
+                duration_ms: estimateMetrics.durationMs,
+              });
+              logger.info("Buck score estimate completed", {
+                imageId,
+                detectionId,
+                grossScoreEstimate: estimate.gross_score_estimate,
+                confidence: estimate.confidence,
+              });
+            } catch (estErr) {
+              logger.warn("Score estimate failed; buck will not advance to fingerprint", {
+                imageId,
+                detectionId,
+                error: estErr instanceof Error ? estErr.message : String(estErr),
+              });
+            }
+          }
+
           const coords = computeBboxCoords(detection.box_2d);
 
           return {
@@ -393,6 +442,8 @@ export const analyzePhoto = task({
             deer_id: null,
             class: "deer",
             confidence: detection.confidence / 100,
+            score_estimate: scoreEstimate?.gross_score_estimate ?? null,
+            score_estimate_confidence: scoreEstimate?.confidence ?? null,
           };
         })
       );
@@ -580,25 +631,30 @@ export const analyzePhoto = task({
           recordCount: detectionRecords.length,
         });
 
-        // Step 7b: Queue fingerprint generation for trophy-tier bucks
-        // Get the inserted detection IDs to queue fingerprint jobs
+        // Step 7b: Queue fingerprint generation for bucks whose score estimate
+        // is within the confirm band (>= threshold - band). The fingerprint
+        // produces the authoritative score and the final trophy decision.
+        // See docs/adr/0004-trophy-gated-ai-cost-cascade.md.
         const { data: insertedDetections } = await supabase
           .from("detections")
-          .select("id, size_class")
+          .select("id, score_estimate")
           .eq("image_id", imageId)
-          .in("size_class", ["trophy"]);
+          .eq("class", "deer")
+          .not("score_estimate", "is", null);
 
-        const trophyDetections = insertedDetections?.filter(d => d.size_class === "trophy") ?? [];
+        const bandDetections = (insertedDetections ?? []).filter((d) =>
+          passesScoreEstimateBand(d.score_estimate, trophyThreshold)
+        );
 
-        if (trophyDetections.length > 0) {
-          logger.info("Queuing fingerprint generation for trophy bucks", {
+        if (bandDetections.length > 0) {
+          logger.info("Queuing fingerprint generation for in-band bucks", {
             imageId,
-            trophyCount: trophyDetections.length,
+            inBandCount: bandDetections.length,
+            trophyThreshold,
           });
 
-          // Queue fingerprint generation jobs for each trophy detection
           // Using triggerAndWait would block, so we use trigger() for async queuing
-          const fingerprintPromises = trophyDetections.map((detection) =>
+          const fingerprintPromises = bandDetections.map((detection) =>
             generateFingerprint.trigger({
               detectionId: detection.id,
               userId: imageRecord.user_id,
@@ -609,7 +665,7 @@ export const analyzePhoto = task({
             await Promise.all(fingerprintPromises);
             logger.info("Fingerprint generation jobs queued successfully", {
               imageId,
-              count: trophyDetections.length,
+              count: bandDetections.length,
             });
           } catch (fpError) {
             // Don't fail the main job if fingerprint queuing fails
