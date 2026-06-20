@@ -345,6 +345,10 @@ export type Database = {
           sam3_antler_score: number | null
           sam3_deer_score: number | null
           sex: string | null
+          is_trophy: boolean
+          score_estimate: number | null
+          score_estimate_confidence: number | null
+          score_gross: number | null
           size_class: string | null
           species: string | null
         }
@@ -377,6 +381,10 @@ export type Database = {
           sam3_antler_score?: number | null
           sam3_deer_score?: number | null
           sex?: string | null
+          is_trophy?: boolean
+          score_estimate?: number | null
+          score_estimate_confidence?: number | null
+          score_gross?: number | null
           size_class?: string | null
           species?: string | null
         }
@@ -409,6 +417,10 @@ export type Database = {
           sam3_antler_score?: number | null
           sam3_deer_score?: number | null
           sex?: string | null
+          is_trophy?: boolean
+          score_estimate?: number | null
+          score_estimate_confidence?: number | null
+          score_gross?: number | null
           size_class?: string | null
           species?: string | null
         }
@@ -820,6 +832,7 @@ export type Database = {
           id: string
           stripe_customer_id: string | null
           subscription_tier: string
+          trophy_threshold: number
           updated_at: string
         }
         Insert: {
@@ -830,6 +843,7 @@ export type Database = {
           id: string
           stripe_customer_id?: string | null
           subscription_tier?: string
+          trophy_threshold?: number
           updated_at?: string
         }
         Update: {
@@ -840,6 +854,7 @@ export type Database = {
           id?: string
           stripe_customer_id?: string | null
           subscription_tier?: string
+          trophy_threshold?: number
           updated_at?: string
         }
         Relationships: []
