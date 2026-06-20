@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Upload, Image, Crosshair, Camera, MapPin, Settings } from 'lucide-react'
+import { Upload, Image, Crosshair, Camera, MapPin, Settings, Share2 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useUIStore } from '@/lib/stores/ui'
@@ -24,6 +24,11 @@ const navigationItems = [
     name: 'Deer',
     href: '/deer',
     icon: Crosshair,
+  },
+  {
+    name: 'Showcase',
+    href: '/showcase',
+    icon: Share2,
   },
   {
     name: 'Cameras',
