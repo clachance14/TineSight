@@ -101,20 +101,22 @@ export const batchProcess = task({
               chunkSize: chunk.length,
             });
 
-            await analyzePhoto.batchTrigger(
-              chunk.map(imageId => ({
-                payload: { imageId, batchId, sessionId }
-              }))
-            );
-
-            // Fan-out variant generation in parallel with analysis. Variants are
+            // Fan-out analysis and variant generation together. Variants are
             // decoupled from analysis (ADR 0003): the grid gets thumbnails even
-            // if Gemini detection fails for an image.
-            await generateImageVariantsJob.batchTrigger(
-              chunk.map(imageId => ({
-                payload: { imageId }
-              }))
-            );
+            // if Gemini detection fails. The two enqueues are independent, so
+            // trigger them concurrently.
+            await Promise.all([
+              analyzePhoto.batchTrigger(
+                chunk.map(imageId => ({
+                  payload: { imageId, batchId, sessionId }
+                }))
+              ),
+              generateImageVariantsJob.batchTrigger(
+                chunk.map(imageId => ({
+                  payload: { imageId }
+                }))
+              ),
+            ]);
           })
         )
       );

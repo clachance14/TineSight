@@ -22,13 +22,21 @@ const STORAGE_BUCKET = 'photos';
 const MAX_INPUT_PIXELS = 60_000_000;
 
 /**
+ * Variant lifecycle states, mirroring the images.variant_status DB constraint.
+ * The generated Supabase types widen this to `string`; use this app-level union
+ * wherever the value is read/written so the invariant survives in code.
+ */
+export type VariantStatus = 'pending' | 'processing' | 'ready' | 'failed';
+
+/**
  * Variant size/quality budgets (see ADR 0002).
- * Dimensions are a bounding box (fit: 'inside'); bytes are a target, not a hard
- * cap — we don't chase a byte ceiling into quality/retry churn.
+ * Dimensions are a bounding box (fit: 'inside'). Byte targets are advisory only
+ * (thumbnail ~<40KB, medium ~<200KB) — we don't chase a byte ceiling into
+ * quality/retry churn, so they live in this comment, not as enforced config.
  */
 export const VARIANT_CONFIG = {
-  thumbnail: { maxDim: 400, quality: 72, effort: 4, targetBytes: 40 * 1024 },
-  medium: { maxDim: 1080, quality: 80, effort: 4, targetBytes: 200 * 1024 },
+  thumbnail: { maxDim: 400, quality: 72, effort: 4 },
+  medium: { maxDim: 1080, quality: 80, effort: 4 },
 } as const;
 
 export interface ImageVariants {

@@ -135,6 +135,27 @@ No Playwright/Vitest. A surface is "done" when:
   menus — make touch-friendly or remove.
 - `/quality-sweep` the full diff (Codex + Claude structural review).
 
+## Follow-ups logged by the Step 1 quality sweep (dual-model)
+
+Robustness items deferred from the variant pipeline (not blocking; need schema/
+design changes — kept out of the increment to avoid scope creep):
+
+- **Stuck-`processing` reclaim**: a worker crash after the claim strands a row in
+  `processing` forever (no path reclaims it). Add a claim timestamp
+  (`variant_claimed_at`) + a stale-reclaim sweep, or have the backfill pick up
+  `processing` rows older than a threshold. (Both models, P1.)
+- **Cross-nudge attempt cap**: `failed` is re-claimable by any later nudge, so a
+  permanently-corrupt original can be retried 3-at-a-time indefinitely. Add a
+  `variant_attempts` counter to make `failed` terminal after N. (Both models.)
+- **Kill `.mjs`/`.ts` drift**: `scripts/backfill-variants.mjs` duplicates
+  `lib/image/variants.ts` (already drifted). Extract a Node-importable
+  `lib/image/variants.core.mjs` shared by both. (Both models, P2 — deferred:
+  module-resolution risk to the green build.)
+- **RPC-ize keyset pagination**: replace the hand-built PostgREST `.or()` cursor
+  in `backfill-variants.ts` with a typed SQL RPC + matching index. (Codex, P2.)
+- **route.ts dead arrays**: `imagePaths`/`thumbnailPaths` are built but unused
+  (pre-existing). Remove. (Claude, P3.)
+
 ## Open items to resolve during grounding (loop decides via /feature)
 - Exact budget numbers (thumbnail bytes, DOM cap, LCP) — measure real data.
 - Whether to salvage `fix/photo-grid-scroll-performance` (2 commits) for the

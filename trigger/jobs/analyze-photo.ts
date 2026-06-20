@@ -99,7 +99,7 @@ export const analyzePhoto = task({
 
       const { data: imageRecord, error: fetchError } = await supabase
         .from("images")
-        .select("id, file_path, user_id, thumbnail_path")
+        .select("id, file_path, user_id, variant_status")
         .eq("id", imageId)
         .single();
 
@@ -119,9 +119,11 @@ export const analyzePhoto = task({
       });
 
       // Defensive: ensure display variants exist even if the on-upload fan-out
-      // missed this image. Idempotent (the job claims only pending/failed rows),
-      // decoupled from analysis so a Gemini failure never blocks thumbnails.
-      if (!imageRecord.thumbnail_path) {
+      // missed this image. Gated on the authoritative variant_status (symmetric
+      // with the job's own claim predicate); the idempotent claim dedupes any
+      // overlap with the batch fan-out. Decoupled so a Gemini failure never
+      // blocks thumbnails.
+      if (imageRecord.variant_status !== "ready") {
         try {
           await generateImageVariantsJob.trigger({ imageId });
         } catch (variantErr) {
