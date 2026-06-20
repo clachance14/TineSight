@@ -52,3 +52,19 @@ but the token model leaves room to add them later.
   account-scoped path — a future change to data access must consider both.
 - This is a documented, intentional exception to Principle 3's "no public read"
   posture, scoped strictly to Showcase content the operator explicitly curated.
+
+## Implementation notes (post-build security review)
+
+Validated by a dual-model security sweep (Codex + Claude) — no cross-tenant
+exposure; the public path leaks nothing beyond the curated DTO. Settled details:
+
+- Public reads go through the `get_public_showcase(token)` SECURITY DEFINER RPC
+  returning a fixed DTO; the public page's service-role client is used ONLY to
+  call that RPC and to sign the medium image paths it returns (no raw reads).
+- The cross-tenant invariant (curated buck must belong to the showcase owner) is
+  enforced by a DB trigger, and the RPC re-asserts ownership on every join.
+- **Known accepted trade-off:** Showcase image URLs are signed with a short TTL
+  (~300s). The HTML is `no-store` + `force-dynamic`, so a revoked link stops
+  serving immediately, but image URLs already delivered to a viewer remain valid
+  for up to the TTL after revocation. Acceptable for curated marketing imagery;
+  tighten via a per-request image proxy if instant image revocation is needed.

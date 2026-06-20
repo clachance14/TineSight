@@ -112,12 +112,17 @@ export async function setShowcaseActive(
   isActive: boolean
 ): Promise<{ error: Error | null }> {
   const supabase = await createClient()
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('showcases')
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
     .eq('id', showcaseId)
     .eq('user_id', userId)
-  return { error }
+    .select('id')
+  if (error !== null) return { error }
+  // No row updated => not owned / not found. Don't report a false success on a
+  // revocation control.
+  if (data === null || data.length === 0) return { error: new Error('Showcase not found') }
+  return { error: null }
 }
 
 /** Rotate the token (invalidates the old link immediately). */
@@ -127,13 +132,19 @@ export async function regenerateShowcaseToken(
 ): Promise<{ data: { token: string } | null; error: Error | null }> {
   const supabase = await createClient()
   const token = generateShowcaseToken()
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('showcases')
     .update({ token, updated_at: new Date().toISOString() })
     .eq('id', showcaseId)
     .eq('user_id', userId)
-  if (error) {
+    .select('id')
+  if (error !== null) {
     return { data: null, error }
+  }
+  // No row updated => not owned / not found. Don't hand back a token that was
+  // never persisted (the old link would still be live).
+  if (data === null || data.length === 0) {
+    return { data: null, error: new Error('Showcase not found') }
   }
   return { data: { token }, error: null }
 }
