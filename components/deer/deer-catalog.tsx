@@ -104,7 +104,7 @@ export function DeerCatalog({ onDeerClick, onCreateClick }: DeerCatalogProps): R
           {deer.map((d) => (
             <Link href={`/deer/${d.id}`} key={d.id}>
               <Card
-                className="cursor-pointer transition-all hover:ring-2 hover:ring-copper"
+                className="cursor-pointer transition-transform duration-100 hover:ring-2 hover:ring-copper active:scale-[0.98]"
                 onClick={() => {
                   onDeerClick?.(d)
                 }}
