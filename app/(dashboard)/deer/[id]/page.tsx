@@ -51,23 +51,24 @@ export default async function DeerDetailPage({ params }: DeerDetailPageProps) {
     // Fetch reference detection with image info, bbox, and fingerprint
     const { data: refDetection } = await supabase
       .from('detections')
-      .select('image_id, bbox_x, bbox_y, bbox_width, bbox_height, antler_fingerprint, images!inner(file_path)')
+      .select('image_id, bbox_x, bbox_y, bbox_width, bbox_height, antler_fingerprint, images!inner(file_path, medium_path)')
       .eq('id', deer.reference_detection_id)
       .single()
 
     if (refDetection) {
       const imageData = refDetection as unknown as {
-        images: { file_path: string }
+        images: { file_path: string; medium_path: string | null }
         bbox_x: number | null
         bbox_y: number | null
         bbox_width: number | null
         bbox_height: number | null
         antler_fingerprint: unknown
       }
+      // Medium variant for the bbox-zoomed reference, never the full-res original.
       const { data: urlData } = await supabase
         .storage
         .from('photos')
-        .createSignedUrl(imageData.images.file_path, 3600)
+        .createSignedUrl(imageData.images.medium_path ?? imageData.images.file_path, 3600)
 
       referenceImageUrl = urlData?.signedUrl ?? null
       referenceBbox = {

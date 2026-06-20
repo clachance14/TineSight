@@ -174,7 +174,7 @@ export async function getDeerCatalog(
         bbox_y,
         bbox_width,
         bbox_height,
-        images!inner(file_path)
+        images!inner(file_path, medium_path)
       )
     `, { count: 'exact' })
     .eq('user_id', userId)
@@ -212,11 +212,15 @@ export async function getDeerCatalog(
 
   deerToReturn.forEach((d: Record<string, unknown>, index: number) => {
     const refDetection = d['reference_detection'] as {
-      images: { file_path: string }
+      images: { file_path: string; medium_path: string | null }
     } | null
 
-    if (refDetection?.images?.file_path) {
-      filePaths.push({ index, path: refDetection.images.file_path })
+    // Serve the MEDIUM variant for catalog cards (the bbox-zoom magnifies a
+    // region, so the medium is sharp enough); never the full-res original
+    // (ADR 0003 budget). Fall back to the original if the variant isn't ready.
+    const refPath = refDetection?.images?.medium_path ?? refDetection?.images?.file_path
+    if (refPath) {
+      filePaths.push({ index, path: refPath })
     }
   })
 

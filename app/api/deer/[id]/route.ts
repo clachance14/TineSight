@@ -39,19 +39,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   if (deer.reference_detection_id) {
     const { data: refDetection } = await supabase
       .from('detections')
-      .select('bbox_x, bbox_y, bbox_width, bbox_height, images!inner(file_path)')
+      .select('bbox_x, bbox_y, bbox_width, bbox_height, images!inner(file_path, medium_path)')
       .eq('id', deer.reference_detection_id)
       .single()
 
     if (refDetection) {
       const imageData = refDetection as unknown as {
-        images: { file_path: string }
+        images: { file_path: string; medium_path: string | null }
         bbox_x: number | null
         bbox_y: number | null
         bbox_width: number | null
         bbox_height: number | null
       }
-      referenceImageUrl = await getCachedSignedUrl(imageData.images.file_path)
+      // Medium variant for the bbox-zoomed reference, never the full-res original.
+      referenceImageUrl = await getCachedSignedUrl(imageData.images.medium_path ?? imageData.images.file_path)
       referenceBbox = {
         x: imageData.bbox_x,
         y: imageData.bbox_y,
@@ -84,14 +85,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       image_id,
       size_class,
       estimated_point_range,
-      images!inner(file_path, captured_at)
+      images!inner(file_path, thumbnail_path, medium_path, captured_at)
     `)
     .eq('deer_id', deerId)
     .order('created_at', { ascending: false })
     .range(offset, offset + pageSize - 1)
 
-  // Get signed URLs for sightings - CACHED batch operation
-  const sightingFilePaths = (sightings || []).map((s: any) => s.images.file_path)
+  // Get signed URLs for sightings - CACHED batch operation. Sightings render as
+  // small grid thumbnails, so prefer the thumbnail variant, then medium, never
+  // the full-res original (ADR 0003 budget).
+  const sightingFilePaths = (sightings || []).map((s: any) => s.images.thumbnail_path ?? s.images.medium_path ?? s.images.file_path)
   const cachedUrls = await getCachedSignedUrls(sightingFilePaths)
 
   const sightingsWithUrls = (sightings || []).map((sighting: any, index: number) => ({
