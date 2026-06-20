@@ -177,7 +177,19 @@ design changes — kept out of the increment to avoid scope creep):
 - **RPC-ize keyset pagination**: replace the hand-built PostgREST `.or()` cursor
   in `backfill-variants.ts` with a typed SQL RPC + matching index. (Codex, P2.)
 - **route.ts dead arrays**: `imagePaths`/`thumbnailPaths` are built but unused
-  (pre-existing). Remove. (Claude, P3.)
+  (pre-existing). Remove. (Claude, P3.) — DONE in Step 2 sweep.
+
+## Follow-ups logged by the Step 2 quality sweep (dual-model)
+
+- **Split the grid into query vs pure component**: `PhotoGrid` still calls
+  `usePhotosInfinite` even when `externalData` owns the data (unused internal
+  query path). Extract `PhotoGridWithQuery` + pure `VirtualPhotoGrid`, or add
+  `enabled: !externalData` to the hook. (Both models, P2 — deferred: refactor.)
+- **Consolidate the detail swipe/tap gesture classification**: `touchStartRef`
+  is read in both the overlay `onTouchEnd` and inside `handleSwipeEnd` with an
+  implicit ordering contract; thresholds split across two functions. Extract one
+  `classifyGesture(start,end) -> 'tap'|'prev'|'next'|'none'`. (Both models, P2 —
+  works today, fragile.)
 
 ## Open items to resolve during grounding (loop decides via /feature)
 - Exact budget numbers (thumbnail bytes, DOM cap, LCP) — measure real data.

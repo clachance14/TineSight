@@ -10,6 +10,11 @@ interface PhotoLightboxProps {
   onClose: () => void
 }
 
+/** Distance between two active touch points (pinch span). */
+function touchDist(a: React.Touch, b: React.Touch): number {
+  return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)
+}
+
 export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps) {
   const [scale, setScale] = useState(1)
   const [position, setPosition] = useState({ x: 0, y: 0 })
@@ -115,9 +120,6 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
   }, [])
 
   // Touch handlers: two-finger pinch to zoom, one-finger drag to pan (when zoomed)
-  const touchDist = (a: React.Touch, b: React.Touch): number =>
-    Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)
-
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     const a = e.touches[0]
     const b = e.touches[1]
@@ -155,6 +157,22 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (e.touches.length < 2) pinchRef.current = null
+    // Pinch -> one finger left: hand off to pan seamlessly (no dead state) so the
+    // remaining finger keeps dragging instead of doing nothing until re-touch.
+    const remaining = e.touches[0]
+    if (e.touches.length === 1 && remaining !== undefined && scale > 1) {
+      setIsDragging(true)
+      setDragStart({ x: remaining.clientX - position.x, y: remaining.clientY - position.y })
+      return
+    }
+    if (e.touches.length === 0) {
+      setIsDragging(false)
+    }
+  }, [scale, position])
+
+  // System interruption (incoming call, OS gesture): reset all gesture state.
+  const handleTouchCancel = useCallback(() => {
+    pinchRef.current = null
     setIsDragging(false)
   }, [])
 
@@ -219,6 +237,7 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
         style={{ cursor: scale > 1 ? (isDragging ? "grabbing" : "grab") : "default" }}
       >
         <div

@@ -384,21 +384,19 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     // Fetch quality status and generate signed URLs in parallel for performance
     const photoIds = photosToReturn.map((p) => p.id)
 
-    // Collect all file paths for batch URL generation (much faster than individual calls)
+    // Collect file paths for batch URL generation (much faster than individual calls).
+    // The grid is thumbnail-only and the lightbox loads full-res from the detail
+    // endpoint, so the LIST endpoint signs ONLY thumbnail + medium — never the
+    // full-res original (ADR 0003: don't ship multi-MB URLs the client won't use).
     const allPaths: string[] = []
-    const thumbnailPaths: string[] = []
-    const imagePaths: string[] = []
 
     for (const photo of photosToReturn) {
       if (photo.thumbnail_path) {
-        thumbnailPaths.push(photo.thumbnail_path)
         allPaths.push(photo.thumbnail_path)
       }
       if (photo.medium_path) {
         allPaths.push(photo.medium_path)
       }
-      allPaths.push(photo.file_path)
-      imagePaths.push(photo.file_path)
     }
 
     // Build quality status query promise
@@ -452,7 +450,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
         ...photo,
         thumbnailUrl: photo.thumbnail_path ? urlMap.get(photo.thumbnail_path) ?? null : null,
         mediumUrl: photo.medium_path ? urlMap.get(photo.medium_path) ?? null : null,
-        imageUrl: urlMap.get(photo.file_path) ?? null,
+        // Full-res is intentionally NOT signed for the list (thumbnail-only grid;
+        // the detail endpoint signs full-res where the lightbox needs it).
+        imageUrl: null,
         blurDataUrl: photo.blur_data_url ?? null,
         bestQualityStatus: qualityMap.get(photo.id) ?? null,
       }

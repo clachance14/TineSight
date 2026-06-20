@@ -1,6 +1,6 @@
 'use client'
 
-import { type JSX, useCallback, useMemo, useRef, useEffect, useState } from 'react'
+import { type JSX, useCallback, useMemo, useRef, useEffect, useLayoutEffect, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
@@ -22,7 +22,8 @@ interface PhotoGridProps {
 interface Photo {
   id: string
   thumbnailUrl: string | null
-  imageUrl: string | null
+  // NOTE: full-res imageUrl is deliberately NOT part of the grid contract — the
+  // grid is thumbnail-only by invariant (ADR 0003). Do not reintroduce it.
   blurDataUrl?: string | null
   detection_status: string
   bestQualityStatus: string | null
@@ -122,15 +123,20 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
     [onPhotoClick]
   )
 
-  const hasNextPage = externalData?.hasNextPage ?? internalQuery.hasNextPage
-  const isFetchingNextPage = externalData?.isFetchingNextPage ?? internalQuery.isFetchingNextPage
+  const hasNextPage = externalData?.hasNextPage ?? internalQuery.hasNextPage ?? false
+  const isFetchingNextPage = externalData?.isFetchingNextPage ?? internalQuery.isFetchingNextPage ?? false
+  // Depend on the (stable) function identities, not the externalData object which
+  // the parent recreates every render — otherwise this callback churns and the
+  // infinite-scroll effect re-runs on every render.
+  const externalFetchNextPage = externalData?.fetchNextPage
+  const internalFetchNextPage = internalQuery.fetchNextPage
   const fetchNextPage = useCallback(() => {
-    if (externalData?.fetchNextPage) {
-      externalData.fetchNextPage()
+    if (externalFetchNextPage != null) {
+      externalFetchNextPage()
     } else {
-      void internalQuery.fetchNextPage()
+      void internalFetchNextPage()
     }
-  }, [externalData, internalQuery])
+  }, [externalFetchNextPage, internalFetchNextPage])
 
   // --- Virtualization ---------------------------------------------------------
   // The outer div is the scroll container. We virtualize ROWS; each row renders
@@ -140,8 +146,9 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   const [columns, setColumns] = useState(2)
   const [rowHeight, setRowHeight] = useState(180)
 
-  // Measure container width -> column count + square row height.
-  useEffect(() => {
+  // Measure container width -> column count + square row height. useLayoutEffect
+  // so the first painted frame already has the real row height (no size jump).
+  useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const measure = (): void => {
@@ -175,14 +182,21 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   // Infinite scroll, driven by the virtualizer's own range (no IntersectionObserver,
   // no observer-root mismatch, no per-render observer churn). When the last
   // rendered row is within 2 rows of the end, pull the next page.
+  //
+  // Latch keyed on the loaded count: fire at most once per distinct loaded length,
+  // so we never chain-fetch multiple pages while one is in flight or re-fire on
+  // effect churn. The latch resets naturally when the new page changes the length.
+  const requestedAtLengthRef = useRef(0)
   const virtualRows = rowVirtualizer.getVirtualItems()
   useEffect(() => {
     const last = virtualRows[virtualRows.length - 1]
-    if (!last) return
-    if (last.index >= rowCount - 2 && hasNextPage && !isFetchingNextPage) {
+    if (last === undefined) return
+    const nearEnd = last.index >= rowCount - 2
+    if (nearEnd && hasNextPage && !isFetchingNextPage && requestedAtLengthRef.current !== photos.length) {
+      requestedAtLengthRef.current = photos.length
       fetchNextPage()
     }
-  }, [virtualRows, rowCount, hasNextPage, isFetchingNextPage, fetchNextPage])
+  }, [virtualRows, rowCount, hasNextPage, isFetchingNextPage, fetchNextPage, photos.length])
 
   if (isLoading) {
     return (
