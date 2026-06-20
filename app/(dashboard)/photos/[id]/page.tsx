@@ -93,8 +93,18 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
     notFound()
   }
 
-  // Get signed URL for the photo (may be null if storage file is missing)
-  const { data: imageUrl } = await getSignedViewUrl(photo.file_path)
+  // Display the MEDIUM variant, not the full-res original — loading a multi-MB
+  // original just to show a contained image is the budget violation Step 1/2 fix
+  // (ADR 0003). Full-res is signed separately and only used for explicit zoom in
+  // the lightbox. Falls back to full-res if the medium variant isn't ready yet.
+  const [fullResResult, mediumResult] = await Promise.all([
+    getSignedViewUrl(photo.file_path),
+    photo.medium_path != null && photo.medium_path !== ''
+      ? getSignedViewUrl(photo.medium_path)
+      : Promise.resolve({ data: null, error: null }),
+  ])
+  const fullResUrl = fullResResult.data
+  const imageUrl = mediumResult.data ?? fullResUrl
 
   // Transform detections for PhotoDetailClient component
   // Include Gemini analysis data (species, sex, buck size class, age class) and quality info
@@ -249,11 +259,15 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
         <div className="lg:col-span-2 space-y-3 md:space-y-4">
           <PhotoDetailClient
             imageUrl={imageUrl ?? null}
+            fullResUrl={fullResUrl ?? null}
             detections={detections}
             imageWidth={imageWidth}
             imageHeight={imageHeight}
             showDetections={photo.detection_status === 'completed'}
             referenceCount={referenceCount}
+            prevId={prevId}
+            nextId={nextId}
+            navQueryString={filterQueryString}
           />
 
           {/* Photo metadata */}

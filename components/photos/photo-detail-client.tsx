@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useRef } from "react"
+import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { ImageOff, Eye, EyeOff, ZoomIn } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
@@ -30,9 +31,15 @@ interface Detection {
 
 interface PhotoDetailClientProps {
   /**
-   * Signed URL for the photo image (null if storage file is missing)
+   * Signed URL for the displayed image — the MEDIUM variant (budget: never the
+   * full-res original just to show a contained image). Null if missing.
    */
   imageUrl: string | null
+  /**
+   * Signed URL for the full-resolution original, used ONLY for explicit zoom in
+   * the lightbox. Null if missing.
+   */
+  fullResUrl?: string | null
   /**
    * List of detections for this photo
    */
@@ -50,6 +57,11 @@ interface PhotoDetailClientProps {
    * User's current reference ROI count
    */
   referenceCount?: number
+  /** Adjacent photo ids for swipe navigation (mobile). */
+  prevId?: string | null
+  nextId?: string | null
+  /** Filter query string preserved across prev/next navigation. */
+  navQueryString?: string
 }
 
 /**
@@ -58,14 +70,51 @@ interface PhotoDetailClientProps {
  */
 export function PhotoDetailClient({
   imageUrl,
+  fullResUrl = null,
   detections,
   imageWidth,
   imageHeight,
   showDetections = true,
   referenceCount: _referenceCount = 0,
+  prevId = null,
+  nextId = null,
+  navQueryString = "",
 }: PhotoDetailClientProps) {
+  const router = useRouter()
+
   // Shared hover state with detection cards
   const { hoveredDetectionId, setHoveredDetectionId } = useDetectionHover()
+
+  // Horizontal swipe -> navigate to adjacent photo (mobile). Vertical swipes are
+  // ignored so page scroll is unaffected.
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const navTo = useCallback(
+    (id: string | null) => {
+      if (id === null || id === "") return
+      router.push(navQueryString !== "" ? `/photos/${id}?${navQueryString}` : `/photos/${id}`)
+    },
+    [router, navQueryString]
+  )
+  const handleSwipeStart = useCallback((e: React.TouchEvent) => {
+    const t = e.touches[0]
+    touchStartRef.current = t ? { x: t.clientX, y: t.clientY } : null
+  }, [])
+  const handleSwipeEnd = useCallback(
+    (e: React.TouchEvent) => {
+      const start = touchStartRef.current
+      const t = e.changedTouches[0]
+      touchStartRef.current = null
+      if (!start || !t) return
+      const dx = t.clientX - start.x
+      const dy = t.clientY - start.y
+      // Horizontal intent: dominant X movement past a threshold.
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        if (dx < 0) navTo(nextId)
+        else navTo(prevId)
+      }
+    },
+    [navTo, nextId, prevId]
+  )
 
   // Detection edit panel state
   const { openPanel } = useDetectionEdit()
@@ -121,12 +170,22 @@ export function PhotoDetailClient({
                   }}
                 />
 
-                {/* Mobile tap-to-zoom overlay */}
+                {/* Mobile gesture overlay: tap to zoom, horizontal swipe to
+                    move between photos. */}
                 <div
-                  className="absolute inset-0 z-10 md:hidden cursor-pointer"
-                  onClick={() => setIsLightboxOpen(true)}
+                  className="absolute inset-0 z-10 md:hidden"
+                  onTouchStart={handleSwipeStart}
+                  onTouchEnd={(e) => {
+                    const start = touchStartRef.current
+                    const t = e.changedTouches[0]
+                    handleSwipeEnd(e)
+                    // Treat a near-stationary touch as a tap -> open zoom.
+                    if (start && t && Math.abs(t.clientX - start.x) < 10 && Math.abs(t.clientY - start.y) < 10) {
+                      setIsLightboxOpen(true)
+                    }
+                  }}
                   role="button"
-                  aria-label="Tap to zoom"
+                  aria-label="Tap to zoom, swipe to change photo"
                 />
 
                 {/* Detection overlay */}
@@ -184,10 +243,12 @@ export function PhotoDetailClient({
         </CardContent>
       </Card>
 
-      {/* Photo Lightbox for zooming (only render when image exists) */}
+      {/* Photo Lightbox for zooming — uses the full-resolution original (the one
+          place we deliberately load full-res, on explicit user zoom). Falls back
+          to the medium display URL if no original is available. */}
       {imageUrl && (
         <PhotoLightbox
-          imageUrl={imageUrl}
+          imageUrl={fullResUrl ?? imageUrl}
           isOpen={isLightboxOpen}
           onClose={() => setIsLightboxOpen(false)}
         />

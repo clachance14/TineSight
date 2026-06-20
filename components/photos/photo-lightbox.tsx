@@ -16,6 +16,8 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
+  // Two-finger pinch state: initial finger distance + scale at gesture start.
+  const pinchRef = useRef<{ startDist: number; startScale: number } | null>(null)
 
   // Reset zoom when opening, prevent body scroll, and scroll to top on close
   useEffect(() => {
@@ -112,28 +114,47 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
     setIsDragging(false)
   }, [])
 
-  // Touch event handlers for mobile panning
+  // Touch handlers: two-finger pinch to zoom, one-finger drag to pan (when zoomed)
+  const touchDist = (a: React.Touch, b: React.Touch): number =>
+    Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)
+
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    const touch = e.touches[0]
-    if (scale > 1 && e.touches.length === 1 && touch) {
+    const a = e.touches[0]
+    const b = e.touches[1]
+    if (e.touches.length === 2 && a !== undefined && b !== undefined) {
+      e.preventDefault()
+      pinchRef.current = { startDist: touchDist(a, b), startScale: scale }
+      setIsDragging(false)
+      return
+    }
+    if (scale > 1 && e.touches.length === 1 && a !== undefined) {
       e.preventDefault()
       setIsDragging(true)
-      setDragStart({ x: touch.clientX - position.x, y: touch.clientY - position.y })
+      setDragStart({ x: a.clientX - position.x, y: a.clientY - position.y })
     }
   }, [scale, position])
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    const touch = e.touches[0]
-    if (isDragging && e.touches.length === 1 && touch) {
+    const a = e.touches[0]
+    const b = e.touches[1]
+    const pinch = pinchRef.current
+    if (e.touches.length === 2 && pinch !== null && a !== undefined && b !== undefined) {
+      e.preventDefault()
+      const next = Math.max(0.5, Math.min(pinch.startScale * (touchDist(a, b) / pinch.startDist), 5))
+      setScale(next)
+      return
+    }
+    if (isDragging && e.touches.length === 1 && a !== undefined) {
       e.preventDefault()
       setPosition({
-        x: touch.clientX - dragStart.x,
-        y: touch.clientY - dragStart.y,
+        x: a.clientX - dragStart.x,
+        y: a.clientY - dragStart.y,
       })
     }
   }, [isDragging, dragStart])
 
-  const handleTouchEnd = useCallback(() => {
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length < 2) pinchRef.current = null
     setIsDragging(false)
   }, [])
 
@@ -182,7 +203,7 @@ export function PhotoLightbox({ imageUrl, isOpen, onClose }: PhotoLightboxProps)
       {/* Zoom hint */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-cream/60 text-xs md:text-sm text-center px-4">
         <span className="hidden sm:inline">Scroll to zoom • Drag to pan • Click outside or press Esc to close</span>
-        <span className="sm:hidden">Use +/- to zoom • Drag to pan • Tap outside to close</span>
+        <span className="sm:hidden">Pinch or +/- to zoom • Drag to pan • Tap outside to close</span>
       </div>
 
       {/* Image container */}
