@@ -154,6 +154,33 @@ Use your reasoning to compare antler width against ear width.
 `.trim();
 
 /**
+ * Mid-cost gross-score estimate prompt (Step 2 of the trophy gate).
+ * Cheaper than the full fingerprint: a single number + confidence, no per-tine
+ * breakdown. Used to decide which bucks are worth the expensive fingerprint.
+ */
+export const SCORE_ESTIMATE_PROMPT = `
+You are scoring a cropped image of a buck (a male deer with antlers).
+
+Estimate the Boone & Crockett GROSS score of this buck's rack, in inches.
+Gross score = total of main beam lengths + all tine lengths + mass
+(circumference) measurements + inside spread, with NO deductions.
+
+Reference points:
+- A small or young buck (basket rack): ~90-115 inches
+- A typical mature buck: ~115-135 inches
+- A trophy-class buck: 135+ inches
+- An exceptional buck: 160+ inches
+
+Use the deer's ears and body as a scale reference. Estimate conservatively when
+the angle, distance, or occlusion makes measurement uncertain, and lower your
+confidence accordingly.
+
+Return ONLY:
+- gross_score_estimate: your single best gross-score number in inches
+- confidence: 0-100, how confident you are given image quality and angle
+`.trim();
+
+/**
  * Stage 2: Deer Analysis Prompt (with Thinking feature)
  * Used by analyzeDeer() for detailed crop analysis with reasoning
  */

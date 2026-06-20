@@ -193,6 +193,25 @@ export const CLASSIFICATION_SCHEMA = {
   required: ["sex", "age_class", "confidence"],
 };
 
+export const SCORE_ESTIMATE_SCHEMA = {
+  type: "OBJECT" as const,
+  properties: {
+    gross_score_estimate: {
+      type: "NUMBER" as const,
+      description:
+        "Estimated Boone & Crockett GROSS score in inches (main beams + all tine lengths + mass circumferences + inside spread, with NO deductions). A mature whitetail is typically 110-160; trophy-class is 130+. Estimate conservatively from the visible rack.",
+      nullable: false,
+    },
+    confidence: {
+      type: "NUMBER" as const,
+      description:
+        "Confidence in this estimate from 0-100, accounting for angle, distance, and occlusion.",
+      nullable: false,
+    },
+  },
+  required: ["gross_score_estimate", "confidence"],
+};
+
 /**
  * Stage 3: Comparison Schema
  * Used by compareDeers() to match deer against known profiles

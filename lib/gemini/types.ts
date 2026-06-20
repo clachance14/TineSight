@@ -176,3 +176,19 @@ export const antlerFingerprintSchema = z.object({
 });
 
 export type AntlerFingerprintResult = z.infer<typeof antlerFingerprintSchema>;
+
+// Schema for mid-cost gross-score estimate (Step 2 of the trophy gate)
+export const scoreEstimateSchema = z.object({
+  gross_score_estimate: z
+    .number()
+    .min(0)
+    .max(300)
+    .describe("Estimated Boone & Crockett GROSS score in inches"),
+  confidence: z
+    .number()
+    .min(0)
+    .max(100)
+    .describe("Confidence in the estimate, 0-100"),
+});
+
+export type ScoreEstimateResult = z.infer<typeof scoreEstimateSchema>;
