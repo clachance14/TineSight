@@ -442,8 +442,10 @@ export const analyzePhoto = task({
             deer_id: null,
             class: "deer",
             confidence: detection.confidence / 100,
-            score_estimate: scoreEstimate?.gross_score_estimate ?? null,
-            score_estimate_confidence: scoreEstimate?.confidence ?? null,
+            // Columns are INTEGER (gross inches); round the model's number so the
+            // re-queried band value matches what we computed here.
+            score_estimate: scoreEstimate ? Math.round(scoreEstimate.gross_score_estimate) : null,
+            score_estimate_confidence: scoreEstimate ? Math.round(scoreEstimate.confidence) : null,
           };
         })
       );

@@ -191,6 +191,31 @@ design changes — kept out of the increment to avoid scope creep):
   `classifyGesture(start,end) -> 'tap'|'prev'|'next'|'none'`. (Both models, P2 —
   works today, fragile.)
 
+## Follow-ups logged by the Step 3 quality sweep (dual-model)
+
+Applied now: free SQL backfill (migration 043) of `is_trophy`/`score_gross` from
+existing `antler_fingerprint` JSONB (fixes the 042 RPC regression on existing
+data — 397 trophies restored, 0 AI cost); `Math.round` on the integer estimate.
+
+Deferred — the `size_class='trophy'` → `is_trophy`/`score` read-side migration.
+These are the operator's **Plan 2** (clustering/trophy.ts) and **Plan 3**
+(gallery/stats surfacing) per the trophy-score-gate roadmap; the score gate
+*writes* `is_trophy`, these *read* the old signal. No user-visible break today
+(reads still use `size_class`; `is_trophy` is consumed only by the clustering RPC,
+now correct post-backfill). Full leftover list for those plans:
+- **Plan 2 (trophy pipeline / clustering):** `lib/services/trophy.ts` (trophy
+  counts 75/83/95/110/177, cluster source 410), `lib/services/fingerprint.ts:68`
+  (`getTrophyDetections`).
+- **Plan 3 (gallery + stats surfacing):** `lib/services/photos.ts` trophy filter
+  (249/676/968), `app/api/photos/route.ts` (173/305), `components/photos/
+  mobile-filter-bar.tsx` (85), `components/photos/photo-filters.tsx` (167),
+  `get_photo_stats` RPC (migration 033:53) `trophy_count`.
+- **Display-only (keep `size_class` — qualitative impression, not the gate):**
+  buck-grid/sightings-grid/match-review-modal badges; the `size_class` enum.
+- **Also Plan 3:** wire `buckScoreFromDetections` (deer canonical score, currently
+  unused); make `scripts/verify-score-estimate.mjs` import shared prompt/schema
+  (currently self-contained → drift risk).
+
 ## Open items to resolve during grounding (loop decides via /feature)
 - Exact budget numbers (thumbnail bytes, DOM cap, LCP) — measure real data.
 - Whether to salvage `fix/photo-grid-scroll-performance` (2 commits) for the
