@@ -91,6 +91,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // node:test unit tests are excluded from the tsconfig project (they use .ts
+    // import extensions for the native test runner), so the type-aware parser
+    // can't lint them — they are verified by `npm run test:unit`.
+    "**/*.test.ts",
   ]),
 ]);
 

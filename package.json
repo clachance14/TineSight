@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "type-check": "tsc --noEmit",
+    "test:unit": "node --test \"lib/**/*.test.ts\"",
     "prepare": "husky"
   },
   "dependencies": {
