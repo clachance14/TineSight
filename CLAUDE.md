@@ -1,250 +1,158 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repository.
 
-## Product Vision
+## Product
 
-**TineSight** helps hunting lease operators build a catalog of trophy bucks using AI-powered re-identification, enabling them to attract and close lease deals.
+**TineSight** helps hunting-lease operators build a catalog of trophy bucks using
+AI-powered re-identification, so they can attract and close lease deals.
 
 | Aspect | Detail |
 |--------|--------|
-| **Problem** | Volume overwhelm (1000s of photos) + Can't track individual bucks |
-| **Target User** | Hunting lease operator (commercial hunting operation) |
-| **Differentiator** | AI buck re-identification - "This is the same buck from last week" |
-| **North Star Metric** | First Buck Re-Identified |
+| **Problem** | Volume overwhelm (1000s of trail-cam photos) + can't track individual bucks |
+| **Target user** | Hunting-lease operator (commercial operation) |
+| **Differentiator** | AI buck re-identification — "this is the same buck from last week" |
+| **North Star** | First Buck Re-Identified |
 
-See `.specify/memory/product-vision.md` for complete problem definition, user journey, and success metrics.
+Domain language is canonical in **`CONTEXT.md`** (glossary: Photo, Detection,
+Buck, Re-ID, Catalog, Trophy buck, Score, Size impression, Showcase). Read it
+before using these terms — they are precise (e.g. a Trophy is decided by **Score**,
+not the cheap `size_class` glance).
 
-## Project Status
+## Project status
 
-TineSight is a **specification-first project** currently in the planning phase. Complete specifications exist for the MVP foundation, but source code has not yet been implemented. Start implementation with `/speckit.implement`.
-
-## MANDATORY: Multi-Agent Execution
-
-**After exiting plan mode, Claude MUST automatically:**
-
-1. **Analyze dependencies** - Identify independent vs dependent tasks
-2. **Group into parallel batches** - Cluster independent tasks
-3. **Execute with up to 5 agents** - Launch Task tool agents in parallel
-4. **Serialize only when required** - Only sequence when there are explicit dependencies
-
-**Parallelization rules:**
-- File edits in different directories → parallel
-- Independent component implementations → parallel
-- Database migrations → sequential (order matters)
-- Tests depending on implementation → sequential after implementation
-
-**Example:** If implementing 3 independent components, launch 3 agents in a single message.
+This is a **built, working app** (~49k LOC), not a spec-only project. It is
+pre-launch (operator dogfood; no external users yet). The mobile-core hardening
+effort (see `docs/plans/2026-06-20-mobile-core-hardening.md`) delivered:
+server-side image variants, a virtualized thumbnail-only mobile photo grid, a
+medium-variant lightbox, a Score-based trophy gate, and a public token Showcase.
 
 ## Commands
 
-Once the project is initialized:
-
 ```bash
-npm run dev          # Start development server at localhost:3000
-npm run build        # Production build
-npm run lint         # Run ESLint
-npm run type-check   # TypeScript type checking
+npm run dev          # dev server at localhost:3000
+npm run build        # production build
+npm run lint         # ESLint (NOTE: repo has a large pre-existing lint backlog)
+npm run type-check   # tsc --noEmit  (the real gate — keep it green)
+npm run test:unit    # node:test unit tests (lib/**/*.test.ts) — see Testing below
 ```
 
-Database operations:
+Database (Supabase):
 ```bash
-npx supabase login                                    # Authenticate with Supabase
-npx supabase link --project-ref <ref>                # Link to project
-npx supabase gen types typescript --linked > types/database.ts  # Generate types
+npx supabase gen types typescript --linked > types/database.ts
+# ^ CAUTION: a full regen from a newer CLI can drift the whole file and drop the
+#   hand-added convenience aliases at the bottom. Prefer SURGICAL manual edits to
+#   types/database.ts when adding a column/table (mirror an existing block).
 ```
 
-Trigger.dev (v3/v4):
+Trigger.dev (v3/v4 — background jobs in `trigger/jobs/`):
 ```bash
-npx trigger.dev@latest dev         # Start local Trigger.dev worker
-# Config: trigger.config.ts | Jobs: ./trigger/
-# Note: `npx trigger dev` and `npx @trigger.dev/cli dev` are WRONG commands
-# Jobs: analyze-photo (Gemini vision), compare-deer (matching), batch-process
+npx trigger.dev@latest dev    # correct. NOT `npx trigger dev`.
+# Jobs: analyze-photo, generate-image-variants, backfill-variants, batch-process,
+#       generate-fingerprint, compare-deer, cluster-trophy-detections, ...
 ```
 
-Utility scripts (in `scripts/`):
+Utility scripts (`scripts/`, load env via `import './env.mjs'` first):
 ```bash
-node scripts/cleanup-orphans.mjs   # Delete failed images
-node scripts/retry-failed.mjs      # Reset failed images and retry
-node scripts/trigger-batch.mjs     # Trigger batch processing
+node scripts/backfill-variants.mjs      # generate thumbnail+medium for existing photos
+node scripts/verify-score-estimate.mjs <crop.jpg>   # real-Gemini score-estimate smoke
 ```
 
 ## Architecture
 
-### Stack
-- **Framework**: Next.js 14 (App Router) with TypeScript 5.x
-- **Styling**: TailwindCSS + shadcn/ui
-- **Database**: PostgreSQL via Supabase with pgvector extension
-- **Auth**: Supabase Auth (email, OAuth, magic link)
-- **Storage**: Supabase Storage (images)
-- **Background Jobs**: Trigger.dev (async processing)
-- **ML Inference**: Gemini API (vision analysis + deer re-ID)
-- **Hosting**: Vercel (serverless)
-- **Data Fetching**: TanStack Query (interactive flows)
-- **Client State**: Zustand (UI state, selections)
-- **Forms**: React Hook Form + Zod
-- **Testing**: Playwright (E2E in CI), Vitest (unit)
+- **Framework**: Next.js 16 (App Router), React 19, TypeScript 5 (strict, incl.
+  `exactOptionalPropertyTypes` + `noPropertyAccessFromIndexSignature` — don't pass
+  explicit `undefined` to optional props; index-signature fields need `['x']`).
+- **Styling**: TailwindCSS + shadcn/ui. Dark mode default; TineSight palette.
+- **DB**: Supabase Postgres (+ pgvector). **Storage**: Supabase Storage (`photos`
+  bucket: originals at `file_path`, plus `thumbnails/{id}.webp`, `medium/{id}.webp`).
+- **Auth**: Supabase Auth via `@supabase/ssr`, cookie sessions.
+- **Background**: Trigger.dev. **ML**: Gemini (`@google/genai`).
+- **Data fetching**: TanStack Query. **State**: Zustand. **Forms**: RHF + Zod.
+- **Hosting**: Vercel.
 
-See `docs/plans/2025-12-01-technical-architecture-design.md` for complete architecture decisions.
+### Image variants (ADR 0003)
+Photos are stored full-res; the app serves **thumbnail (≤400px webp) / medium
+(~1080px webp)** variants. NEVER load the full-res original into a grid or a
+small/zoomed display — that caused an iOS Safari memory crash. The mobile photo
+grid is virtualized (`@tanstack/react-virtual`) and thumbnail-only. Variants are
+generated by the `generate-image-variants` job (status-tracked on
+`images.variant_status`); `backfill-variants` covers existing photos.
 
-### Project Structure (planned)
-```
-app/
-├── (auth)/           # Public auth pages (login, signup, forgot-password)
-├── (dashboard)/      # Protected pages (dashboard, photos, deer, cameras, settings)
-├── auth/callback/    # OAuth/magic link callback handler
-└── globals.css       # Design system styles
+### Trophy Score gate (ADR 0004)
+"Trophy" is decided by a numeric **Score**, not the `size_class` glance. Pipeline:
+detect → cheap size glance (drops only spikes) → mid-cost `estimateAntlerScore`
+→ fingerprint on a confirm band → authoritative `is_trophy` from the fingerprint
+gross score, vs `profiles.trophy_threshold` (default 130). Pure gate math lives in
+`lib/scoring/gates.ts` (unit-tested). NOTE: the read-side (gallery/dashboard) still
+filters `size_class='trophy'` in places — that migration is deferred (Plan 2/3;
+see the charter follow-ups). `is_trophy` is currently consumed by the clustering
+RPC + Showcase.
 
-components/
-├── auth/             # Auth form components
-├── dashboard/        # Sidebar, header
-├── photos/           # Upload, grid, viewer
-├── deer/             # Catalog, profile, matcher
-└── ui/               # shadcn/ui components
+### Showcase (ADR 0001)
+Public, no-login, revocable token links to curated trophy bucks. The ONLY public
+read path is the `get_public_showcase(token)` SECURITY DEFINER RPC returning a
+fixed DTO; the public page (`app/showcase/[token]`) uses the service-role client
+ONLY to call that RPC + sign the medium paths it returns. Owner-only RLS + a
+cross-tenant trigger. Middleware allowlists ONLY `/showcase/<token>`.
 
-lib/
-├── supabase/
-│   ├── client.ts     # Browser client
-│   ├── server.ts     # Server component client
-│   └── middleware.ts # Auth helper
-├── services/         # Data access layer (auth, photos, deer, detections)
-├── stores/           # Zustand stores (photo-selection, ui)
-└── utils.ts
+## Key patterns
 
-trigger/
-└── jobs/             # Background jobs (process-photo, generate-embedding)
+- **Service layer**: components never call Supabase directly — use `lib/services/*`.
+- **SSR auth**: `@supabase/ssr`, cookie sessions; always `getUser()` (never
+  `getSession()`) for server-side checks. Route protection in `proxy.ts` →
+  `lib/supabase/middleware.ts`.
+- **RLS is non-negotiable** on every table (`auth.uid()`). The one deliberate
+  public-read exception is the Showcase RPC (ADR 0001).
+- **Tenancy**: primarily `user_id`. `detections` has NO `user_id` — scope via
+  `images.user_id`.
 
-scripts/
-├── env.mjs           # Dotenv loader for .env.local
-├── cleanup-orphans.mjs
-├── retry-failed.mjs
-└── trigger-batch.mjs
+## Testing & verification (ADR 0002)
 
-tests/
-├── e2e/              # Playwright (run in CI)
-└── integration/      # Service tests
+- **No Vitest, no Playwright.** Pure logic → **`node:test`** run with
+  `npm run test:unit` (test files are `lib/**/*.test.ts`, excluded from tsconfig +
+  eslint because they use `.ts` import extensions for the native runner).
+- Integration/UI → `npm run build` + `npm run type-check` green, plus gstack
+  browser QA and **performance/memory budgets** (the real guardrail that makes the
+  iOS crash class impossible by construction).
+- A husky **pre-commit hook runs a nested `claude --print /review`** on every
+  commit. It is slow; for batch/automated work it can be bypassed by pointing
+  `core.hooksPath` elsewhere (restore with `git config core.hooksPath .husky/_`).
 
-middleware.ts         # Route protection
-```
+## Constitution (`.specify/memory/constitution.md`)
 
-### Key Patterns
+Serverless-first · Human-in-the-Loop AI (re-ID suggestions require user
+confirmation — NEVER auto-merge buck identities) · Multi-tenant isolation (RLS) ·
+RBAC · Integration testing over unit · Phased delivery · Design-system compliance.
 
-**Service Layer**: Components never call Supabase directly. Use `lib/services/*.ts` for all data access.
+## Design system
 
-**Data Flow**: Server Components for initial load, TanStack Query for client mutations/cache.
+Colors: `slate-deep` #2D3638 (bg), `slate` #3D4A4D (surface), `copper` #C4895A
+(accent), `cream` #F5F0E8 (text). Fonts: DM Sans / Fraunces / JetBrains Mono.
+Mobile is a **mobile web app** (phone browser) — touch-first, ≥44px targets, no
+hover-only affordances.
 
-**Supabase SSR Auth**: Use `@supabase/ssr` with cookie-based sessions. Always use `getUser()` for server-side auth checks (NOT `getSession()` - deprecated).
+## Key reference docs
 
-**Route Protection**: `middleware.ts` at project root handles auth redirects. Protected routes in `(dashboard)/` group.
+- `CONTEXT.md` — domain glossary
+- `docs/plans/2026-06-20-mobile-core-hardening.md` — the hardening charter + deferred follow-ups
+- `docs/adr/0001` public Showcase links · `0002` verification strategy · `0003`
+  image variant pipeline · `0004` trophy-gated AI cost cascade
+- `docs/superpowers/plans/2026-06-20-trophy-score-gate.md` — the score-gate plan (+ Plan 2/3 roadmap)
+- `.specify/memory/{product-vision,constitution}.md`
 
-**Row-Level Security**: REQUIRED on all tables. Use `auth.uid()` for ownership checks. Use `has_account_access()` helper for team member access.
+## Lessons learned
 
-**Utility Scripts**: Scripts in `scripts/` use dotenv for env loading. Pattern:
-```javascript
-import './env.mjs'  // Loads .env.local via dotenv
-// Then use process.env.VAR_NAME
-```
-
-## Constitution Principles
-
-All code must comply with these principles (see `.specify/memory/constitution.md` for full details):
-
-1. **Serverless-First** - Managed services only (Vercel, Supabase). No self-managed infrastructure.
-2. **Human-in-the-Loop AI** - AI suggestions require user confirmation. No autonomous actions on critical data.
-3. **Multi-Tenant Data Isolation** - RLS on every table. Cross-tenant access must be impossible.
-4. **Role-Based Access Control** - Owner vs Viewer roles. Server-side enforcement required.
-5. **Integration Testing Over Unit Testing** - Prioritize user flow tests over unit coverage.
-6. **Phased Delivery** - Independent user stories (P1, P2, P3 priority).
-7. **Design System Compliance** - Dark mode default. Use TineSight color palette.
-
-## Design System
-
-**Colors** (extend in `tailwind.config.ts`):
-- `slate-deep` (#2D3638) - Primary background
-- `slate` (#3D4A4D) - Elevated surfaces
-- `copper` (#C4895A) - Primary accent/CTAs
-- `copper-light` (#D49A6A) - Hover states
-- `cream` (#F5F0E8) - Primary text
-- `cream-dark` (#E8E3DB) - Secondary text
-
-**Typography**: Inter (sans), JetBrains Mono (monospace)
-
-**Components**: Use shadcn/ui with TineSight theme customizations
-
-## Development Workflow
-
-Use speckit commands for feature development:
-
-1. `/speckit.specify` - Create feature specification
-2. `/speckit.plan` - Generate implementation plan
-3. `/speckit.tasks` - Generate actionable task list
-4. `/speckit.implement` - Execute tasks
-
-## Key Reference Documents
-
-- **Product Vision**: `.specify/memory/product-vision.md` (problem, users, metrics, journey)
-- **Constitution**: `.specify/memory/constitution.md` (principles, tech stack, governance)
-- **Architecture Design**: `docs/plans/2025-12-01-technical-architecture-design.md` (complete tech decisions)
-- **Feature Spec**: `specs/001-saas-foundation/spec.md`
-- **Implementation Plan**: `specs/001-saas-foundation/plan.md`
-- **Data Model**: `specs/001-saas-foundation/data-model.md`
-- **Tasks**: `specs/001-saas-foundation/tasks.md`
-- **Quickstart**: `specs/001-saas-foundation/quickstart.md`
-- **API Contract**: `specs/001-saas-foundation/contracts/auth-api.yaml`
-
-## Environment Variables
-
-Copy `.env.example` to `.env.local` and configure:
-- `NEXT_PUBLIC_SUPABASE_URL` - Supabase project URL
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Public anon key
-- `SUPABASE_SERVICE_ROLE_KEY` - Server-only service role key
-- `GEMINI_API_KEY` - Google Gemini API key for vision analysis
-
-## Active Technologies
-- TypeScript 5.x (strict mode) + Next.js 14 (App Router), React 18, TanStack Query, Trigger.dev, Sharp (image processing) (003-roi-quality-filter)
-- PostgreSQL via Supabase with pgvector extension, Supabase Storage for images (003-roi-quality-filter)
-- @google/genai (Gemini SDK) (005-gemini-deer-pipeline)
-
-## Recent Changes
-- 005-gemini-deer-pipeline: Migrated from Replicate MegaDetector to Gemini for deer detection and matching
-- 003-roi-quality-filter: Added TypeScript 5.x (strict mode) + Next.js 14 (App Router), React 18, TanStack Query, Trigger.dev, Sharp (image processing)
-
-## Lessons Learned
-
-### Common Gotchas
-
-1. **Trigger.dev Command Syntax**
-   - ✅ Correct: `npx trigger.dev@latest dev`
-   - ❌ Wrong: `npx trigger dev`, `npx @trigger.dev/cli dev`
-
-2. **Supabase Auth - Use `getUser()` Not `getSession()`**
-   - `getSession()` is deprecated for server-side auth checks
-   - Always use `getUser()` with `@supabase/ssr` cookie-based sessions
-
-3. **Next.js 16 Middleware Deprecation**
-   - The `middleware.ts` convention is deprecated in favor of `proxy`
-   - Migration needed eventually (see Next.js docs)
-
-4. **Script Environment Loading**
-   - Scripts in `scripts/` must import `./env.mjs` first before accessing `process.env`
-   - Pattern: `import './env.mjs'` at top of file
-
-### Architectural Decisions
-
-5. **Service Layer Discipline**
-   - Components never call Supabase directly
-   - All data access through `lib/services/*.ts`
-
-6. **RLS is Non-Negotiable**
-   - Every table must have Row-Level Security enabled
-   - Use `auth.uid()` for ownership, `has_account_access()` for team access
-
-7. **Specification-First Workflow**
-   - Use speckit commands for structured feature development
-   - Specs live in `specs/<feature-name>/` with spec.md, plan.md, tasks.md
-
-### Migration History
-
-8. **Gemini Migration (005)**
-   - Migrated from Replicate MegaDetector to Gemini API
-   - Simplified ML inference stack with single provider
+1. **Trigger.dev**: `npx trigger.dev@latest dev` (not `npx trigger dev`).
+2. **Supabase auth**: `getUser()`, never `getSession()` server-side.
+3. **Scripts**: `import './env.mjs'` first.
+4. **iOS Safari image-memory crash**: never decode full-res images in a list;
+   serve variants + virtualize (ADR 0003).
+5. **Trophy ≠ size_class glance**: it's a numeric Score (ADR 0004). Keep the three
+   rack signals (size impression / score estimate / authoritative score) distinct.
+6. **types/database.ts**: prefer surgical edits over full `gen types` regen (regen
+   drift drops hand-added aliases / changes shapes).
+7. **Strict TS**: `exactOptionalPropertyTypes` rejects explicit `undefined` on
+   optional props — build the object conditionally.
+8. **node:test files** use `.ts` import extensions → excluded from tsconfig+eslint;
+   run via `npm run test:unit`.
