@@ -113,19 +113,42 @@ No Playwright/Vitest. A surface is "done" when:
 - Enforce + measure the budgets above.
 - Mobile lightbox polish: swipe between photos, pinch/zoom, smooth.
 
-### 3. Deer catalog + re-ID (mobile)
+### 3. Trophy-gated AI cost cascade (backend) — per ADR 0004
+Added to the loop 2026-06-20 by operator request. Full plan:
+`docs/superpowers/plans/2026-06-20-trophy-score-gate.md` (READ IT before building
+this step). ADR: `docs/adr/0004-trophy-gated-ai-cost-cascade.md`.
+- Restructure the Gemini pipeline into a cost-tiered cascade: detect → size
+  glance (drop spikes only) → NEW mid-cost score-estimate → fingerprint (within
+  confirm band) → automatic re-ID on confirmed trophies → cluster → operator
+  promote. Trophy = Score ≥ `account.trophy_threshold` (default 130″), NOT the
+  `size_class="trophy"` glance (fixes the CONTEXT.md conflation).
+- **CHANGE-WITH-CARE (Constitution P2):** touches the re-ID North Star pipeline
+  (compare-deer, cluster-trophy-detections, lib/gemini/*, lib/services/matching).
+  No auto-merge of identities (human-in-the-loop). Prove on real corpus by hand.
+- **COST GUARDRAIL:** new paid Gemini call types + reprocessing existing 4,114
+  photos = real $. Build + apply to NEW photos automatically; prove on a small
+  bounded sample; do NOT silently reprocess the whole corpus. Estimate full
+  reprocess cost and surface it in the SUMMARY for the operator's explicit go
+  (or run within a sane bounded cap). This is the one place "full authority" is
+  tempered by not spending unbounded money unflagged.
+- Must precede Steps 4 and 5: Showcase curates **trophy** bucks, and mobile
+  re-ID UI consumes the **match candidates** this cascade emits.
+
+### 4. Deer catalog + re-ID (mobile)
 - Mobile Catalog browsing + Buck profiles (uses thumbnails).
 - Match-review on mobile: swipe-to-approve/reject Match candidates
   (human-in-the-loop). North Star event: First Buck Re-Identified.
+- Consumes the Match candidates emitted by Step 3's cascade.
 - Stability-first; light polish.
 
-### 4. Showcase (new feature — per ADR 0001)
-- Curate Bucks into a Showcase; generate unguessable, revocable token link.
+### 5. Showcase (new feature — per ADR 0001)
+- Curate **trophy** Bucks (Score-confirmed, per Step 3) into a Showcase; generate
+  unguessable, revocable token link.
 - Public, no-login, mobile-polished Showcase page (reuses thumbnails/medium).
 - Token-gated read path kept strictly separate from account-scoped RLS; noindex.
 - Operator revoke/regenerate.
 
-### 5. Health pass
+### 6. Health pass
 - Remove orphaned Playwright specs, `playwright.config.ts`, `SETUP_TESTS.md`.
 - Rewrite the badly-stale CLAUDE.md (it still claims "no code yet" + Vitest/
   Playwright). Reflect real architecture + ADR 0002.
