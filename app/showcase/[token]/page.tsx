@@ -27,7 +27,7 @@ export default async function ShowcasePage({ params }: ShowcasePageProps): Promi
   const { data: rows, error } = await supabase.rpc('get_public_showcase', { p_token: token })
 
   // Identical 404 for revoked, absent, or errored — no revoked-vs-missing oracle.
-  if (error || !rows || rows.length === 0) {
+  if (error !== null || rows === null || rows.length === 0) {
     notFound()
   }
 
@@ -36,7 +36,7 @@ export default async function ShowcasePage({ params }: ShowcasePageProps): Promi
   const bucks = await Promise.all(
     rows.map(async (r) => {
       let imageUrl: string | null = null
-      if (r.image_path) {
+      if (r.image_path != null && r.image_path !== '') {
         const { data } = await supabase.storage
           .from('photos')
           .createSignedUrl(r.image_path, SIGNED_URL_TTL_SECONDS)
