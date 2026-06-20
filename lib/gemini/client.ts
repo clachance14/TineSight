@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
-import { analysisSchema, comparisonSchema, detectionOnlySchema, deerAnalysisSchema, antlerFingerprintSchema, type AnalysisResult, type ComparisonResult, type DetectionOnlyResult, type DeerAnalysisResult, type AntlerFingerprintResult } from "./types";
-import { PHOTO_ANALYSIS_PROMPT, buildComparisonPromptWithCatalog, DEER_CLASSIFICATION_PROMPT, DETECTION_ONLY_PROMPT, DEER_ANALYSIS_PROMPT, ANTLER_FINGERPRINT_PROMPT } from "./prompts";
-import { DETECTION_SCHEMA, CLASSIFICATION_SCHEMA, COMPARISON_SCHEMA, ANALYSIS_SCHEMA, DEER_ANALYSIS_SCHEMA, ANTLER_FINGERPRINT_SCHEMA } from "./schemas";
+import { analysisSchema, comparisonSchema, detectionOnlySchema, deerAnalysisSchema, antlerFingerprintSchema, scoreEstimateSchema, type AnalysisResult, type ComparisonResult, type DetectionOnlyResult, type DeerAnalysisResult, type AntlerFingerprintResult, type ScoreEstimateResult } from "./types";
+import { PHOTO_ANALYSIS_PROMPT, buildComparisonPromptWithCatalog, DEER_CLASSIFICATION_PROMPT, DETECTION_ONLY_PROMPT, DEER_ANALYSIS_PROMPT, ANTLER_FINGERPRINT_PROMPT, SCORE_ESTIMATE_PROMPT } from "./prompts";
+import { DETECTION_SCHEMA, CLASSIFICATION_SCHEMA, COMPARISON_SCHEMA, ANALYSIS_SCHEMA, DEER_ANALYSIS_SCHEMA, ANTLER_FINGERPRINT_SCHEMA, SCORE_ESTIMATE_SCHEMA } from "./schemas";
 
 /**
  * Metrics captured from a Gemini API call
@@ -508,6 +508,106 @@ export async function classifyDeerCrop(
   }
 
   throw lastError || new Error("All Gemini models failed for classification");
+}
+
+/**
+ * Result from estimateAntlerScore including metrics
+ */
+export interface EstimateScoreResult {
+  result: ScoreEstimateResult;
+  metrics: GeminiMetrics;
+}
+
+/**
+ * Mid-cost gross-score estimate for a cropped buck (Step 2 of the trophy gate).
+ *
+ * Cheaper than extractAntlerFingerprint (no Thinking, no per-tine breakdown):
+ * a single gross-score number + confidence, used to decide which bucks are
+ * worth the expensive fingerprint + re-ID.
+ * See docs/adr/0004-trophy-gated-ai-cost-cascade.md.
+ */
+export async function estimateAntlerScore(
+  cropBase64: string,
+  mimeType: string
+): Promise<EstimateScoreResult> {
+  const ai = getGeminiClient();
+  const startTime = Date.now();
+
+  let lastError: Error | null = null;
+  let totalRetryCount = 0;
+  let wasRateLimited = false;
+
+  for (const model of MODEL_FALLBACK_CHAIN) {
+    try {
+      const { result: response, retryCount, wasRateLimited: rateLimited } = await withRetry(async () => {
+        return await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              parts: [
+                { inlineData: { data: cropBase64, mimeType } },
+                { text: SCORE_ESTIMATE_PROMPT }
+              ]
+            }
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: SCORE_ESTIMATE_SCHEMA,
+            temperature: 0.1,
+          }
+        });
+      });
+
+      totalRetryCount += retryCount;
+      wasRateLimited = wasRateLimited || rateLimited;
+      const durationMs = Date.now() - startTime;
+
+      const text = response.text;
+      if (!text) {
+        throw new Error("Gemini returned empty response");
+      }
+
+      const parsed = JSON.parse(text);
+      const validated = scoreEstimateSchema.parse(parsed);
+
+      const promptTokens = response.usageMetadata?.promptTokenCount ?? 0;
+      const responseTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+      const totalTokens = response.usageMetadata?.totalTokenCount ?? 0;
+
+      console.log(`Gemini score-estimate token usage:`, {
+        promptTokens,
+        responseTokens,
+        totalTokens,
+      });
+
+      return {
+        result: validated,
+        metrics: {
+          promptTokens,
+          responseTokens,
+          totalTokens,
+          modelUsed: model,
+          wasRateLimited,
+          retryCount: totalRetryCount,
+          durationMs,
+        }
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const isOverloaded = lastError.message.includes("503") ||
+                           lastError.message.includes("overloaded") ||
+                           lastError.message.includes("UNAVAILABLE");
+
+      if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
+        console.log(`Model ${model} overloaded for score estimate, trying next fallback...`);
+        continue;
+      }
+
+      throw lastError;
+    }
+  }
+
+  throw lastError || new Error("All Gemini models failed for score estimate");
 }
 
 /**
