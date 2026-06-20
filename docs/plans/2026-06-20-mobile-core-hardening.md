@@ -216,6 +216,14 @@ now correct post-backfill). Full leftover list for those plans:
   unused); make `scripts/verify-score-estimate.mjs` import shared prompt/schema
   (currently self-contained → drift risk).
 
+## Follow-ups logged by the Step 4 quality sweep (Codex)
+
+Step 4 catalog/profile diff was clean. Two MORE full-res-for-small-display spots
+exist in adjacent match/create surfaces (single-image, lower risk than a grid) —
+swap to `medium_path ?? file_path` during Plan 2 / the health pass:
+- `app/api/detections/[id]/matches/route.ts:100` (+ `components/deer/match-confirmation.tsx:145`) — candidate deer card signs full-res.
+- `app/api/detections/[id]/route.ts:55` (+ `components/deer/create-deer-modal.tsx:109`) — create-deer modal background signs full-res.
+
 ## Open items to resolve during grounding (loop decides via /feature)
 - Exact budget numbers (thumbnail bytes, DOM cap, LCP) — measure real data.
 - Whether to salvage `fix/photo-grid-scroll-performance` (2 commits) for the
