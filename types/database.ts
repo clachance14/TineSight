@@ -1308,6 +1308,19 @@ export type Database = {
           fingerprint: Json
         }[]
       }
+      get_public_showcase: {
+        Args: { p_token: string }
+        Returns: {
+          showcase_title: string
+          deer_id: string
+          buck_name: string
+          score_gross: number | null
+          is_trophy: boolean
+          image_path: string | null
+          sighting_count: number
+          buck_position: number
+        }[]
+      }
       has_account_access: {
         Args: { account_owner_id: string }
         Returns: boolean

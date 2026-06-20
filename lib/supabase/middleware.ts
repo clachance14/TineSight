@@ -43,6 +43,9 @@ export async function updateSession(request: NextRequest) {
     !request.nextUrl.pathname.startsWith('/reset-password') &&
     !request.nextUrl.pathname.startsWith('/auth') &&
     !request.nextUrl.pathname.startsWith('/api/auth/') &&
+    // Public Showcase pages are intentionally no-login (ADR 0001). Only the
+    // public /showcase view is allowlisted; owner /api/showcase routes stay authed.
+    !request.nextUrl.pathname.startsWith('/showcase') &&
     request.nextUrl.pathname !== '/'
   ) {
     // no user, potentially respond by redirecting the user to the login page

@@ -21,6 +21,20 @@ const nextConfig: NextConfig = {
   // Enable Turbopack (Next.js 16 default)
   // Web Workers work natively in modern browsers without special bundler config
   turbopack: {},
+  // Public Showcase pages (ADR 0001): never index, never leak the token via
+  // referrer, never cache (so a revoked link stops working immediately).
+  async headers() {
+    return [
+      {
+        source: '/showcase/:token*',
+        headers: [
+          { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+          { key: 'Cache-Control', value: 'no-store, max-age=0' },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
