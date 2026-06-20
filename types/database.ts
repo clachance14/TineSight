@@ -901,6 +901,57 @@ export type Database = {
           },
         ]
       }
+      showcases: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          title: string
+          token: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          title?: string
+          token: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          title?: string
+          token?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      showcase_bucks: {
+        Row: {
+          created_at: string
+          deer_id: string
+          position: number
+          showcase_id: string
+        }
+        Insert: {
+          created_at?: string
+          deer_id: string
+          position?: number
+          showcase_id: string
+        }
+        Update: {
+          created_at?: string
+          deer_id?: string
+          position?: number
+          showcase_id?: string
+        }
+        Relationships: []
+      }
       team_members: {
         Row: {
           accepted_at: string | null
@@ -1438,3 +1489,10 @@ export type DeerUpdate = Database['public']['Tables']['deer']['Update']
 export type DeerEmbedding = Database['public']['Tables']['deer_embeddings']['Row']
 export type DeerEmbeddingInsert = Database['public']['Tables']['deer_embeddings']['Insert']
 export type DeerEmbeddingUpdate = Database['public']['Tables']['deer_embeddings']['Update']
+
+export type Showcase = Database['public']['Tables']['showcases']['Row']
+export type ShowcaseInsert = Database['public']['Tables']['showcases']['Insert']
+export type ShowcaseUpdate = Database['public']['Tables']['showcases']['Update']
+
+export type ShowcaseBuck = Database['public']['Tables']['showcase_bucks']['Row']
+export type ShowcaseBuckInsert = Database['public']['Tables']['showcase_bucks']['Insert']
