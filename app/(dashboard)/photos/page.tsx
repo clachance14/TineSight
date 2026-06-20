@@ -9,21 +9,18 @@ import { useAreas } from '@/lib/hooks/use-areas'
 import { useLocations } from '@/lib/hooks/use-locations'
 import { PhotoGrid } from '@/components/photos/photo-grid'
 
-// TEST: Adding PhotoGrid component back
-// Previous: extra queries - WORKED
-// Now testing: + PhotoGrid component (has selection store, memoization, scroll handling)
-
 function PhotosContent(): React.JSX.Element {
   const router = useRouter()
 
-  // Primary data
+  // Primary data. The grid virtualizes rows and loads thumbnails only, so the
+  // old crash-era `limit: 15` mitigation is no longer needed.
   const {
     data,
     isLoading,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = usePhotosInfinite({ limit: 15 })
+  } = usePhotosInfinite({ limit: 50 })
 
   // Extra queries (confirmed working)
   const { data: statsData } = useQuery({
