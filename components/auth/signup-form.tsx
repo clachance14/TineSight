@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { signUp } from '@/lib/services/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,9 +28,9 @@ const signupSchema = z.object({
 type SignupFormValues = z.infer<typeof signupSchema>
 
 export function SignupForm() {
+  const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
 
   const form = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
@@ -57,31 +58,14 @@ export function SignupForm() {
       }
 
       if (data?.user) {
-        setSuccess(true)
+        // Redirect to login with success message
+        router.push('/login?signup=success')
       }
     } catch (err) {
       setError('An unexpected error occurred. Please try again.')
     } finally {
       setIsLoading(false)
     }
-  }
-
-  if (success) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Check your email</CardTitle>
-          <CardDescription>
-            We've sent you an email with a confirmation link. Please check your inbox and click the link to activate your account.
-          </CardDescription>
-        </CardHeader>
-        <CardFooter>
-          <Button asChild variant="outline" className="w-full">
-            <Link href="/login">Go to login</Link>
-          </Button>
-        </CardFooter>
-      </Card>
-    )
   }
 
   return (
@@ -158,7 +142,7 @@ export function SignupForm() {
               </div>
             )}
 
-            <Button type="submit" disabled={isLoading} className="w-full">
+            <Button type="submit" disabled={isLoading} className="w-full h-11">
               {isLoading ? 'Creating account...' : 'Create account'}
             </Button>
           </form>

@@ -1,6 +1,6 @@
 'use client'
 
-import { type JSX, useCallback, useMemo, useRef, useEffect, useLayoutEffect, useState } from 'react'
+import { type JSX, useCallback, useMemo, useRef, useEffect, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
 import type { PhotoFilters } from '@/lib/services/photos'
@@ -142,27 +142,42 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
   // The outer div is the scroll container. We virtualize ROWS; each row renders
   // `columns` items. Only on-screen rows live in the DOM, so DOM nodes stay
   // bounded no matter how many tens of thousands of photos are loaded.
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const roRef = useRef<ResizeObserver | null>(null)
   const [columns, setColumns] = useState(2)
-  const [rowHeight, setRowHeight] = useState(180)
+  // itemSize = the square tile edge. rowHeight = itemSize + gap = the vertical
+  // step the virtualizer advances per row (so there's a real gap between rows).
+  const [itemSize, setItemSize] = useState(180)
+  const [rowHeight, setRowHeight] = useState(180 + GAP_PX)
 
-  // Measure container width -> column count + square row height. useLayoutEffect
-  // so the first painted frame already has the real row height (no size jump).
-  useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
+  // Measure container width -> column count + square tile size, via a CALLBACK
+  // REF (not useLayoutEffect + useRef). The loading / empty / error states below
+  // early-return without rendering the scroll container, so on first render the
+  // ref is null; an empty-dep effect runs once against that null and never
+  // re-runs when the real grid mounts. That left columns pinned at 2 and
+  // rowHeight at 180 on desktop, so 565px tiles were stepped only 180px apart —
+  // rows overlapped ~385px and buried the bottom (where the deer are). A
+  // callback ref fires exactly when the node attaches, so width is always real.
+  const setScrollEl = useCallback((el: HTMLDivElement | null) => {
+    scrollRef.current = el
+    roRef.current?.disconnect()
+    if (el == null) {
+      roRef.current = null
+      return
+    }
     const measure = (): void => {
       const width = el.clientWidth
       if (width <= 0) return
       const cols = columnsForWidth(width)
-      const itemSize = (width - GAP_PX * (cols - 1)) / cols
+      const size = (width - GAP_PX * (cols - 1)) / cols
       setColumns(cols)
-      setRowHeight(itemSize + GAP_PX)
+      setItemSize(size)
+      setRowHeight(size + GAP_PX)
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
-    return () => ro.disconnect()
+    roRef.current = ro
   }, [])
 
   const rowCount = Math.ceil(photos.length / columns)
@@ -231,7 +246,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+      <div ref={setScrollEl} className="min-h-0 flex-1 overflow-auto">
         <div
           className="relative w-full"
           style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
@@ -245,7 +260,7 @@ export function PhotoGrid({ filters, onPhotoClick, externalData }: PhotoGridProp
                 className="absolute left-0 top-0 grid w-full gap-1.5"
                 style={{
                   gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                  height: `${rowHeight}px`,
+                  height: `${itemSize}px`,
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
