@@ -67,10 +67,11 @@ export async function getTrophyStats(
   const supabase = await createClient()
 
   try {
-    // Get total trophy detections
+    // Get total trophy detections (needs the images join to filter by owner —
+    // without it this query errored and the count silently fell back to 0).
     const { count: totalTrophy } = await supabase
       .from('detections')
-      .select('*', { count: 'exact', head: true })
+      .select('*, images!inner(user_id)', { count: 'exact', head: true })
       .eq('images.user_id', userId)
       .eq('size_class', 'trophy')
       .is('deleted_at', null)
@@ -87,7 +88,7 @@ export async function getTrophyStats(
     // Get pending match count
     const { count: pendingMatches } = await supabase
       .from('match_candidates')
-      .select('*, detection:detections!detection_id(id, image_id, size_class, images!inner(user_id))', {
+      .select('*, detection:detections!detection_id!inner(id, image_id, size_class, images!inner(user_id))', {
         count: 'exact',
         head: true
       })
@@ -154,7 +155,7 @@ export async function getPendingMatchGroups(
         gemini_confidence,
         gemini_reasoning,
         antler_print_similarity,
-        detection:detections!detection_id(
+        detection:detections!detection_id!inner(
           id,
           image_id,
           crop_file_path,
@@ -167,9 +168,9 @@ export async function getPendingMatchGroups(
         suggested_deer:deer!candidate_deer_id(
           id,
           name,
-          antler_fingerprint,
           reference_detection:detections!reference_detection_id(
-            crop_file_path
+            crop_file_path,
+            antler_fingerprint
           )
         )
       `)
@@ -180,6 +181,29 @@ export async function getPendingMatchGroups(
 
     if (error) {
       return { data: null, error }
+    }
+
+    // Batch-sign every crop URL in ONE storage round-trip instead of awaiting a
+    // createSignedUrl call per match inside the loop. With 100+ pending matches
+    // the sequential version took ~12s and stalled the whole dashboard.
+    const cropPaths = new Set<string>()
+    for (const match of matches ?? []) {
+      const det = match.detection as unknown as { crop_file_path: string | null } | null
+      const sug = match.suggested_deer as unknown as {
+        reference_detection: { crop_file_path: string | null } | null
+      } | null
+      if (det?.crop_file_path) cropPaths.add(det.crop_file_path)
+      if (sug?.reference_detection?.crop_file_path)
+        cropPaths.add(sug.reference_detection.crop_file_path)
+    }
+    const signedUrlByPath = new Map<string, string>()
+    if (cropPaths.size > 0) {
+      const { data: signed } = await supabase.storage
+        .from('photos')
+        .createSignedUrls([...cropPaths], 3600)
+      for (const s of signed ?? []) {
+        if (s.signedUrl && s.path) signedUrlByPath.set(s.path, s.signedUrl)
+      }
     }
 
     // Group by deer
@@ -200,29 +224,21 @@ export async function getPendingMatchGroups(
       const deer = match.suggested_deer as unknown as {
         id: string
         name: string
-        antler_fingerprint: AntlerFingerprint | null
-        reference_detection: { crop_file_path: string | null } | null
+        reference_detection: { crop_file_path: string | null; antler_fingerprint: AntlerFingerprint | null } | null
       }
 
-      if (!deer) continue
+      // Defensive: with the !inner join above these should never be null, but a
+      // null embed (non-trophy/cross-tenant detection) must skip, not crash the
+      // whole dashboard (previously threw at detection.crop_file_path -> 500).
+      if (!detection || !deer) continue
 
-      // Generate signed URL for detection crop
-      let thumbnailUrl: string | null = null
-      if (detection.crop_file_path) {
-        const { data: urlData } = await supabase.storage
-          .from('photos')
-          .createSignedUrl(detection.crop_file_path, 3600)
-        thumbnailUrl = urlData?.signedUrl ?? null
-      }
-
-      // Generate signed URL for deer reference image
-      let referenceUrl: string | null = null
-      if (deer.reference_detection?.crop_file_path) {
-        const { data: urlData } = await supabase.storage
-          .from('photos')
-          .createSignedUrl(deer.reference_detection.crop_file_path, 3600)
-        referenceUrl = urlData?.signedUrl ?? null
-      }
+      // Signed URLs were pre-computed in one batched call above.
+      const thumbnailUrl = detection.crop_file_path
+        ? signedUrlByPath.get(detection.crop_file_path) ?? null
+        : null
+      const referenceUrl = deer.reference_detection?.crop_file_path
+        ? signedUrlByPath.get(deer.reference_detection.crop_file_path) ?? null
+        : null
 
       if (!grouped.has(deer.id)) {
         grouped.set(deer.id, {
@@ -230,7 +246,7 @@ export async function getPendingMatchGroups(
             id: deer.id,
             name: deer.name,
             reference_image_url: referenceUrl,
-            antler_print: deer.antler_fingerprint,
+            antler_print: deer.reference_detection?.antler_fingerprint ?? null,
           },
           pending_matches: [],
           total_count: 0,
@@ -411,7 +427,10 @@ export async function getUnclusteredTrophies(
       .is('deer_id', null)
       .not('antler_fingerprint', 'is', null)
       .is('deleted_at', null)
-      .order('images.captured_at', { ascending: false })
+      // Order by a TOP-LEVEL column. Ordering by an embedded column
+      // ('images.captured_at') is not valid PostgREST and threw
+      // "failed to parse order", which 500'd the whole dashboard.
+      .order('created_at', { ascending: false })
       .limit(50)
 
     if (error) {
@@ -427,6 +446,23 @@ export async function getUnclusteredTrophies(
     const clusteredSet = new Set(
       (clusteredIds ?? []).map((c) => c.detection_id)
     )
+
+    // Batch-sign all crop URLs in one storage round-trip (was a per-detection
+    // createSignedUrl await in the loop — up to 50 sequential round-trips).
+    const cropPaths = new Set<string>()
+    for (const detection of detections ?? []) {
+      const p = (detection as unknown as { crop_file_path: string | null }).crop_file_path
+      if (p) cropPaths.add(p)
+    }
+    const signedUrlByPath = new Map<string, string>()
+    if (cropPaths.size > 0) {
+      const { data: signed } = await supabase.storage
+        .from('photos')
+        .createSignedUrls([...cropPaths], 3600)
+      for (const s of signed ?? []) {
+        if (s.signedUrl && s.path) signedUrlByPath.set(s.path, s.signedUrl)
+      }
+    }
 
     const unclustered: TrophyDetection[] = []
 
@@ -445,13 +481,9 @@ export async function getUnclusteredTrophies(
       // Skip if in a cluster
       if (clusteredSet.has(d.id)) continue
 
-      let thumbnailUrl: string | null = null
-      if (d.crop_file_path) {
-        const { data: urlData } = await supabase.storage
-          .from('photos')
-          .createSignedUrl(d.crop_file_path, 3600)
-        thumbnailUrl = urlData?.signedUrl ?? null
-      }
+      const thumbnailUrl = d.crop_file_path
+        ? signedUrlByPath.get(d.crop_file_path) ?? null
+        : null
 
       unclustered.push({
         id: d.id,

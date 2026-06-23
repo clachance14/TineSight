@@ -14,4 +14,5 @@ export { exportPhotosTask } from './jobs/export-photos';
 export { cleanupExportsSchedule } from './jobs/cleanup-exports';
 export { generateFingerprint } from './jobs/generate-fingerprint';
 export { postCreationScan } from './jobs/post-creation-scan';
+export { reverseReidScan } from './jobs/reverse-reid-scan';
 export { clusterTrophyDetections } from './jobs/cluster-trophy-detections';

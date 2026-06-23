@@ -877,9 +877,15 @@ export interface AntlerFingerprintSchema {
     points_per_side: [number, number];
   };
   scores: {
+    /** Headline gross incl. abnormal points; drives the trophy gate (ADR 0006). */
     gross_score: number;
+    /** Gross of the typical frame (excludes abnormal points). Computed in code. */
+    gross_typical?: number;
     deductions: number;
+    /** Net typical (= net_typical). Kept for back-compat with existing readers. */
     net_score: number;
+    net_typical?: number;
+    net_non_typical?: number;
     score_class: '120s' | '140s' | '160s' | '180s' | '200s' | 'world_class' | 'unknown';
     typical_status: 'typical' | 'non_typical';
     abnormal_points_total: number | null;

@@ -39,6 +39,16 @@ interface DetectionOverlayProps {
    * ID of the currently hovered detection (for cross-highlighting with cards)
    */
   hoveredDetectionId?: string | null
+  /**
+   * ID of the detection "pinned" by an explicit tap. Its box is drawn even when
+   * showAll is false; its numbered pin is highlighted.
+   */
+  pinnedDetectionId?: string | null
+  /**
+   * When true, render small always-visible numbered pins so the user can locate
+   * a detection without turning on every box. Tapping a pin calls onDetectionClick.
+   */
+  showPins?: boolean
   onDetectionClick?: (detectionId: string) => void
   onDetectionHover?: (detectionId: string | null) => void
   /**
@@ -55,6 +65,8 @@ export function DetectionOverlay({
   showAll = true,
   selectedDetectionId,
   hoveredDetectionId,
+  pinnedDetectionId,
+  showPins = false,
   onDetectionClick,
   onDetectionHover,
   imageBounds,
@@ -65,7 +77,7 @@ export function DetectionOverlay({
 
   return (
     <div className="absolute inset-0 pointer-events-none">
-      {detections.map((detection) => (
+      {detections.map((detection, index) => (
         <React.Fragment key={detection.id}>
           {(() => {
         // Calculate position relative to the actual visible image area
@@ -118,11 +130,13 @@ export function DetectionOverlay({
         const isLinkedToDeer = !!detection.deerId
         const isSelected = detection.id === selectedDetectionId
         const isHovered = detection.id === hoveredDetectionId
+        const isPinned = detection.id === pinnedDetectionId
         const hasReference = detection.isReference
 
         // Determine if this detection's box should be visible
-        // Show if: showAll is true, OR this detection is hovered/selected
-        const isBoxVisible = showAll || isHovered || isSelected
+        // Show if: showAll is true, OR this detection is hovered / pinned (tap to
+        // locate) / selected (edit panel open)
+        const isBoxVisible = showAll || isHovered || isSelected || isPinned
 
         // Color logic: hovered (copper glow), selected (cyan), reference (amber), linked deer (copper), unlinked deer (green), other (blue)
         let borderColor = "border-blue-500"
@@ -135,8 +149,9 @@ export function DetectionOverlay({
           bgColor = "bg-cyan-400/20"
           hoverBgColor = "hover:bg-cyan-400/30"
           badgeBgColor = "bg-cyan-400"
-        } else if (isHovered) {
-          // Cross-highlight when card is hovered
+        } else if (isHovered || isPinned) {
+          // Cross-highlight when card is hovered, or persistently when pinned
+          // (tap-to-locate)
           borderColor = "border-copper"
           bgColor = "bg-copper/20"
           hoverBgColor = "hover:bg-copper/30"
@@ -179,7 +194,7 @@ export function DetectionOverlay({
               isBoxVisible ? bgColor : "bg-transparent",
               isBoxVisible && onDetectionClick && hoverBgColor,
               isBoxVisible && isSelected && "border-3 ring-2 ring-cyan-400/50",
-              isBoxVisible && isHovered && "ring-2 ring-copper/50"
+              isBoxVisible && (isHovered || isPinned) && "ring-2 ring-copper/50"
             )}
             style={{
               left: usePixels ? `${left}px` : `${left}%`,
@@ -187,6 +202,7 @@ export function DetectionOverlay({
               width: usePixels ? `${width}px` : `${width}%`,
               height: usePixels ? `${height}px` : `${height}%`,
             }}
+            data-detection-interactive
             onClick={() => onDetectionClick?.(detection.id)}
             onMouseEnter={() => onDetectionHover?.(detection.id)}
             onMouseLeave={() => onDetectionHover?.(null)}
@@ -248,6 +264,61 @@ export function DetectionOverlay({
           </div>
         )
       })()}
+
+        {/* Numbered locator pin — always visible (when showPins) so the photo
+            stays calm with boxes off. Tap pins to locate; a second tap on the
+            already-pinned detection opens the edit panel (callers handle that). */}
+        {showPins && (() => {
+          // bbox coords are CENTER-based, so the box centre is exactly (bboxX, bboxY).
+          const normalizedCenterX = detection.bboxX / imageWidth
+          const normalizedCenterY = detection.bboxY / imageHeight
+
+          const b = imageBounds && imageBounds.ready && imageBounds.width > 0 ? imageBounds : null
+          let cx: number
+          let cy: number
+          if (b) {
+            cx = b.offsetX + normalizedCenterX * b.width
+            cy = b.offsetY + normalizedCenterY * b.height
+          } else {
+            cx = normalizedCenterX * 100
+            cy = normalizedCenterY * 100
+          }
+          const usePx = b !== null
+
+          const isPinnedPin = detection.id === pinnedDetectionId
+          const isHoveredPin = detection.id === hoveredDetectionId
+
+          return (
+            <button
+              type="button"
+              data-detection-interactive
+              aria-label={`Locate detection ${index + 1}`}
+              className={cn(
+                "absolute z-20 grid h-7 w-7 -translate-x-1/2 -translate-y-1/2 place-items-center",
+                "pointer-events-auto cursor-pointer rounded-full border text-xs font-bold tabular-nums",
+                "shadow-md backdrop-blur-sm transition-all duration-150",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper",
+                isPinnedPin
+                  ? "scale-110 border-cream bg-copper text-slate-deep"
+                  : isHoveredPin
+                  ? "border-copper bg-slate-deep/80 text-cream"
+                  : "border-cream/50 bg-slate-deep/75 text-cream hover:scale-110 hover:border-copper"
+              )}
+              style={{
+                left: usePx ? `${cx}px` : `${cx}%`,
+                top: usePx ? `${cy}px` : `${cy}%`,
+              }}
+              onClick={(e) => {
+                e.stopPropagation()
+                onDetectionClick?.(detection.id)
+              }}
+              onMouseEnter={() => onDetectionHover?.(detection.id)}
+              onMouseLeave={() => onDetectionHover?.(null)}
+            >
+              {index + 1}
+            </button>
+          )
+        })()}
 
         {/* Antler bounding box (if present) - SAM2 pipeline */}
         {detection.antlerBbox && (() => {

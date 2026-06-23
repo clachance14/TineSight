@@ -243,7 +243,11 @@ Extract these measurements using your selected calibration reference:
 - main_beam_left: Length from burr (base) to tip, following the curve
 - main_beam_right: Length from burr to tip, following the curve
 
-**Tine Lengths** (measured from top of main beam):
+**Tine Lengths** — NORMAL (typical) points only, measured from top of main beam.
+A projection only counts as a point if it is at least 1 inch long AND longer than
+it is wide at one inch of length. Put ONLY normal-frame points in g1–g7; abnormal
+points (drop tines, stickers, points sprouting off other points, extra beams) go
+in abnormal_points_total below, NOT here.
 For LEFT antler:
 - g1_left: Brow tine (first point above burr)
 - g2_left: Second point (typically longest)
@@ -256,49 +260,38 @@ For LEFT antler:
 For RIGHT antler (same pattern):
 - g1_right through g7_right
 
-**Mass Measurements** (circumference around main beam):
+**Mass Measurements** (smallest circumference around main beam between points):
 For each side, measure at these points:
 - h1_left/h1_right: Between burr and G1
 - h2_left/h2_right: Between G1 and G2
 - h3_left/h3_right: Between G2 and G3
-- h4_left/h4_right: Between G3 and G4
+- h4_left/h4_right: Between G3 and G4. If the antler has no G4, take H4 at the
+  smallest circumference halfway between G3 and the tip of the main beam.
 
 **Point Counts**:
-- total_points: Total countable points (1 inch or longer)
+- total_points: Total countable points (1 inch or longer), both normal and abnormal
 - points_left: Points on left antler
 - points_right: Points on right antler
 
-### 3. CALCULATED SCORES
+**Abnormal Points**:
+- abnormal_points_total: Sum of the lengths (inches) of all abnormal points —
+  drop tines, sticker points, points off other points, extra/abnormal beams. Use 0
+  if there are none. These are kept separate so scoring can deduct them for a
+  typical score and add them for a non-typical score.
 
-Compute standard B&C scoring:
+### 3. SCORES
 
-**Gross Score**:
-Sum of: inside_spread + both main beams + all tines + all mass measurements
+IMPORTANT: Do NOT do the B&C arithmetic yourself — the gross score, deductions,
+net scores, and score class are computed deterministically downstream from your
+measurements above (spread credit is capped at the longer main beam, abnormal
+points are deducted for typical and added for non-typical). Your job is ACCURATE
+MEASUREMENTS, an honest abnormal_points_total, and the character call below. Fill
+the score fields with your best estimate only as a sanity check; they will be
+recomputed and overwritten.
 
-**Deductions**:
-For typical scoring, calculate asymmetry deductions:
-- Spread difference (if any)
-- Beam length difference (|left - right|)
-- G1 difference (|g1_left - g1_right|)
-- G2 difference, G3 difference, etc. for all matching tines
-- Mass differences (H1 through H4)
-Sum all differences for total deductions
-
-**Net Score**:
-gross_score - deductions
-
-**Score Class**:
-Categorize the gross score:
-- "120s": 120-139 (young/developing buck)
-- "140s": 140-159 (quality mature buck)
-- "160s": 160-179 (trophy class, B&C Awards minimum)
-- "180s": 180-199 (exceptional trophy)
-- "200s": 200-219 (world class)
-- "world_class": 220+ (legendary)
-
-**Typical Status**:
-- "typical": Symmetric rack, no major abnormal points
-- "non_typical": Drop tines, kickers, stickers, or major asymmetry
+**Typical Status** (your judgment about the rack's character):
+- "typical": Symmetric, normal-frame rack with no significant abnormal points
+- "non_typical": Drop tines, kickers, stickers, or other significant abnormal points
 
 ### 4. DERIVED RATIOS (angle-invariant)
 

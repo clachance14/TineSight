@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { CalendarIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -121,10 +120,9 @@ export function PhotoDateRangePicker({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <CalendarIcon className="size-4" />
-        <span className="font-medium">Date Range</span>
-      </div>
+      {/* Section label is owned by the parent sheet ("Date range"); a second
+          "Date Range" row here was duplicate labeling (DESIGN.md: omit, then
+          omit again). */}
 
       {/* Preset Buttons */}
       <div className="grid grid-cols-2 gap-2">
@@ -132,15 +130,16 @@ export function PhotoDateRangePicker({
           <Button
             key={preset.value}
             type="button"
-            variant={datePreset === preset.value ? 'default' : 'outline'}
+            variant="outline"
             size="sm"
             onClick={() => handlePresetClick(preset.value)}
             className={cn(
-              "transition-all duration-200",
-              datePreset === preset.value && [
-                "bg-primary text-primary-foreground",
-                "shadow-sm glow-brass",
-              ]
+              // ≥44px touch target (mobile-first, DESIGN.md). Selected state is
+              // MATERIAL — brass hairline + faint tint + brass text — never a
+              // flat copper fill (DESIGN.md anti-slop guardrail).
+              "h-11 transition-colors duration-200",
+              datePreset === preset.value &&
+                "border-brass bg-brass/10 text-brass hover:bg-brass/15"
             )}
           >
             {preset.label}

@@ -2,6 +2,7 @@ import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { compareDeers as compareWithGemini } from "@/lib/gemini/client";
 import { compareFingerprints, type FingerprintComparisonResult } from "@/lib/fingerprint/compare";
+import { assertFullResolutionPath } from "@/lib/image/analysis-source";
 import type { AntlerFingerprint } from "@/types/fingerprint";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
@@ -44,6 +45,10 @@ export const compareDeer = task({
       if (!detection.crop_file_path) {
         throw new Error(`Detection ${detectionId} has no crop_file_path - run crop generation first`);
       }
+
+      // Full-resolution guard (ADR 0003): re-ID visual comparison must run on the
+      // full-res crop, never a display variant.
+      assertFullResolutionPath(detection.crop_file_path, "compare-deer:detection-crop");
 
       // Cast antler_fingerprint from JSONB
       const detectionFingerprint = detection.antler_fingerprint as AntlerFingerprint | null;
@@ -98,6 +103,9 @@ export const compareDeer = task({
           });
           continue;
         }
+
+        // Full-resolution guard (ADR 0003): reference crop must be full-res too.
+        assertFullResolutionPath(refDetection.crop_file_path, "compare-deer:reference-crop");
 
         // Generate signed URL for reference crop
         const { data: refCropUrl, error: refCropUrlError } = await supabase.storage
@@ -183,19 +191,40 @@ export const compareDeer = task({
         }
       }
 
+      // Blend the two independent signals into the legacy `similarity_score`
+      // column (NOT NULL, and the field the review UI sorts on): the documented
+      // 35% visual (Gemini) + 65% structured fingerprint weighting. Falls back to
+      // visual-only when no fingerprint similarity is available for the pair.
+      const blendedScore = (geminiConfidence: number, fpSimilarity: number | null): number => {
+        const visual = geminiConfidence / 100; // 0-1
+        const blended = fpSimilarity === null ? visual : 0.35 * visual + 0.65 * fpSimilarity;
+        return Math.round(blended * 10000) / 10000; // DECIMAL(5,4)
+      };
+
+      // A reject/confirm is an operator decision and must be sticky — never
+      // resurrect a decided (detection, deer) pair back to pending on a rescan
+      // (human-in-the-loop, constitution). Pre-fetch decided pairs and skip them.
+      const { data: decidedRows } = await supabase
+        .from("match_candidates")
+        .select("candidate_deer_id")
+        .eq("detection_id", detectionId)
+        .in("status", ["rejected", "confirmed"]);
+      const decidedDeerIds = new Set((decidedRows ?? []).map((r) => r.candidate_deer_id));
+
       // Store match candidates with fingerprint similarity
-      if (result.best_match) {
+      if (result.best_match && !decidedDeerIds.has(result.best_match.deer_id)) {
         const fpResult = fingerprintResults.get(result.best_match.deer_id);
         const antlerPrintSimilarity = fpResult ? fpResult.overall_similarity / 100 : null; // Convert 0-100 to 0-1
 
-        await supabase.from("match_candidates").insert({
+        await supabase.from("match_candidates").upsert({
           detection_id: detectionId,
           candidate_deer_id: result.best_match.deer_id,
-          gemini_confidence: result.best_match.confidence,
+          similarity_score: blendedScore(result.best_match.confidence, antlerPrintSimilarity),
+          gemini_confidence: Math.round(result.best_match.confidence),
           gemini_reasoning: result.best_match.reasoning,
           antler_print_similarity: antlerPrintSimilarity,
           status: "pending",
-        } as never);
+        }, { onConflict: "detection_id,candidate_deer_id" });
 
         if (fpResult?.flags.possible_broken_tine) {
           logger.info("Possible broken tine detected in best match", {
@@ -208,17 +237,19 @@ export const compareDeer = task({
 
       // Store other possibilities with fingerprint similarity
       for (const other of result.other_possibilities) {
+        if (decidedDeerIds.has(other.deer_id)) continue;
         const fpResult = fingerprintResults.get(other.deer_id);
         const antlerPrintSimilarity = fpResult ? fpResult.overall_similarity / 100 : null;
 
-        await supabase.from("match_candidates").insert({
+        await supabase.from("match_candidates").upsert({
           detection_id: detectionId,
           candidate_deer_id: other.deer_id,
-          gemini_confidence: other.confidence,
+          similarity_score: blendedScore(other.confidence, antlerPrintSimilarity),
+          gemini_confidence: Math.round(other.confidence),
           gemini_reasoning: null,
           antler_print_similarity: antlerPrintSimilarity,
           status: "pending",
-        } as never);
+        }, { onConflict: "detection_id,candidate_deer_id" });
       }
 
       return {

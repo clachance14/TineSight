@@ -10,6 +10,8 @@ export interface GeminiMetrics {
   promptTokens: number;
   responseTokens: number;
   totalTokens: number;
+  /** Thinking/thought tokens (billed at the output rate). 0 when Thinking is off. */
+  thoughtsTokens?: number;
   modelUsed: string;
   wasRateLimited: boolean;
   retryCount: number;
@@ -779,11 +781,16 @@ export async function extractAntlerFingerprint(
       const promptTokens = response.usageMetadata?.promptTokenCount ?? 0;
       const responseTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
       const totalTokens = response.usageMetadata?.totalTokenCount ?? 0;
+      // Thinking tokens are reported separately and billed at the OUTPUT rate; they
+      // are NOT always folded into candidatesTokenCount, so capture them explicitly
+      // for accurate cost tracking (see scripts/fingerprint-with-cost.ts).
+      const thoughtsTokens = response.usageMetadata?.thoughtsTokenCount ?? 0;
 
       // Log token usage including thinking tokens
       console.log(`Gemini antler fingerprint token usage:`, {
         promptTokens,
         responseTokens,
+        thoughtsTokens,
         totalTokens,
       });
 
@@ -805,6 +812,7 @@ export async function extractAntlerFingerprint(
           promptTokens,
           responseTokens,
           totalTokens,
+          thoughtsTokens,
           modelUsed: model,
           wasRateLimited,
           retryCount: totalRetryCount,

@@ -1,38 +1,33 @@
 import { Suspense } from 'react'
 import { TrophyDashboard } from '@/components/trophy/trophy-dashboard'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Card, CardContent } from '@/components/ui/card'
 
 export const metadata = {
-  title: 'Trophy Dashboard | TineSight',
-  description: 'Manage your trophy buck detections, matches, and clusters',
+  title: 'Review | TineSight',
+  description: 'Confirm sightings, name new bucks, and sort trophy detections.',
 }
 
 function DashboardSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Card key={i} variant="elevated" className="py-4">
-            <CardContent>
-              <Skeleton className="h-8 w-16 mb-2" />
-              <Skeleton className="h-4 w-32" />
-            </CardContent>
-          </Card>
-        ))}
+      <Skeleton className="h-4 w-72" />
+      <div className="flex gap-6 border-b border-cream/10 pb-2.5">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-4 w-20" />
       </div>
-      <Skeleton className="h-64 w-full" />
+      <Skeleton className="h-64 w-full rounded-xl" />
     </div>
   )
 }
 
 export default function TrophyPage() {
   return (
-    <div className="container mx-auto py-6 px-4">
+    <div className="container mx-auto max-w-[1180px] py-6 px-4">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-cream">Trophy Dashboard</h1>
-        <p className="text-sm text-cream-dark mt-1">
-          Manage trophy buck detections with AI-powered matching and clustering
+        <h1 className="font-display text-3xl font-semibold leading-none text-cream">Review</h1>
+        <p className="mt-2 text-sm text-cream-dark">
+          Confirm sightings, name new bucks, sort the rest.
         </p>
       </div>
       <Suspense fallback={<DashboardSkeleton />}>

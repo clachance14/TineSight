@@ -50,12 +50,16 @@ export function compareFingerprints(
     fp2.confidence
   )
 
-  // Apply weights from research.md
-  // Note: 35% for embeddings is handled separately in compare-deer.ts
-  // Here we normalize to 65% total (30% + 20% + 15%)
-  const ratioWeight = 30 / 65
-  const featureWeight = 20 / 65
-  const measurementWeight = 15 / 65
+  // Component weights (ADR 0007, Phase 0). Re-weighted toward DISTINCTIVE FEATURES —
+  // the local, individual-carrying signal (drop tines, split G2, kickers) — and away
+  // from ratios/measurements, which encode a "big typical rack" GLOBAL signature that
+  // collides across different mature bucks (the "scores a big rack, not THIS buck"
+  // symptom; see docs/research/antler-print-reid.md). Sum stays 65; the remaining 35
+  // is reserved for the learned-embedding fusion added in ADR 0007 Phase 1.
+  // This is a precision/recall/cost KNOB, not a contract — tune against real data.
+  const ratioWeight = 20 / 65
+  const featureWeight = 35 / 65
+  const measurementWeight = 10 / 65
 
   const overallSimilarity =
     ratioScore * ratioWeight +

@@ -89,9 +89,11 @@ Review changes against these categories, assigning appropriate severity:
 - **File organization**: Components in wrong directories
 
 ### Test Coverage
-- **Missing tests**: New functions/components without test coverage
+TineSight follows Constitution P5 (**integration testing over unit testing**). Per ADR 0002, the verification path is `npm run test:unit` (node:test for pure logic in `lib/**/*.test.ts`) plus gstack browser QA + performance/memory budgets for flows. There is no Playwright/Vitest. Calibrate test suggestions accordingly:
+- **Missing flow coverage**: New user-facing flows without gstack browser QA coverage (prefer this over unit tests)
 - **Incomplete assertions**: Tests that don't verify all behavior
 - **Test anti-patterns**: Testing implementation instead of behavior
+- Do NOT flag pure-logic helpers as "untested" against a Vitest suite that doesn't exist yet
 
 ## Step 4: Generate Report
 

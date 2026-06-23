@@ -21,6 +21,7 @@ interface SortControlsProps {
 const SORT_FIELD_LABELS: Record<PhotoSortField, string> = {
   captured_at: 'Captured Date',
   imported_at: 'Uploaded Date',
+  best_score: 'Score',
   confidence: 'Confidence',
   points: 'Points',
   size_class: 'Size Class',

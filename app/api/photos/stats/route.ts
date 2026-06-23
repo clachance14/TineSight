@@ -21,6 +21,8 @@ interface BatchStats {
     spike: number
     unknown: number
   }
+  // Per-account trophy line (gross inches); anchors the score-tier filter on /photos.
+  trophy_threshold: number
 }
 
 interface RpcResult {
@@ -78,6 +80,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
       )
     }
 
+    // Per-account trophy threshold (anchors the score-tier filter). Default 130.
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('trophy_threshold')
+      .eq('id', user.id)
+      .single()
+    const trophyThreshold = (profile as { trophy_threshold: number } | null)?.trophy_threshold ?? 130
+
     // RPC returns array with single row
     const result = (data as RpcResult[] | null)?.[0]
 
@@ -100,6 +110,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
           spike: 0,
           unknown: 0,
         },
+        trophy_threshold: trophyThreshold,
       }, 'no-store', { status: 200 })
     }
 
@@ -121,6 +132,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
         spike: result.spike_count,
         unknown: result.unknown_size_count,
       },
+      trophy_threshold: trophyThreshold,
     }
 
     return jsonWithCache(stats, 'no-store', { status: 200 })

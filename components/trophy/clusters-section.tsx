@@ -1,6 +1,5 @@
 'use client'
 
-import { Card, CardContent } from '@/components/ui/card'
 import { ClusterCard } from './cluster-card'
 import type { TrophyCluster } from '@/lib/services/trophy'
 
@@ -17,11 +16,14 @@ export function ClustersSection({
 }: ClustersSectionProps) {
   if (clusters.length === 0) {
     return (
-      <Card variant="elevated">
-        <CardContent className="py-8 text-center text-cream-dark">
-          No pending clusters. Upload more trophy buck photos to auto-cluster similar deer.
-        </CardContent>
-      </Card>
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="rounded-xl border border-cream/10 bg-slate px-10 py-8">
+          <h3 className="font-display text-xl font-semibold text-cream">No new bucks suggested</h3>
+          <p className="mx-auto mt-2 max-w-xs text-sm text-cream-dark">
+            Run “Find lookalikes” after importing more trophy photos to group unnamed bucks here.
+          </p>
+        </div>
+      </div>
     )
   }
 

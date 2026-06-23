@@ -3,10 +3,11 @@
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Upload, Image, Crosshair, Camera, MapPin, Settings, Share2 } from 'lucide-react'
+import { Upload, Image, Crosshair, Camera, MapPin, Settings, Share2, Sparkles } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
-import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { useUIStore } from '@/lib/stores/ui'
+import { usePendingMatchCount } from '@/lib/hooks/use-matches'
 import { cn } from '@/lib/utils'
 
 const navigationItems = [
@@ -24,6 +25,11 @@ const navigationItems = [
     name: 'Deer',
     href: '/deer',
     icon: Crosshair,
+  },
+  {
+    name: 'Re-ID',
+    href: '/trophy',
+    icon: Sparkles,
   },
   {
     name: 'Showcase',
@@ -50,6 +56,8 @@ const settingsItem = {
 
 function SidebarContent() {
   const pathname = usePathname()
+  const { data: matchData } = usePendingMatchCount()
+  const pendingCount = matchData?.total_pending ?? 0
 
   return (
     <div className="flex flex-col h-full">
@@ -83,7 +91,12 @@ function SidebarContent() {
               )}
             >
               <Icon className="h-5 w-5" />
-              {item.name}
+              <span className="flex-1">{item.name}</span>
+              {item.href === '/trophy' && pendingCount > 0 && (
+                <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold tabular-nums text-primary-foreground">
+                  {pendingCount}
+                </span>
+              )}
             </Link>
           )
         })}
@@ -134,6 +147,11 @@ export function Sidebar() {
           side="left"
           className="w-64 p-0 bg-sidebar border-sidebar-border md:hidden"
         >
+          {/* Visually-hidden labels satisfy Radix Dialog a11y (screen readers). */}
+          <SheetTitle className="sr-only">Navigation menu</SheetTitle>
+          <SheetDescription className="sr-only">
+            Main navigation links for TineSight
+          </SheetDescription>
           <SidebarContent />
         </SheetContent>
       </Sheet>

@@ -4,13 +4,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { SummaryStats } from './summary-stats'
 import { PendingMatchesSection } from './pending-matches-section'
 import { ClustersSection } from './clusters-section'
+import { NameClusterDialog } from './name-cluster-dialog'
 import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { DashboardData, TrophyDetection } from '@/lib/services/trophy'
-import Image from 'next/image'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Sparkles } from 'lucide-react'
 import { useState } from 'react'
+import { useTriggerMatching } from '@/lib/hooks/use-matches'
+import { useToast } from '@/lib/hooks/use-toast'
 
 async function fetchDashboard(): Promise<DashboardData> {
   const response = await fetch('/api/trophy/dashboard')
@@ -60,57 +62,111 @@ async function batchRejectMatches(matchIds: string[]): Promise<void> {
   }
 }
 
-function UnclusteredSection({ detections }: { detections: TrophyDetection[] }) {
+function UnsortedSection({ detections }: { detections: TrophyDetection[] }) {
   if (detections.length === 0) {
     return (
-      <Card variant="elevated">
-        <CardContent className="py-8 text-center text-cream-dark">
-          No unclustered detections. All trophy bucks are either assigned to deer or grouped in clusters.
-        </CardContent>
-      </Card>
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="rounded-xl border border-cream/10 bg-slate px-10 py-8">
+          <h3 className="font-display text-xl font-semibold text-cream">Nothing left to sort</h3>
+          <p className="mx-auto mt-2 max-w-xs text-sm text-cream-dark">
+            Every trophy detection is either named or grouped with a buck.
+          </p>
+        </div>
+      </div>
     )
   }
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-      {detections.map((detection) => (
-        <div key={detection.id} className="space-y-2">
-          <div className="relative aspect-square rounded-lg overflow-hidden bg-slate/30">
-            {detection.thumbnail_url && (
-              <Image
-                src={detection.thumbnail_url}
-                alt="Unclustered detection"
-                fill
-                className="object-cover"
-              />
-            )}
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      {detections.map((detection) => {
+        const captured =
+          detection.captured_at != null && detection.captured_at !== ''
+            ? new Date(detection.captured_at).toLocaleDateString()
+            : null
+        return (
+          <div
+            key={detection.id}
+            className="group overflow-hidden rounded-xl border border-cream/10 bg-slate"
+          >
+            <div className="relative aspect-square overflow-hidden bg-slate-light/40">
+              {detection.thumbnail_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={detection.thumbnail_url}
+                  alt="Unsorted trophy detection"
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-2 bg-gradient-to-b from-slate to-slate-deep px-3 py-2.5">
+              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-cream-dark">
+                {detection.estimated_point_range != null && detection.estimated_point_range !== ''
+                  ? `${detection.estimated_point_range} pts`
+                  : (detection.antler_print?.scores.score_class ?? 'Trophy')}
+              </span>
+              {captured && (
+                <span className="font-mono text-[10px] tabular-nums text-cream-dark/70">{captured}</span>
+              )}
+            </div>
           </div>
-          <div className="space-y-1">
-            {detection.antler_print?.scores.score_class && (
-              <Badge variant="outline" className="text-xs">
-                {detection.antler_print.scores.score_class}
-              </Badge>
-            )}
-            {detection.estimated_point_range && (
-              <p className="text-xs text-cream-dark">
-                {detection.estimated_point_range} pts
-              </p>
-            )}
-            {detection.captured_at && (
-              <p className="text-xs text-muted-foreground">
-                {new Date(detection.captured_at).toLocaleDateString()}
-              </p>
-            )}
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
 
 export function TrophyDashboard() {
   const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const triggerMatching = useTriggerMatching()
   const [activeSection, setActiveSection] = useState<'pending' | 'clusters' | 'unclustered'>('pending')
+  const [namingClusterId, setNamingClusterId] = useState<string | null>(null)
+
+  const clusterMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/deer/clusters', { method: 'POST' })
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string }
+        throw new Error(data.error ?? 'Failed to start clustering')
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      toast({
+        title: 'Finding lookalikes',
+        description: 'Grouping your trophy detections — new bucks appear here within a minute.',
+      })
+      queryClient.invalidateQueries({ queryKey: ['trophy-dashboard'] })
+    },
+    onError: (err: unknown) => {
+      toast({
+        title: 'Could not start clustering',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    },
+  })
+
+  const handleFindMatches = () => {
+    triggerMatching.mutate(undefined, {
+      onSuccess: (res: { detection_count: number; limited?: boolean }) => {
+        toast({
+          title: 'Matching queued',
+          description: res.detection_count > 0
+            ? `${res.detection_count} buck${res.detection_count === 1 ? '' : 's'} queued for re-ID${res.limited ? ' (batch capped — run again for more' : ''}${res.limited ? ')' : ''}. Results appear here within a minute.`
+            : 'No fingerprinted bucks awaiting re-ID.',
+        })
+        queryClient.invalidateQueries({ queryKey: ['trophy-dashboard'] })
+      },
+      onError: (err: unknown) => {
+        toast({
+          title: 'Could not start matching',
+          description: err instanceof Error ? err.message : 'Unknown error',
+          variant: 'destructive',
+        })
+      },
+    })
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['trophy-dashboard'],
@@ -190,65 +246,48 @@ export function TrophyDashboard() {
       <SummaryStats stats={data.stats} />
 
       {/* Section Tabs */}
-      <div className="flex gap-2 border-b border-slate/20">
-        <button
-          onClick={() => setActiveSection('pending')}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeSection === 'pending'
-              ? 'text-copper border-b-2 border-copper'
-              : 'text-cream-dark hover:text-cream'
-          }`}
-        >
-          Pending Matches
-          {hasPendingMatches && (
-            <Badge variant="warning" className="ml-2">
-              {data.stats.pendingMatchCount}
-            </Badge>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveSection('clusters')}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeSection === 'clusters'
-              ? 'text-copper border-b-2 border-copper'
-              : 'text-cream-dark hover:text-cream'
-          }`}
-        >
-          Suggested Clusters
-          {hasClusters && (
-            <Badge variant="secondary" className="ml-2">
-              {data.stats.clusterCount}
-            </Badge>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveSection('unclustered')}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeSection === 'unclustered'
-              ? 'text-copper border-b-2 border-copper'
-              : 'text-cream-dark hover:text-cream'
-          }`}
-        >
-          Unclustered
-          {hasUnclustered && (
-            <Badge variant="outline" className="ml-2">
-              {data.stats.unclusteredCount}
-            </Badge>
-          )}
-        </button>
+      <div className="flex gap-6 border-b border-cream/10">
+        {([
+          ['pending', 'Matches', data.stats.pendingMatchCount, hasPendingMatches],
+          ['clusters', 'New Bucks', data.stats.clusterCount, hasClusters],
+          ['unclustered', 'Unsorted', data.stats.unclusteredCount, hasUnclustered],
+        ] as const).map(([key, label, count, show]) => (
+          <button
+            key={key}
+            onClick={() => setActiveSection(key)}
+            className={`-mb-px flex items-center gap-2 border-b-2 pb-2.5 font-sans text-[11px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+              activeSection === key
+                ? 'border-copper text-copper'
+                : 'border-transparent text-cream-dark hover:text-cream'
+            }`}
+          >
+            {label}
+            {show && <span className="font-mono text-[11px] tabular-nums text-cream-dark/70">{count}</span>}
+          </button>
+        ))}
       </div>
 
       {/* Section Content */}
       <div>
         {activeSection === 'pending' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-cream">
-                Pending Matches
-              </h2>
-              <p className="text-sm text-cream-dark">
-                Review AI-suggested matches for your trophy bucks
-              </p>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="font-display text-xl font-semibold text-cream">
+                  Matches
+                </h2>
+                <p className="text-sm text-cream-dark">
+                  Confirm whether each detection is a buck already in your catalog.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={handleFindMatches}
+                disabled={triggerMatching.isPending}
+              >
+                <Sparkles className="h-4 w-4" />
+                {triggerMatching.isPending ? 'Queuing…' : 'Find Matches'}
+              </Button>
             </div>
             <PendingMatchesSection
               groups={data.pendingGroups}
@@ -262,42 +301,52 @@ export function TrophyDashboard() {
 
         {activeSection === 'clusters' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-cream">
-                Suggested Clusters
-              </h2>
-              <p className="text-sm text-cream-dark">
-                Auto-grouped trophy detections based on antler prints
-              </p>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="font-display text-xl font-semibold text-cream">
+                  New Bucks
+                </h2>
+                <p className="text-sm text-cream-dark">
+                  Lookalike detections grouped as one unnamed buck — name a group to add it to your catalog.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => clusterMutation.mutate()}
+                disabled={clusterMutation.isPending}
+              >
+                <Sparkles className="h-4 w-4" />
+                {clusterMutation.isPending ? 'Grouping…' : 'Find lookalikes'}
+              </Button>
             </div>
             <ClustersSection
               clusters={data.clusters}
-              onNameCluster={(clusterId) => {
-                // TODO: Implement name cluster modal
-                console.log('Name cluster:', clusterId)
-              }}
-              onViewDetails={(clusterId) => {
-                // TODO: Implement cluster details modal
-                console.log('View cluster details:', clusterId)
-              }}
+              onNameCluster={(clusterId) => setNamingClusterId(clusterId)}
             />
           </div>
         )}
 
         {activeSection === 'unclustered' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-cream">
-                Unclustered Detections
+            <div>
+              <h2 className="font-display text-xl font-semibold text-cream">
+                Unsorted
               </h2>
               <p className="text-sm text-cream-dark">
-                Trophy bucks not yet assigned or clustered
+                Trophy detections not yet named or grouped with a buck.
               </p>
             </div>
-            <UnclusteredSection detections={data.unclustered} />
+            <UnsortedSection detections={data.unclustered} />
           </div>
         )}
       </div>
+
+      <NameClusterDialog
+        clusterId={namingClusterId}
+        memberCount={data.clusters.find((c) => c.id === namingClusterId)?.member_count ?? 0}
+        open={namingClusterId !== null}
+        onOpenChange={(open) => { if (!open) setNamingClusterId(null) }}
+      />
     </div>
   )
 }

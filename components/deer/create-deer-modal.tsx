@@ -88,6 +88,38 @@ export function CreateDeerModal({
     mutation.mutate()
   }
 
+  // Fallback framing when there's no crop image: render the bbox region from the
+  // full image. bbox coords are center-based on a 0-10000 scale; mirror the
+  // proven CropLightbox math (20% context padding, fit whole region, clamp) so
+  // the preview isn't wildly over-zoomed. (The old formula treated the raw 0-10000
+  // width as a fraction → ~63000% → pinned to the 2000% cap.)
+  const SCALE = 10000
+  const fallbackStyle: React.CSSProperties | null =
+    !cropUrl && imageUrl && bbox
+      ? (() => {
+          const widthPct = (bbox.width / SCALE) * 100
+          const heightPct = (bbox.height / SCALE) * 100
+          const centerXPct = (bbox.x / SCALE) * 100
+          const centerYPct = (bbox.y / SCALE) * 100
+          const padding = 0.2
+          const regionWidthPct = widthPct * (1 + 2 * padding)
+          const regionHeightPct = heightPct * (1 + 2 * padding)
+          const bgSize = Math.min(
+            (100 / regionWidthPct) * 100,
+            (100 / regionHeightPct) * 100
+          )
+          const clampedBgSize = Math.min(bgSize, 2000)
+          const bgPosX = 50 + ((centerXPct - 50) * clampedBgSize) / 100
+          const bgPosY = 50 + ((centerYPct - 50) * clampedBgSize) / 100
+          return {
+            backgroundImage: `url(${imageUrl})`,
+            backgroundSize: `${clampedBgSize}%`,
+            backgroundPosition: `${bgPosX}% ${bgPosY}%`,
+            backgroundRepeat: 'no-repeat',
+          }
+        })()
+      : null
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -102,15 +134,10 @@ export function CreateDeerModal({
                 alt="Deer to name"
                 className="max-h-48 rounded-lg object-contain"
               />
-            ) : imageUrl && bbox ? (
+            ) : fallbackStyle ? (
               <div
                 className="h-48 w-full max-w-[300px] rounded-lg"
-                style={{
-                  backgroundImage: `url(${imageUrl})`,
-                  backgroundSize: `${Math.min((100 / (bbox.width / 10000)) * 100, 2000)}%`,
-                  backgroundPosition: `${(bbox.x / 10000) * 100}% ${(bbox.y / 10000) * 100}%`,
-                  backgroundRepeat: 'no-repeat',
-                }}
+                style={fallbackStyle}
               />
             ) : null}
           </div>

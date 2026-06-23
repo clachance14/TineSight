@@ -27,6 +27,10 @@ interface Photo {
   blurDataUrl?: string | null
   detection_status: string
   bestQualityStatus: string | null
+  // Authoritative photo score (gross else estimate). Surfaced as a chip only at
+  // the desktop breakpoint — the mobile thumbnail grid stays clean (ADR 0003).
+  best_score?: number | null
+  best_score_is_estimate?: boolean
 }
 
 const GAP_PX = 6 // tailwind gap-1.5
@@ -68,10 +72,16 @@ function PhotoGridItem({
       }
     : undefined
 
+  // Data-backed processing state: while a photo is still being analyzed it carries
+  // no detection signal, so we dim it and show an "Analyzing…" affordance instead
+  // of presenting it as a finished, empty frame.
+  const isProcessing =
+    photo.detection_status === 'pending' || photo.detection_status === 'processing'
+
   return (
     <button
       type="button"
-      className="group relative aspect-square w-full cursor-pointer overflow-hidden rounded-lg bg-slate transition-transform duration-100 active:scale-[0.97]"
+      className="group relative aspect-square w-full cursor-pointer overflow-hidden rounded-lg bg-slate ring-1 ring-inset ring-white/[0.06] transition-all duration-150 hover:-translate-y-0.5 hover:shadow-lifted active:scale-[0.97]"
       style={blurStyle}
       onClick={handleClick}
       aria-label="Open trail camera photo"
@@ -89,6 +99,27 @@ function PhotoGridItem({
         // No thumbnail yet (variant still generating): the blurhash background
         // shows through. We deliberately do NOT fall back to the full-res image.
         <span className="sr-only">Preview generating</span>
+      )}
+
+      {isProcessing && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-deep-forest/55 backdrop-blur-[1px]">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-brass/40 border-t-brass" />
+          <span className="text-[10px] font-medium text-weathered">Analyzing…</span>
+        </div>
+      )}
+
+      {/* Desktop-only score chip. Mobile thumbnails stay clean (ADR 0003). The
+          "est." marker is shown when the value is the Gemini estimate, not the
+          authoritative fingerprint gross — honest labeling. */}
+      {!isProcessing && photo.best_score != null && (
+        <span className="absolute left-1.5 top-1.5 z-10 hidden items-center gap-1 rounded-md bg-deep-forest/80 px-1.5 py-0.5 backdrop-blur-[1px] md:inline-flex">
+          <span className="font-mono text-[12px] font-semibold leading-none tabular-nums text-score-gold">
+            {photo.best_score}
+          </span>
+          {photo.best_score_is_estimate === true ? (
+            <span className="text-[9px] font-medium uppercase leading-none text-weathered">est</span>
+          ) : null}
+        </span>
       )}
     </button>
   )

@@ -127,10 +127,16 @@ RBAC · Integration testing over unit · Phased delivery · Design-system compli
 
 ## Design system
 
-Colors: `slate-deep` #2D3638 (bg), `slate` #3D4A4D (surface), `copper` #C4895A
-(accent), `cream` #F5F0E8 (text). Fonts: DM Sans / Fraunces / JetBrains Mono.
-Mobile is a **mobile web app** (phone browser) — touch-first, ≥44px targets, no
-hover-only affordances.
+**Read `DESIGN.md` before any visual/UI decision** — it is the source of truth for
+fonts, colors, spacing, layout, and the "my trophy room" aesthetic anchor. Do not
+deviate without explicit user approval; flag mismatches in QA.
+
+Quick reference: bg `#232B2D`, surface `#2D3638`, copper accent `#C4895A` (rationed),
+score-gold `#D6B16F` (the Score numeral), text cream `#F5F0E8`. Fonts: Fraunces
+(names/titles) / DM Sans (labels) / JetBrains Mono (all numbers). Mobile is a
+**mobile web app** (phone browser) — touch-first, ≥44px targets, no hover-only
+affordances. The Score is the hero metric (ADR 0004); trophy status is shown as
+material (brass top-light), not a badge.
 
 ## Key reference docs
 

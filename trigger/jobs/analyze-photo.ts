@@ -14,6 +14,8 @@ import { generateFingerprint } from "./generate-fingerprint";
 import { generateImageVariantsJob } from "./generate-image-variants";
 import { estimateAntlerScore } from "@/lib/gemini/client";
 import { passesCoarseCut, passesScoreEstimateBand, DEFAULT_TROPHY_THRESHOLD_INCHES } from "@/lib/scoring/gates";
+import { assertFullResolutionPath, assertFullResolutionDimensions } from "@/lib/image/analysis-source";
+import sharp from "sharp";
 
 /**
  * Analyze Photo Job
@@ -120,6 +122,13 @@ export const analyzePhoto = task({
         filePath: imageRecord.file_path,
       });
 
+      // Full-resolution guard (ADR 0003): never analyze a downscaled display
+      // variant. Detection + every downstream crop derive from this source, so
+      // a thumbnail/medium here would silently corrupt scoring (drop tines read
+      // as kickers). Path check is definitive; the dimension check below catches
+      // a variant that slipped past it.
+      assertFullResolutionPath(imageRecord.file_path, "analyze-photo:source");
+
       // Defensive: ensure display variants exist even if the on-upload fan-out
       // missed this image. Gated on the authoritative variant_status (symmetric
       // with the job's own claim predicate); the idempotent claim dedupes any
@@ -207,6 +216,14 @@ export const analyzePhoto = task({
 
       // Step 4b: Generate blur data URL for placeholder
       const imageBufferNode = Buffer.from(imageBuffer);
+
+      // Full-resolution guard (ADR 0003), dimension half: a real trail-cam
+      // original is always far larger than the medium variant ceiling. If what
+      // we downloaded is variant-scale, refuse rather than score a downscaled
+      // image. Reuses the sharp decode the blur step needs anyway.
+      const sourceMeta = await sharp(imageBufferNode).metadata();
+      assertFullResolutionDimensions(sourceMeta.width, sourceMeta.height, "analyze-photo:source");
+
       const blurDataUrl = await generateBlurDataUrl(imageBufferNode);
       if (blurDataUrl) {
         logger.info("Blur data URL generated", { imageId, blurDataUrlLength: blurDataUrl.length });

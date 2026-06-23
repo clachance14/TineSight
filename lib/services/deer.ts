@@ -34,6 +34,14 @@ export interface DeerWithSightings extends Deer {
     width: number | null
     height: number | null
   } | null
+  /** Authoritative gross Score from the reference detection (ADR 0004); the hero metric. */
+  score?: number | null
+  /** Whether the reference detection cleared the trophy gate. */
+  is_trophy?: boolean
+  /** Most recent sighting (image capture time) across this deer's detections. */
+  last_seen?: string | null
+  /** Pending re-ID suggestions awaiting confirmation for this buck (ADR 0005). */
+  pending_match_count?: number
 }
 
 export interface DeerCatalogFilters {
@@ -174,6 +182,8 @@ export async function getDeerCatalog(
         bbox_y,
         bbox_width,
         bbox_height,
+        score_gross,
+        is_trophy,
         images!inner(file_path, medium_path)
       )
     `, { count: 'exact' })
@@ -240,6 +250,40 @@ export async function getDeerCatalog(
     }
   })
 
+  // Last-seen = most recent sighting (image capture time) per deer. One batched
+  // query over the page's deer, reduced to a max in JS. Bounded by catalog size
+  // (pre-launch dogfood); revisit with an aggregate RPC if catalogs grow large.
+  const lastSeenByDeer = new Map<string, string>()
+  const pageDeerIds = deerToReturn
+    .map((d) => (d as Record<string, unknown>)['id'] as string)
+    .filter(Boolean)
+  if (pageDeerIds.length > 0) {
+    const { data: sightings } = await supabase
+      .from('detections')
+      .select('deer_id, images!inner(captured_at)')
+      .in('deer_id', pageDeerIds)
+    for (const row of (sightings ?? []) as Array<{ deer_id: string | null; images: { captured_at: string | null } | null }>) {
+      const capturedAt = row.images?.captured_at
+      if (row.deer_id == null || capturedAt == null) continue
+      const prev = lastSeenByDeer.get(row.deer_id)
+      if (prev === undefined || capturedAt > prev) lastSeenByDeer.set(row.deer_id, capturedAt)
+    }
+  }
+
+  // Pending re-ID suggestions per deer (ADR 0005) — drives the catalog-card badge.
+  const pendingByDeer = new Map<string, number>()
+  if (pageDeerIds.length > 0) {
+    const { data: pending } = await supabase
+      .from('match_candidates')
+      .select('candidate_deer_id')
+      .in('candidate_deer_id', pageDeerIds)
+      .eq('status', 'pending')
+    for (const row of (pending ?? []) as Array<{ candidate_deer_id: string | null }>) {
+      if (row.candidate_deer_id == null) continue
+      pendingByDeer.set(row.candidate_deer_id, (pendingByDeer.get(row.candidate_deer_id) ?? 0) + 1)
+    }
+  }
+
   // Build response with URLs mapped back
   const deerWithImages = deerToReturn.map((d: Record<string, unknown>, index: number) => {
     const refDetection = d['reference_detection'] as {
@@ -247,6 +291,8 @@ export async function getDeerCatalog(
       bbox_y: number | null
       bbox_width: number | null
       bbox_height: number | null
+      score_gross: number | null
+      is_trophy: boolean | null
       images: { file_path: string }
     } | null
 
@@ -262,6 +308,10 @@ export async function getDeerCatalog(
         width: refDetection.bbox_width,
         height: refDetection.bbox_height,
       } : null,
+      score: refDetection?.score_gross ?? null,
+      is_trophy: refDetection?.is_trophy ?? false,
+      last_seen: lastSeenByDeer.get(d['id'] as string) ?? null,
+      pending_match_count: pendingByDeer.get(d['id'] as string) ?? 0,
       detections: undefined,
       reference_detection: undefined,
     }

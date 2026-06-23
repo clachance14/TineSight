@@ -1,8 +1,5 @@
 'use client'
 
-import Image from 'next/image'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { MeasurementComparison } from './measurement-comparison'
 import type { PendingMatchGroup } from '@/lib/services/trophy'
@@ -17,271 +14,190 @@ interface PendingMatchesSectionProps {
   onBatchReject?: (matchIds: string[]) => void
 }
 
+/** Mono confidence readout — a measurement, not a colored status pill (DESIGN.md). */
+function ConfidenceReadout({ label, value }: { label: string; value: number }): React.JSX.Element {
+  const strong = value >= 85
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="font-sans text-[10px] uppercase tracking-[0.12em] text-cream-dark">{label}</span>
+      <span className={`font-mono text-sm tabular-nums ${strong ? 'text-brass-light' : 'text-cream'}`}>{value}</span>
+    </span>
+  )
+}
+
 export function PendingMatchesSection({
   groups,
   onConfirmMatch,
   onRejectMatch,
   onBatchConfirm,
   onBatchReject,
-}: PendingMatchesSectionProps) {
+}: PendingMatchesSectionProps): React.JSX.Element {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
-  const [selectedMatches, setSelectedMatches] = useState<Set<string>>(new Set())
   const [expandedMatches, setExpandedMatches] = useState<Set<string>>(new Set())
 
-  const toggleGroup = (deerId: string) => {
+  const toggleGroup = (deerId: string): void => {
     setExpandedGroups((prev) => {
       const next = new Set(prev)
-      if (next.has(deerId)) {
-        next.delete(deerId)
-      } else {
-        next.add(deerId)
-      }
+      if (next.has(deerId)) next.delete(deerId)
+      else next.add(deerId)
       return next
     })
   }
 
-  const toggleMatch = (matchId: string) => {
+  const toggleMatch = (matchId: string): void => {
     setExpandedMatches((prev) => {
       const next = new Set(prev)
-      if (next.has(matchId)) {
-        next.delete(matchId)
-      } else {
-        next.add(matchId)
-      }
+      if (next.has(matchId)) next.delete(matchId)
+      else next.add(matchId)
       return next
     })
-  }
-
-  const toggleSelectMatch = (matchId: string, _deerId: string) => {
-    setSelectedMatches((prev) => {
-      const next = new Set(prev)
-      if (next.has(matchId)) {
-        next.delete(matchId)
-      } else {
-        next.add(matchId)
-      }
-      return next
-    })
-  }
-
-  const getSelectedForDeer = (_deerId: string, group: PendingMatchGroup) => {
-    return group.pending_matches
-      .filter((m) => selectedMatches.has(m.id))
-      .map((m) => m.id)
   }
 
   if (groups.length === 0) {
     return (
-      <Card variant="elevated">
-        <CardContent className="py-8 text-center text-cream-dark">
-          No pending matches. Great job keeping up with match review!
-        </CardContent>
-      </Card>
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="rounded-xl border border-cream/10 bg-slate px-10 py-8">
+          <h3 className="font-display text-xl font-semibold text-cream">You&rsquo;re all caught up</h3>
+          <p className="mx-auto mt-2 max-w-xs text-sm text-cream-dark">
+            No matches waiting. Run “Find Matches” to surface new re-ID suggestions.
+          </p>
+        </div>
+      </div>
     )
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {groups.map((group) => {
         const isExpanded = expandedGroups.has(group.deer.id)
-        const selectedInGroup = getSelectedForDeer(group.deer.id, group)
+        const matchIds = group.pending_matches.map((m) => m.id)
 
         return (
-          <Card key={group.deer.id} variant="elevated">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={() => toggleGroup(group.deer.id)}
-                  className="flex items-center gap-2 hover:text-copper transition-colors"
-                >
-                  {isExpanded ? (
-                    <ChevronDown className="h-5 w-5" />
-                  ) : (
-                    <ChevronRight className="h-5 w-5" />
-                  )}
-                  <CardTitle className="text-lg">{group.deer.name}</CardTitle>
-                </button>
-                <Badge variant="warning">{group.total_count} pending</Badge>
-              </div>
-            </CardHeader>
+          <div key={group.deer.id} className="overflow-hidden rounded-xl border border-cream/10 bg-slate">
+            {/* Group header: the known buck this batch may belong to */}
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <button
+                onClick={() => toggleGroup(group.deer.id)}
+                className="flex min-w-0 items-center gap-2 text-left transition-colors hover:text-copper"
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-4 w-4 flex-none text-cream-dark" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 flex-none text-cream-dark" />
+                )}
+                <span className="truncate font-display italic text-lg font-semibold text-cream">
+                  {group.deer.name}
+                </span>
+                <span className="font-mono text-[11px] tabular-nums text-cream-dark/70">
+                  {group.total_count} to review
+                </span>
+              </button>
+
+              {group.pending_matches.length > 1 && (
+                <div className="flex flex-none gap-2">
+                  <Button variant="default" size="sm" onClick={() => onBatchConfirm?.(matchIds)}>
+                    <Check className="h-4 w-4" />
+                    Accept all {group.total_count}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => onBatchReject?.(matchIds)}>
+                    Reject all
+                  </Button>
+                </div>
+              )}
+            </div>
 
             {isExpanded && (
-              <CardContent className="space-y-4">
-                {/* Batch actions */}
-                {group.pending_matches.length > 1 && (
-                  <div className="flex gap-2 pb-4 border-b border-slate/20">
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => {
-                        const matchIds = group.pending_matches.map((m) => m.id)
-                        onBatchConfirm?.(matchIds)
-                      }}
-                    >
-                      <Check className="h-4 w-4 mr-1" />
-                      Accept All {group.total_count}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const matchIds = group.pending_matches.map((m) => m.id)
-                        onBatchReject?.(matchIds)
-                      }}
-                    >
-                      <X className="h-4 w-4 mr-1" />
-                      Reject All
-                    </Button>
-                    {selectedInGroup.length > 0 && (
-                      <>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => onBatchConfirm?.(selectedInGroup)}
-                        >
-                          Confirm Selected ({selectedInGroup.length})
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onBatchReject?.(selectedInGroup)}
-                        >
-                          Reject Selected
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
+              <div className="space-y-2 border-t border-cream/10 p-3">
+                {group.pending_matches.map((match) => {
+                  const isMatchExpanded = expandedMatches.has(match.id)
 
-                {/* Match candidates */}
-                <div className="space-y-3">
-                  {group.pending_matches.map((match) => {
-                    const isMatchExpanded = expandedMatches.has(match.id)
-                    const isSelected = selectedMatches.has(match.id)
+                  return (
+                    <div key={match.id} className="overflow-hidden rounded-lg border border-cream/10">
+                      <div className="flex items-center gap-4 bg-slate-deep/40 p-3">
+                        {/* Detection photo — the thing being judged. Plain <img>:
+                            next/image fails on signed Supabase crop URLs and
+                            optimization is disabled globally anyway (see
+                            deer-find-sightings.tsx). */}
+                        <div className="relative h-24 w-24 flex-none overflow-hidden rounded-lg border border-cream/10 bg-slate-light/40">
+                          {match.detection.thumbnail_url && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={match.detection.thumbnail_url}
+                              alt="Candidate detection"
+                              className="absolute inset-0 h-full w-full object-cover"
+                            />
+                          )}
+                        </div>
 
-                    return (
-                      <div
-                        key={match.id}
-                        className="border border-slate/20 rounded-lg overflow-hidden"
-                      >
-                        <div className="p-4 bg-slate/10 flex items-center gap-4">
-                          {/* Selection checkbox */}
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleSelectMatch(match.id, group.deer.id)}
-                            className="h-4 w-4 rounded border-slate-600 text-copper focus:ring-copper"
-                          />
-
-                          {/* Thumbnail */}
-                          <div className="relative w-20 h-20 rounded overflow-hidden bg-slate/30 flex-shrink-0">
-                            {match.detection.thumbnail_url && (
-                              <Image
-                                src={match.detection.thumbnail_url}
-                                alt="Detection"
-                                fill
-                                className="object-cover"
+                        {/* Readouts */}
+                        <div className="flex-1 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                            <ConfidenceReadout label="Visual" value={Math.round(match.visual_confidence)} />
+                            {match.antler_print_similarity !== null && (
+                              <ConfidenceReadout
+                                label="Print"
+                                value={Math.round(match.antler_print_similarity * 100)}
                               />
                             )}
                           </div>
-
-                          {/* Match info */}
-                          <div className="flex-1 space-y-1">
-                            <div className="flex items-center gap-2">
-                              <Badge
-                                variant={
-                                  match.visual_confidence >= 85
-                                    ? 'success'
-                                    : match.visual_confidence >= 70
-                                      ? 'secondary'
-                                      : 'outline'
-                                }
-                              >
-                                Visual: {Math.round(match.visual_confidence)}%
-                              </Badge>
-                              {match.antler_print_similarity !== null && (
-                                <Badge
-                                  variant={
-                                    match.antler_print_similarity >= 0.85
-                                      ? 'success'
-                                      : match.antler_print_similarity >= 0.7
-                                        ? 'secondary'
-                                        : 'outline'
-                                  }
-                                >
-                                  Print: {Math.round(match.antler_print_similarity * 100)}%
-                                </Badge>
-                              )}
-                              {match.possible_broken_tine && (
-                                <Badge variant="warning">Possible Broken Tine</Badge>
-                              )}
-                            </div>
-                            <p className="text-sm text-cream-dark">
-                              {match.detection.captured_at
-                                ? new Date(match.detection.captured_at).toLocaleDateString()
-                                : 'Unknown date'}
+                          {match.possible_broken_tine && (
+                            <p className="font-sans text-[10px] uppercase tracking-[0.12em] text-saddle-light">
+                              Possible broken tine
                             </p>
-                          </div>
-
-                          {/* Actions */}
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => toggleMatch(match.id)}
-                            >
-                              <Eye className="h-4 w-4 mr-1" />
-                              {isMatchExpanded ? 'Hide' : 'View'} Details
-                            </Button>
-                            <Button
-                              variant="default"
-                              size="sm"
-                              onClick={() => onConfirmMatch?.(match.id)}
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => onRejectMatch?.(match.id)}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
+                          )}
+                          <p className="font-mono text-[11px] tabular-nums text-cream-dark/70">
+                            {match.detection.captured_at
+                              ? new Date(match.detection.captured_at).toLocaleDateString()
+                              : 'Unknown date'}
+                          </p>
                         </div>
 
-                        {/* Expanded details */}
-                        {isMatchExpanded && (
-                          <div className="p-4 space-y-4">
-                            {/* Reasoning */}
-                            {match.gemini_reasoning && (
-                              <div className="text-sm">
-                                <div className="font-medium text-cream mb-1">
-                                  AI Reasoning:
-                                </div>
-                                <p className="text-cream-dark">{match.gemini_reasoning}</p>
-                              </div>
-                            )}
-
-                            {/* Measurement comparison */}
-                            {match.detection.antler_print &&
-                              group.deer.antler_print && (
-                                <MeasurementComparison
-                                  detection={match.detection.antler_print}
-                                  reference={group.deer.antler_print}
-                                  {...(match.antler_print_similarity !== null && { similarity: match.antler_print_similarity })}
-                                  {...(match.possible_broken_tine && { possibleBrokenTine: match.possible_broken_tine })}
-                                />
-                              )}
-                          </div>
-                        )}
+                        {/* Actions */}
+                        <div className="flex flex-none items-center gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => toggleMatch(match.id)}>
+                            <Eye className="h-4 w-4" />
+                            {isMatchExpanded ? 'Hide' : 'Details'}
+                          </Button>
+                          <Button variant="default" size="icon-sm" aria-label="Confirm match" onClick={() => onConfirmMatch?.(match.id)}>
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button variant="outline" size="icon-sm" aria-label="Reject match" onClick={() => onRejectMatch?.(match.id)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                    )
-                  })}
-                </div>
-              </CardContent>
+
+                      {isMatchExpanded && (
+                        <div className="space-y-4 p-4">
+                          {match.gemini_reasoning && (
+                            <div className="text-sm">
+                              <div className="mb-1 font-sans text-[10px] uppercase tracking-[0.12em] text-cream-dark">
+                                AI reasoning
+                              </div>
+                              <p className="text-cream-dark">{match.gemini_reasoning}</p>
+                            </div>
+                          )}
+
+                          {match.detection.antler_print && group.deer.antler_print && (
+                            <MeasurementComparison
+                              detection={match.detection.antler_print}
+                              reference={group.deer.antler_print}
+                              {...(match.antler_print_similarity !== null && {
+                                similarity: match.antler_print_similarity,
+                              })}
+                              {...(match.possible_broken_tine && {
+                                possibleBrokenTine: match.possible_broken_tine,
+                              })}
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             )}
-          </Card>
+          </div>
         )
       })}
     </div>

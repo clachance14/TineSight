@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
@@ -48,6 +48,26 @@ export function DetectionEditPanel() {
   const [showSuccess, setShowSuccess] = useState(false)
   const [isLinking, setIsLinking] = useState(false)
   const deleteDetection = useDeleteDetection()
+
+  // The edit-panel Sheet is modal={false}; opening a nested Dialog/Dropdown
+  // shifts focus out and closes it, which nulls selectedDetectionId and drops
+  // the live `detection` query. So we snapshot the detection the moment a deer
+  // action starts — otherwise the create POST loses detection_id (400) and the
+  // link PATCH silently no-ops.
+  const [createSnapshot, setCreateSnapshot] = useState<{
+    id: string
+    cropUrl: string | null
+    imageUrl: string | null
+    bboxX: number | null
+    bboxY: number | null
+    bboxWidth: number | null
+    bboxHeight: number | null
+  } | null>(null)
+  // Stable fallback id that survives the panel closing (for link-to-existing).
+  const lastDetectionIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (detection?.id) lastDetectionIdRef.current = detection.id
+  }, [detection?.id])
 
   const form = useForm<DetectionEditFormValues>({
     resolver: zodResolver(detectionEditFormSchema),
@@ -129,12 +149,15 @@ export function DetectionEditPanel() {
   }
 
   const handleLinkToExisting = async (deerId: string) => {
-    if (!selectedDetectionId) return
+    // Opening the deer dropdown can close the non-modal Sheet (nulling
+    // selectedDetectionId), so fall back to the snapshotted id.
+    const detectionId = selectedDetectionId ?? lastDetectionIdRef.current
+    if (!detectionId) return
 
     setIsLinking(true)
     try {
       await updateDetection.mutateAsync({
-        detectionId: selectedDetectionId,
+        detectionId,
         data: { deerId },
       })
       // Invalidate deer catalog to update sighting counts
@@ -424,7 +447,19 @@ export function DetectionEditPanel() {
                 <Button
                   type="button"
                   className="flex-1 h-9 bg-copper hover:bg-copper-light text-white text-sm"
-                  onClick={() => setCreateModalOpen(true)}
+                  onClick={() => {
+                    // Snapshot before the Sheet can close and drop the query.
+                    setCreateSnapshot({
+                      id: detection.id,
+                      cropUrl: detection.cropUrl,
+                      imageUrl: detection.imageUrl,
+                      bboxX: detection.bboxX,
+                      bboxY: detection.bboxY,
+                      bboxWidth: detection.bboxWidth,
+                      bboxHeight: detection.bboxHeight,
+                    })
+                    setCreateModalOpen(true)
+                  }}
                 >
                   Create Deer Profile
                 </Button>
@@ -456,15 +491,18 @@ export function DetectionEditPanel() {
 
     <CreateDeerModal
       open={createModalOpen}
-      onOpenChange={setCreateModalOpen}
-      detectionId={detection?.id || ''}
-      cropUrl={detection?.cropUrl}
-      imageUrl={detection?.imageUrl}
-      bbox={detection?.bboxX != null ? {
-        x: detection.bboxX,
-        y: detection.bboxY!,
-        width: detection.bboxWidth!,
-        height: detection.bboxHeight!,
+      onOpenChange={(open) => {
+        setCreateModalOpen(open)
+        if (!open) setCreateSnapshot(null)
+      }}
+      detectionId={createSnapshot?.id ?? ''}
+      cropUrl={createSnapshot?.cropUrl}
+      imageUrl={createSnapshot?.imageUrl}
+      bbox={createSnapshot?.bboxX != null ? {
+        x: createSnapshot.bboxX,
+        y: createSnapshot.bboxY!,
+        width: createSnapshot.bboxWidth!,
+        height: createSnapshot.bboxHeight!,
       } : null}
       onSuccess={(deer) => router.push(`/deer/${deer.id}`)}
     />

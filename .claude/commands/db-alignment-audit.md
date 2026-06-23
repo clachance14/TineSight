@@ -33,6 +33,8 @@ For smaller codebases, audit everything without asking.
 
 ## 2. Detect the database and schema source
 
+**TineSight fast-path** (this repo): the stack is fixed — Supabase Postgres, migrations in `supabase/migrations/`, generated types in `types/database.ts` (regen: `npx supabase gen types typescript --linked > types/database.ts`). Data access goes through `lib/services/*.ts`; tenancy is primarily `user_id` (with `account_id` on a few tables), enforced by RLS via `auth.uid()`. Treat `types/database.ts` as the generated source of truth and skip straight to step 3. The generic detection below applies when this command is reused in another repo.
+
 Figure out how the project defines its database.
 
 Look for, in this rough order:

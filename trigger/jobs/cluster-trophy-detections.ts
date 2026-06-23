@@ -40,7 +40,10 @@ interface DetectionWithFingerprint {
   captured_at: string
 }
 
-const SIMILARITY_THRESHOLD = 0.85 // 85% from research.md
+// compareFingerprints returns overall_similarity on a 0-100 scale (see
+// lib/fingerprint/compare.ts), so this gate is 85 percent, NOT 0.85. With 0.85
+// every pair cleared the gate (~0.85%) and unrelated trophies got clustered.
+const SIMILARITY_THRESHOLD = 85 // 85% from research.md
 const SCALE_OPTIMIZATION_THRESHOLD = 500 // Use optimized algorithm above this count
 
 export const clusterTrophyDetections = task({

@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Pencil, Check, X } from 'lucide-react'
+import { Pencil, Check, X, ArrowLeft } from 'lucide-react'
 import { useDeer, useUpdateDeer } from '@/lib/hooks/use-deer'
 import { useToast } from '@/lib/hooks/use-toast'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,7 +13,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { SightingsGrid } from '@/components/deer/sightings-grid'
-import { AntlerPrintCard } from '@/components/deer/antler-print-card'
+import { DeerPendingSightings } from '@/components/deer/deer-pending-sightings'
+import { DeerFindSightings } from '@/components/deer/deer-find-sightings'
+import { DeerHeroImage } from '@/components/deer/deer-hero-image'
+import { AntlerPrintCard, getScoreClassDisplay } from '@/components/deer/antler-print-card'
 import { AntlerFingerprint } from '@/types/fingerprint'
 
 interface ReferenceBbox {
@@ -35,6 +39,34 @@ interface DeerDetailClientProps {
   }
 }
 
+/**
+ * Build the short identity-signature chips shown on the hero — the at-a-glance
+ * way to tell this buck apart. Detail lives in the Antler Print section.
+ */
+function buildIdentityChips(fp: AntlerFingerprint | null): string[] {
+  if (!fp) return []
+  const { measurements, features } = fp
+  const chips: string[] = []
+
+  if (measurements.total_points) {
+    chips.push(`${measurements.total_points} points`)
+  }
+  if (measurements.inside_spread !== null) {
+    chips.push(`${measurements.inside_spread.toFixed(1)}" spread`)
+  }
+  if (features.has_drop_tine) {
+    const loc = features.drop_tine_location === 'both' ? 'both' : features.drop_tine_location
+    chips.push(`Drop tine${loc ? ` · ${loc}` : ''}`)
+  }
+  if (features.has_split_g2) {
+    chips.push('Split G2')
+  }
+  if (features.has_kickers && features.kicker_count > 0) {
+    chips.push(`${features.kicker_count} kicker${features.kicker_count > 1 ? 's' : ''}`)
+  }
+  return chips
+}
+
 export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps): React.JSX.Element {
   const [page, setPage] = useState(1)
   const pageSize = 12
@@ -50,51 +82,15 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
   const updateDeer = useUpdateDeer()
   const { toast } = useToast()
 
-  // Use initial data for header while sightings load
+  // Use initial data for the hero while sightings load
   const displayDeer = deer ?? initialDeer
+  const fingerprint = (initialDeer.antler_fingerprint as AntlerFingerprint | null) ?? null
+  const chips = buildIdentityChips(fingerprint)
+  const scoreClass = fingerprint ? getScoreClassDisplay(fingerprint.scores.score_class) : null
 
-  // Helper function to get CSS background style for cropped detection thumbnail
-  const getReferenceImageStyle = (
-    imageUrl: string,
-    bbox: ReferenceBbox | null | undefined
-  ): React.CSSProperties => {
-    // If no valid bbox, show centered full image
-    if (!bbox || bbox.x === null || bbox.y === null || bbox.width === null || bbox.height === null) {
-      return {
-        backgroundImage: `url(${imageUrl})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-      }
-    }
-
-    // YOLO normalized coordinates (0-10000 scale, center-based)
-    const imageSize = 10000
-    const centerXPct = (bbox.x / imageSize) * 100
-    const centerYPct = (bbox.y / imageSize) * 100
-    const widthPct = (bbox.width / imageSize) * 100
-    const heightPct = (bbox.height / imageSize) * 100
-
-    // Add 20% padding around the detection
-    const padding = 0.20
-    const regionWidthPct = widthPct * (1 + 2 * padding)
-    const regionHeightPct = heightPct * (1 + 2 * padding)
-
-    // Calculate background size to show the padded region
-    // Use Math.min to ensure entire bbox fits (contain), not Math.max (cover/crop)
-    const bgSizeX = (100 / regionWidthPct) * 100
-    const bgSizeY = (100 / regionHeightPct) * 100
-    const bgSize = Math.min(bgSizeX, bgSizeY, 2000)
-
-    return {
-      backgroundImage: `url(${imageUrl})`,
-      backgroundSize: `${bgSize}%`,
-      backgroundPosition: `${centerXPct}% ${centerYPct}%`,
-    }
-  }
   const sightings = deer?.sightings ?? []
   const pagination = deer?.pagination ?? { page: 1, pageSize, total: 0, totalPages: 0 }
 
-  // Initialize edit values when entering edit mode
   const startEditing = () => {
     setEditName(displayDeer.name)
     setEditNotes(displayDeer.notes || '')
@@ -116,180 +112,223 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
     try {
       await updateDeer.mutateAsync({
         id: deerId,
-        data: { name: editName.trim(), notes: editNotes.trim() || null }
+        data: { name: editName.trim(), notes: editNotes.trim() || null },
       })
       toast({
         title: 'Profile Updated',
-        description: 'Deer profile has been saved.'
+        description: 'Deer profile has been saved.',
       })
       setIsEditing(false)
       setNameError(null)
-      router.refresh() // Re-run server components to update header
+      router.refresh()
     } catch (error) {
       toast({
         title: 'Error',
         description: error instanceof Error ? error.message : 'Failed to save',
-        variant: 'destructive'
+        variant: 'destructive',
       })
     }
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      {/* Main content - 2/3 width */}
-      <div className="lg:col-span-2 space-y-6">
-        {/* Reference image */}
-        <Card>
-          <CardContent className="p-0">
-            <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-slate">
-              {displayDeer.reference_image_url ? (
-                <div
-                  className="h-full w-full"
-                  style={getReferenceImageStyle(
-                    displayDeer.reference_image_url,
-                    initialDeer.reference_bbox
-                  )}
-                  role="img"
-                  aria-label={`${displayDeer.name} reference image`}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center">
-                  <div className="text-center">
-                    <span className="text-6xl">🦌</span>
-                    <p className="mt-4 text-sm text-cream-dark">No reference image</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+    <div className="space-y-8">
+      {/* ============================ HERO / DOSSIER ========================= */}
+      <section className="brass-corners relative overflow-hidden rounded-2xl border border-cream/10 bg-slate">
+        {/* Image layer (medium variant only — never full-res, ADR 0003).
+            DeerHeroImage frames the detection bbox dead-center. */}
+        {displayDeer.reference_image_url ? (
+          <DeerHeroImage
+            imageUrl={displayDeer.reference_image_url}
+            bbox={initialDeer.reference_bbox ?? null}
+            alt={`${displayDeer.name} reference image`}
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate">
+            <span className="text-7xl opacity-40">🦌</span>
+          </div>
+        )}
 
-        {/* Notes */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Notes</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isEditing ? (
-              <Textarea
-                value={editNotes}
-                onChange={(e) => setEditNotes(e.target.value)}
-                placeholder="Add notes about this deer..."
-                className="min-h-[120px] bg-slate border-cream/20 text-cream placeholder:text-cream-dark/50"
-              />
-            ) : (
-              <>
-                {displayDeer.notes ? (
-                  <p className="text-cream whitespace-pre-wrap">{displayDeer.notes}</p>
-                ) : (
-                  <p className="text-cream-dark text-sm italic">No notes yet</p>
-                )}
-              </>
+        {/* Legibility gradient: dark at the bottom where the identity block sits */}
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-deep via-slate-deep/70 to-slate-deep/10" />
+
+        {/* Content */}
+        <div className="relative flex min-h-[400px] flex-col justify-between p-5 sm:min-h-[420px] sm:p-7">
+          {/* Top bar: back + edit */}
+          <div className="flex items-start justify-between">
+            <Button
+              variant="outline"
+              size="icon"
+              asChild
+              className="border-cream/20 bg-slate-deep/60 backdrop-blur hover:bg-slate-deep"
+            >
+              <Link href="/deer" aria-label="Back to catalog">
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+            {!isEditing && (
+              <Button
+                onClick={startEditing}
+                variant="outline"
+                size="icon"
+                aria-label="Edit profile"
+                className="border-cream/20 bg-slate-deep/60 backdrop-blur hover:bg-slate-deep"
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
 
-      {/* Sidebar - 1/3 width */}
-      <div className="space-y-6">
-        {/* Deer info */}
-        <Card>
-          <CardHeader>
+          {/* Identity block (bottom-anchored) */}
+          <div className="space-y-3">
             {isEditing ? (
-              <div className="space-y-2">
-                <div className="space-y-1">
-                  <Input
-                    value={editName}
-                    onChange={(e) => {
-                      setEditName(e.target.value)
-                      setNameError(null)
-                    }}
-                    placeholder="Deer name"
-                    className="text-2xl font-semibold bg-slate border-cream/20 text-cream placeholder:text-cream-dark/50"
-                  />
-                  {nameError && (
-                    <p className="text-sm text-red-400">{nameError}</p>
-                  )}
-                </div>
+              <div className="max-w-md space-y-2">
+                <Input
+                  value={editName}
+                  onChange={(e) => {
+                    setEditName(e.target.value)
+                    setNameError(null)
+                  }}
+                  placeholder="Deer name"
+                  aria-label="Deer name"
+                  className="heading-display border-cream/20 bg-slate-deep/70 text-2xl text-cream backdrop-blur placeholder:text-cream-dark/50"
+                />
+                {nameError && <p className="text-sm text-red-400">{nameError}</p>}
                 <div className="flex gap-2">
                   <Button
                     onClick={handleSave}
                     disabled={updateDeer.isPending}
-                    className="bg-copper hover:bg-copper-light text-white"
+                    className="bg-copper text-white hover:bg-copper-light"
                     size="sm"
                   >
-                    <Check className="h-4 w-4 mr-1" />
+                    <Check className="mr-1 h-4 w-4" />
                     Save
                   </Button>
                   <Button
                     onClick={cancelEditing}
                     disabled={updateDeer.isPending}
                     variant="outline"
-                    className="border-cream/20 text-cream hover:bg-slate"
+                    className="border-cream/20 bg-slate-deep/60 text-cream backdrop-blur hover:bg-slate-deep"
                     size="sm"
                   >
-                    <X className="h-4 w-4 mr-1" />
+                    <X className="mr-1 h-4 w-4" />
                     Cancel
                   </Button>
                 </div>
               </div>
             ) : (
-              <div className="flex items-start justify-between gap-2">
-                <CardTitle className="text-2xl">{displayDeer.name}</CardTitle>
-                <Button
-                  onClick={startEditing}
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-cream-dark hover:text-cream hover:bg-slate"
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-              </div>
+              <>
+                <p className="label-premium text-copper">Buck Profile</p>
+                <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+                  <h1 className="heading-display text-3xl text-cream sm:text-5xl">{displayDeer.name}</h1>
+                  {fingerprint && scoreClass && (
+                    <div className="flex items-end gap-3">
+                      <div className="text-right">
+                        <p className="font-display text-4xl leading-none text-cream tabular-nums sm:text-5xl">
+                          {fingerprint.scores.gross_score.toFixed(1)}
+                          <span className="text-2xl text-cream-dark">&Prime;</span>
+                        </p>
+                        <p className="label-premium mt-1 text-cream-dark">Gross B&amp;C</p>
+                      </div>
+                      <Badge variant={scoreClass.variant} className="glow-brass">
+                        {scoreClass.label}
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+                {chips.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {chips.map((chip) => (
+                      <span
+                        key={chip}
+                        className="rounded-full border border-cream/10 bg-slate-deep/70 px-3 py-1 text-xs text-cream backdrop-blur"
+                      >
+                        {chip}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-sm text-cream-dark">Sightings</span>
+                  <Badge variant="secondary">{displayDeer.sighting_count}</Badge>
+                </div>
+              </>
             )}
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-cream-dark">Sightings:</span>
-                <Badge variant="secondary">
-                  {displayDeer.sighting_count}
-                </Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+      </section>
 
-        {/* Antler Print Card */}
-        <AntlerPrintCard fingerprint={initialDeer.antler_fingerprint as AntlerFingerprint | null} />
+      {/* ================= DATA: side-by-side on desktop, stacked on mobile ==
+          Antler Print is a tall, narrow stat panel → right column.
+          Sightings (a gallery) wants width → wide left column.
+          On mobile, order puts the Antler Print data ahead of the gallery. */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Antler Print — right column on desktop */}
+        <div className="space-y-6 lg:order-2 lg:col-span-1">
+          <AntlerPrintCard fingerprint={fingerprint} />
+        </div>
 
-        {/* Sightings grid */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Sightings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  {Array.from({ length: 4 }, (_, i) => (
+        {/* Sightings + Notes — wide left column on desktop */}
+        <div className="space-y-6 lg:order-1 lg:col-span-2">
+          {/* PENDING RE-ID (proposed sightings awaiting confirmation) */}
+          <DeerPendingSightings deerId={deerId} deerName={displayDeer.name} />
+
+          {/* MANUAL RE-ID — operator-driven ranked search (ADR 0005) */}
+          <DeerFindSightings
+            deerId={deerId}
+            deerName={displayDeer.name}
+            hasFingerprint={fingerprint != null}
+          />
+
+          {/* SIGHTINGS */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Sightings</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {Array.from({ length: 8 }, (_, i) => (
                     <div key={i} className="space-y-2">
                       <Skeleton className="aspect-square w-full rounded-lg" />
                       <Skeleton className="h-3 w-20" />
                     </div>
                   ))}
                 </div>
-              </div>
-            ) : (
-              <SightingsGrid
-                sightings={sightings}
-                deerId={deerId}
-                page={pagination.page}
-                totalPages={pagination.totalPages}
-                onPageChange={setPage}
-              />
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <SightingsGrid
+                  sightings={sightings}
+                  deerId={deerId}
+                  page={pagination.page}
+                  totalPages={pagination.totalPages}
+                  onPageChange={setPage}
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          {/* NOTES */}
+          <Card className="bg-slate/50">
+            <CardHeader>
+              <CardTitle className="text-base text-cream-dark">Notes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isEditing ? (
+                <Textarea
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="Add notes about this deer..."
+                  className="min-h-[120px] border-cream/20 bg-slate text-cream placeholder:text-cream-dark/50"
+                />
+              ) : displayDeer.notes ? (
+                <p className="whitespace-pre-wrap text-cream">{displayDeer.notes}</p>
+              ) : (
+                <p className="text-sm italic text-cream-dark">
+                  No notes yet — tap the pencil to add field observations.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

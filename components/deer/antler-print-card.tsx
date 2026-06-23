@@ -10,9 +10,10 @@ interface AntlerPrintCardProps {
 }
 
 /**
- * Get badge variant and label for score class
+ * Get badge variant and label for score class.
+ * Exported so the deer-page hero and this card share one source of truth.
  */
-function getScoreClassDisplay(scoreClass: string): { variant: 'default' | 'success' | 'warning'; label: string } {
+export function getScoreClassDisplay(scoreClass: string): { variant: 'default' | 'success' | 'warning'; label: string } {
   switch (scoreClass) {
     case 'world_class':
       return { variant: 'success', label: 'World Class' }
@@ -58,6 +59,31 @@ function formatMeasurement(value: number | null): string {
 function formatRatio(value: number | null): string {
   if (value === null) return '—'
   return value.toFixed(2)
+}
+
+/**
+ * Compact stat tile: muted label over a bold value (+ optional trailing icon).
+ * Two per row, this packs the measurement/ratio data into far less height than
+ * full-width label/value rows on mobile.
+ */
+function Stat({
+  label,
+  value,
+  icon,
+}: {
+  label: string
+  value: React.ReactNode
+  icon?: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="space-y-0.5">
+      <p className="text-xs text-cream-dark">{label}</p>
+      <p className="flex items-center gap-1.5 text-sm font-medium text-cream">
+        {value}
+        {icon}
+      </p>
+    </div>
+  )
 }
 
 /**
@@ -126,16 +152,16 @@ export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JS
           </Badge>
         </div>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-5">
         {/* Scores */}
-        <div className="space-y-3">
+        <div className="space-y-2">
           <h3 className="text-sm font-semibold text-cream">B&C Score</h3>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <p className="text-xs text-cream-dark">Gross Score</p>
               <p className="text-lg font-semibold text-cream">{scores.gross_score.toFixed(1)}"</p>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <p className="text-xs text-cream-dark">Net Score</p>
               <p className="text-lg font-semibold text-cream">{scores.net_score.toFixed(1)}"</p>
             </div>
@@ -147,100 +173,83 @@ export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JS
           )}
         </div>
 
-        {/* Key Measurements */}
-        <div className="space-y-3">
+        {/* Key Measurements — 2-up tile grid */}
+        <div className="space-y-2.5">
           <h3 className="text-sm font-semibold text-cream">Measurements</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-cream-dark">Inside Spread</span>
-              <span className="text-cream font-medium">{formatMeasurement(measurements.inside_spread)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-cream-dark">Main Beams</span>
-              <span className="text-cream font-medium">
-                {formatMeasurement(measurements.main_beam_left)} / {formatMeasurement(measurements.main_beam_right)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-cream-dark">Points (L/R)</span>
-              <span className="text-cream font-medium">
-                {measurements.points_per_side[0]} / {measurements.points_per_side[1]} ({measurements.total_points} total)
-              </span>
-            </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            <Stat label="Inside Spread" value={formatMeasurement(measurements.inside_spread)} />
+            <Stat
+              label="Main Beams"
+              value={`${formatMeasurement(measurements.main_beam_left)} / ${formatMeasurement(measurements.main_beam_right)}`}
+            />
+            <Stat
+              label="Points (L/R)"
+              value={`${measurements.points_per_side[0]} / ${measurements.points_per_side[1]}`}
+            />
             {measurements.tines.left.g2 !== null && measurements.tines.left.g3 !== null && (
               <>
-                <div className="flex justify-between">
-                  <span className="text-cream-dark">G2 Tines</span>
-                  <span className="text-cream font-medium">
-                    {formatMeasurement(measurements.tines.left.g2)} / {formatMeasurement(measurements.tines.right.g2)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cream-dark">G3 Tines</span>
-                  <span className="text-cream font-medium">
-                    {formatMeasurement(measurements.tines.left.g3)} / {formatMeasurement(measurements.tines.right.g3)}
-                  </span>
-                </div>
+                <Stat
+                  label="G2 Tines"
+                  value={`${formatMeasurement(measurements.tines.left.g2)} / ${formatMeasurement(measurements.tines.right.g2)}`}
+                />
+                <Stat
+                  label="G3 Tines"
+                  value={`${formatMeasurement(measurements.tines.left.g3)} / ${formatMeasurement(measurements.tines.right.g3)}`}
+                />
               </>
             )}
           </div>
         </div>
 
-        {/* Derived Ratios */}
-        <div className="space-y-3">
+        {/* Derived Ratios — 2-up tile grid with confidence icons */}
+        <div className="space-y-2.5">
           <h3 className="text-sm font-semibold text-cream">Identifying Ratios</h3>
-          <div className="space-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
             {ratios.g2_to_g3 !== null && (
-              <div className="flex justify-between items-center">
-                <span className="text-cream-dark">G2:G3 Ratio</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-cream font-medium">{formatRatio(ratios.g2_to_g3)}</span>
-                  <ConfidenceIndicator confidence={confidence.tine_confidence} />
-                </div>
-              </div>
+              <Stat
+                label="G2:G3 Ratio"
+                value={formatRatio(ratios.g2_to_g3)}
+                icon={<ConfidenceIndicator confidence={confidence.tine_confidence} />}
+              />
             )}
             {ratios.beam_symmetry !== null && (
-              <div className="flex justify-between items-center">
-                <span className="text-cream-dark">Beam Symmetry</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-cream font-medium">{formatRatio(ratios.beam_symmetry)}</span>
-                  <ConfidenceIndicator confidence={confidence.beam_confidence} />
-                </div>
-              </div>
+              <Stat
+                label="Beam Symmetry"
+                value={formatRatio(ratios.beam_symmetry)}
+                icon={<ConfidenceIndicator confidence={confidence.beam_confidence} />}
+              />
             )}
             {ratios.spread_to_beam !== null && (
-              <div className="flex justify-between items-center">
-                <span className="text-cream-dark">Spread:Beam</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-cream font-medium">{formatRatio(ratios.spread_to_beam)}</span>
-                  <ConfidenceIndicator confidence={confidence.spread_confidence} />
-                </div>
-              </div>
+              <Stat
+                label="Spread:Beam"
+                value={formatRatio(ratios.spread_to_beam)}
+                icon={<ConfidenceIndicator confidence={confidence.spread_confidence} />}
+              />
             )}
             {ratios.tine_symmetry !== null && (
-              <div className="flex justify-between items-center">
-                <span className="text-cream-dark">Tine Symmetry</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-cream font-medium">{formatRatio(ratios.tine_symmetry)}</span>
-                  <ConfidenceIndicator confidence={confidence.tine_confidence} />
-                </div>
-              </div>
+              <Stat
+                label="Tine Symmetry"
+                value={formatRatio(ratios.tine_symmetry)}
+                icon={<ConfidenceIndicator confidence={confidence.tine_confidence} />}
+              />
             )}
           </div>
         </div>
 
-        {/* Distinctive Features */}
+        {/* Distinctive Features — chips wrap denser than a bullet list */}
         {distinctiveFeatures.length > 0 && (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <h3 className="text-sm font-semibold text-cream">Distinctive Features</h3>
-            <ul className="space-y-1.5">
+            <div className="flex flex-wrap gap-1.5">
               {distinctiveFeatures.map((feature, index) => (
-                <li key={index} className="text-sm text-cream-dark flex items-start gap-2">
-                  <span className="text-copper mt-0.5">•</span>
-                  <span>{feature}</span>
-                </li>
+                <span
+                  key={index}
+                  className="rounded-full border border-cream/10 bg-slate px-2.5 py-1 text-xs text-cream"
+                >
+                  {feature}
+                </span>
               ))}
-            </ul>
+            </div>
           </div>
         )}
 

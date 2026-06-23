@@ -29,8 +29,10 @@ export const useUIStore = create<UIState>()(
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       closeSidebar: () => set({ sidebarOpen: false }),
-      // Photo viewer preferences
-      showBoundingBoxes: true,
+      // Photo viewer preferences.
+      // Default OFF: the photo detail view now shows calm numbered pins and draws
+      // a box only for the located/hovered detection. This toggles ALL boxes on.
+      showBoundingBoxes: false,
       setShowBoundingBoxes: (show) => set({ showBoundingBoxes: show }),
       toggleBoundingBoxes: () => set((state) => ({ showBoundingBoxes: !state.showBoundingBoxes })),
       // Filter sidebar state
@@ -47,7 +49,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'tinesight-ui-preferences',
-      version: 1, // Bump version to trigger migration
+      version: 2, // Bump version to trigger migration
       skipHydration: true, // Prevents auto-hydration crash on iOS Safari
       partialize: (state) => ({
         // Persist these preferences
@@ -58,12 +60,17 @@ export const useUIStore = create<UIState>()(
         filterSidebarExpandedSections: state.filterSidebarExpandedSections,
       }),
       // Migration: remove mobileGridColumns from old stored state
-      migrate: (persistedState: unknown) => {
+      migrate: (persistedState: unknown, fromVersion: number) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const state = persistedState as any
         // Delete the old mobileGridColumns to prevent hydration crash
         if (state && 'mobileGridColumns' in state) {
           delete state.mobileGridColumns
+        }
+        // v1 -> v2: drop the persisted showBoundingBoxes so the new "off by
+        // default" (calm pins) preference takes effect for existing users.
+        if (state && fromVersion < 2 && 'showBoundingBoxes' in state) {
+          delete state.showBoundingBoxes
         }
         return state
       },

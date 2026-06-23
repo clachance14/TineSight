@@ -1,0 +1,256 @@
+# AI Trophy Scoring Feature Plan
+
+## Overview
+Add AI-powered Boone & Crockett score estimation for deer, using user-cropped head/antler photos analyzed by Gemini's top model. This is a premium add-on feature.
+
+## Research Summary
+
+### B&C Scoring System
+The Boone & Crockett scoring system measures:
+- **F** - Main beam length (both sides)
+- **G** - Tine/point lengths (G1-G7 per side)
+- **H** - Circumferences (4 per side, between tines)
+- **D** - Inside spread (widest point between beams)
+
+**Gross Score** = Sum of all measurements
+**Net Score** = Gross - asymmetry deductions (differences between left/right)
+
+### Reference Measurements (from B&C Field Judging Guide)
+These are average buck proportions used for visual estimation:
+| Feature | Average Size |
+|---------|--------------|
+| Ear tip-to-tip spread | 16 inches |
+| Ear length (base to tip) | 6 inches |
+| Eye circumference | 4 inches |
+| Eye to nose | 8 inches |
+
+### MSU Deer Lab Score Estimation Formulas
+```
+Most Accurate (all 4 measurements):
+Score = -34.064 + (4.64 × points) + (0.804 × spread) + (3.075 × circumferences) + (1.942 × main_beams)
+
+Simpler (beams + points + circumferences):
+Score = -30.117 + (4.583 × points) + (3.14 × circumferences) + (2.162 × main_beams)
+```
+
+### BuckScore Approach (competitor)
+- Uses ear width as primary reference measurement
+- Requires manual point placement on measurements
+- Claims 3% accuracy with proper reference placement
+- Best angles: 0°, 45°, 90° (side/quartering views)
+
+---
+
+## Implementation Design
+
+### User Flow
+```
+Deer Profile → [Score This Buck] button →
+Crop Tool (user crops head/antlers) →
+Submit for Analysis →
+Gemini scores using top model →
+Display score card with breakdown
+```
+
+### Architecture
+
+#### 1. Database Schema Addition
+```sql
+-- Add to detections table or create new scores table
+CREATE TABLE deer_scores (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deer_id UUID REFERENCES deer(id) ON DELETE CASCADE,
+  detection_id UUID REFERENCES detections(id),  -- source crop
+  crop_file_path TEXT NOT NULL,                  -- user's manual crop
+
+  -- Raw Gemini estimates (in inches, relative to ear reference)
+  estimated_spread NUMERIC(5,1),
+  estimated_main_beam_left NUMERIC(5,1),
+  estimated_main_beam_right NUMERIC(5,1),
+  estimated_points_left INTEGER,
+  estimated_points_right INTEGER,
+  estimated_tine_lengths JSONB,                  -- array of tine estimates
+  estimated_circumferences JSONB,                -- array of H measurements
+
+  -- Calculated scores
+  gross_score_low NUMERIC(5,1),
+  gross_score_high NUMERIC(5,1),
+  gross_score_mid NUMERIC(5,1),
+  net_score_low NUMERIC(5,1),
+  net_score_high NUMERIC(5,1),
+  net_score_mid NUMERIC(5,1),
+
+  -- Quality & confidence
+  photo_angle TEXT,                              -- front, quartering, side
+  photo_quality_score INTEGER,                   -- 0-100
+  estimation_confidence INTEGER,                 -- 0-100
+  gemini_reasoning TEXT,                         -- AI explanation
+
+  -- Metadata
+  model_used TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+
+  CONSTRAINT valid_scores CHECK (gross_score_low <= gross_score_high)
+);
+```
+
+#### 2. Gemini Prompt Design (CRITICAL)
+
+**NOTE:** Initial testing showed 30"+ underestimation on a verified 200" buck. The prompt below has been revised to be more accurate.
+
+```typescript
+export const TROPHY_SCORING_PROMPT = `
+# ROLE
+You are a Master B&C Official Measurer. Your goal is extreme precision. You use anatomical landmarks to establish a "pixel-to-inch" scale to overcome the "optical illusions" of trail cam photos.
+
+# YOUR TASK
+Provide a calibrated B&C score estimate. 
+
+# THE MEASUREMENT "RULER" (Anatomical Calibration)
+1. **The Ear (Primary Ruler):** Average mature buck ear is 6.5" to 7". 
+2. **Ear Spread (Secondary Ruler):** Tip-to-tip on an alert buck is 16" to 17".
+3. **The Eye (Mass Ruler):** A whitetail eye is ~2" wide.
+
+# MEASUREMENT PROTOCOL
+- **Tine Counting:** FIRST, count the number of scorable points (>1 inch) on each side. Do not assume extra tines (G5+) unless they are clearly visible.
+- **Inside Spread (D):** Compare the widest point of the beams to the ear tips. If the beam is 5" past the ear on each side, the spread is ~26-27". 
+- **Main Beams (F):** Traced from the base to the tip. If they sweep past the nose, they are 26"+.
+- **Mass (H1-H4):** 
+    - 4.0" to 4.5" = Average
+    - 4.5" to 5.0" = Heavy (thicker than eye)
+    - 5.0" to 5.5" = Exceptional (significantly thicker than eye)
+    - 6.0"+ = World Class (nearly 3x eye width)
+- **Angle Compensation:** Frontal views hide beam depth. Look at the "hook" of the beams. If they curve toward the camera, they are 10-15% longer than they appear linearly.
+
+# CALCULATION RULES (B&C Standard)
+1. **Gross Typical Frame** = Spread + Beams(L+R) + Typical Tines(L+R) + Mass(L+R).
+2. **Net Typical** = Gross Typical - Asymmetry(differences between L/R pairs) - Abnormal Points.
+3. **Inside Spread Credit:** Cannot exceed the length of the shortest main beam.
+
+# OUTPUT FORMAT (Strict JSON)
+{
+  "calibration": {
+    "scale_used": "e.g., ear length = 7 inches",
+    "points_counted": { "left": number, "right": number },
+    "angle_impact": "How the angle is affecting your perception"
+  },
+  "measurements": {
+    "inside_spread": number,
+    "main_beams": { "L": number, "R": number },
+    "tines_L": [number], 
+    "tines_R": [number],
+    "mass_L": [number],
+    "mass_R": [number],
+    "abnormal_points": [number]
+  },
+  "math": {
+    "total_gross": number,
+    "total_deductions": number,
+    "net_score": number
+  },
+  "score_class": "120s|140s|160s|180s|200s|World Class",
+  "reasoning": "A concise explanation of the most significant features (e.g., '14-inch G2s and 27-inch spread')."
+}
+
+# CRITICAL CONSTRAINTS
+- **DO NOT INVENT TINES:** Only score what you can see. If it's a 10-pointer, only list G1 through G4.
+- **ACCURACY OVER EGO:** Do not er on the side of greatness or conservativeness. Er on the side of the anatomical ruler.
+- **DOUBLE CHECK ADDITION:** Ensure the `total_gross` matches your array sums.
+`.trim();
+```
+
+#### 3. Key Files to Modify/Create
+
+| File | Purpose |
+|------|---------|
+| `lib/gemini/prompts.ts` | Add TROPHY_SCORING_PROMPT |
+| `lib/gemini/client.ts` | Add scoreDeer() function using gemini-2.5-pro |
+| `lib/gemini/schemas.ts` | Add trophy scoring response schema |
+| `lib/services/scoring.ts` | New service for score operations |
+| `trigger/jobs/score-deer.ts` | Async scoring job |
+| `app/api/deer/[id]/score/route.ts` | API endpoint to trigger scoring |
+| `components/deer/score-crop-modal.tsx` | Cropping UI component |
+| `components/deer/score-card.tsx` | Score display component |
+| `supabase/migrations/xxx_add_deer_scores.sql` | Database migration |
+
+#### 4. Model Selection
+Use **gemini-2.5-pro** (or gemini-2.0-pro-exp) for scoring:
+- Higher accuracy needed for measurements
+- User pays for this (add-on feature), so cost is acceptable
+- Enable Thinking feature for detailed reasoning
+
+Current models in codebase use gemini-2.5-flash for cost efficiency.
+Scoring should upgrade to pro tier.
+
+#### 5. Cropping UI
+
+Use existing Sharp infrastructure for cropping. Options:
+1. **react-image-crop** - Popular, well-maintained
+2. **react-easy-crop** - Simpler API, mobile-friendly
+
+User flow:
+1. Select a detection/photo from deer profile
+2. Open crop modal with original image
+3. User draws rectangle around head/antlers
+4. Preview crop, submit for scoring
+5. Show loading state while Gemini processes
+6. Display score card when complete
+
+---
+
+## Implementation Tasks
+
+### Phase 1: Backend Infrastructure
+1. [ ] Create `deer_scores` table migration
+2. [ ] Add TROPHY_SCORING_PROMPT to prompts.ts
+3. [ ] Add scoring schema to schemas.ts
+4. [ ] Add `scoreDeer()` function to gemini/client.ts (use pro model)
+5. [ ] Create `lib/services/scoring.ts` service layer
+6. [ ] Create `trigger/jobs/score-deer.ts` async job
+
+### Phase 2: API Layer
+7. [ ] Create POST `/api/deer/[id]/score` endpoint (triggers scoring)
+8. [ ] Create GET `/api/deer/[id]/scores` endpoint (fetch scores)
+9. [ ] Add score upload endpoint for cropped image
+
+### Phase 3: Frontend
+10. [ ] Install react-image-crop or react-easy-crop
+11. [ ] Create `ScoreCropModal` component
+12. [ ] Create `ScoreCard` component (displays results)
+13. [ ] Add "Score This Buck" button to deer profile
+14. [ ] Add scores list/history to deer profile
+
+### Phase 4: Polish
+15. [ ] Add loading states and error handling
+16. [ ] Add score sharing (export as image)
+17. [ ] Add score comparison between photos of same deer
+
+---
+
+## Design Decisions (Confirmed)
+
+| Decision | Choice |
+|----------|--------|
+| **Monetization** | Subscription tier (premium feature) |
+| **Score History** | Keep all scores with timestamps |
+| **Crop Library** | react-image-crop |
+
+---
+
+## Sources
+- [B&C Field Judging Guide](https://www.boone-crockett.org/field-judging-whitetail-deer)
+- [MSU Deer Lab Score Estimation](https://www.msudeer.msstate.edu/estimate-boone-and-crockett-score.php)
+- [BuckScore Methodology](https://www.buckscore.com/how-to-score-deer-with-buckscore/)
+
+---
+
+## Execution Strategy
+
+**MANDATORY: Use multi-agent parallel execution**
+
+1. Analyze dependencies - identify independent vs dependent tasks
+2. Group into parallel batches - cluster independent tasks
+3. Execute with up to 5 agents in parallel via Task tool
+4. Serialize only when dependencies require it
+
+See CLAUDE.md "Execution Preferences" for parallelization rules.

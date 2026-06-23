@@ -3,9 +3,6 @@ import { createClient } from '@/lib/supabase/server'
 import { getDeerById } from '@/lib/services/deer'
 import { redirect, notFound } from 'next/navigation'
 import { DeerDetailClient } from './deer-detail-client'
-import Link from 'next/link'
-import { Button } from '@/components/ui/button'
-import { ArrowLeft } from 'lucide-react'
 
 interface DeerDetailPageProps {
   params: Promise<{ id: string }>
@@ -88,27 +85,7 @@ export default async function DeerDetailPage({ params }: DeerDetailPageProps) {
     antler_fingerprint: antlerFingerprint,
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Header with back button */}
-      <div className="flex items-center gap-4">
-        <Button variant="outline" size="icon" asChild>
-          <Link href="/deer">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-cream">
-            {deer.name}
-          </h1>
-          <p className="mt-1 text-sm text-cream-dark">
-            Deer profile and sighting history
-          </p>
-        </div>
-      </div>
-
-      {/* Client component with interactivity */}
-      <DeerDetailClient deerId={id} initialDeer={initialDeer} />
-    </div>
-  )
+  // The dossier hero (in the client component) owns the header, back button,
+  // name and score — so the page shell is just the data hand-off.
+  return <DeerDetailClient deerId={id} initialDeer={initialDeer} />
 }

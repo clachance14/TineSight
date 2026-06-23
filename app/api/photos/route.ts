@@ -55,7 +55,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const deerIdParam = searchParams.get('deerId')
     const uploadSessionId = searchParams.get('uploadSessionId') ?? undefined
     const areaNameParam = searchParams.get('areaName')
+    const areaNamesParam = searchParams.get('areaNames')
     const otherAnimalsParam = searchParams.get('otherAnimals')
+    const minScoreParam = searchParams.get('minScore')
 
     // Validate and parse limit (default 50, max 100)
     let limit = 50
@@ -139,6 +141,20 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       }
     }
 
+    // Parse minScore filter (photo-level authoritative-score floor, gross inches)
+    let minScore: number | undefined
+    if (minScoreParam !== null) {
+      const parsed = parseInt(minScoreParam, 10)
+      if (!isNaN(parsed) && parsed >= 0) {
+        minScore = parsed
+      } else {
+        return NextResponse.json(
+          { error: 'Invalid minScore: must be a non-negative integer' },
+          { status: 400 }
+        )
+      }
+    }
+
     // Parse dateFrom filter
     let dateFrom: string | undefined
     if (dateFromParam !== null) {
@@ -205,11 +221,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const sortByParam = searchParams.get('sortBy')
     let sortBy: PhotoSortField | undefined
     if (sortByParam !== null) {
-      if (sortByParam === 'captured_at' || sortByParam === 'imported_at') {
+      if (sortByParam === 'captured_at' || sortByParam === 'imported_at' || sortByParam === 'best_score') {
         sortBy = sortByParam
       } else {
         return NextResponse.json(
-          { error: 'Invalid sortBy: must be "captured_at" or "imported_at"' },
+          { error: 'Invalid sortBy: must be "captured_at", "imported_at", or "best_score"' },
           { status: 400 }
         )
       }
@@ -247,10 +263,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       dateFrom?: string
       dateTo?: string
       sizeClass?: string
+      minScore?: number
       cameraId?: string
       deerId?: string
       uploadSessionId?: string
       areaName?: string
+      areaNames?: string[]
       otherAnimals?: OtherAnimalType[]
       sortBy?: PhotoSortField
       sortDirection?: 'asc' | 'desc'
@@ -326,6 +344,17 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       filters.areaName = areaNameParam
     }
 
+    if (areaNamesParam !== null && areaNamesParam.trim() !== '') {
+      const names = areaNamesParam.split(',').map((a) => a.trim()).filter((a) => a !== '')
+      if (names.length > 0) {
+        filters.areaNames = names
+      }
+    }
+
+    if (minScore !== undefined) {
+      filters.minScore = minScore
+    }
+
     if (otherAnimalsParam !== null && otherAnimalsParam.trim() !== '') {
       const validAnimals: OtherAnimalType[] = ['hogs', 'cows', 'goats', 'people', 'vehicles']
       const animals = otherAnimalsParam.split(',').filter((a): a is OtherAnimalType =>
@@ -375,10 +404,17 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const activeSortField = sortBy ?? 'imported_at'
     let nextCursor: string | null = null
     if (hasNextPage && lastPhoto !== undefined) {
-      const cursorTimestamp = activeSortField === 'captured_at'
-        ? (lastPhoto.captured_at ?? lastPhoto.imported_at)
-        : lastPhoto.imported_at
-      nextCursor = `${cursorTimestamp}::${lastPhoto.id}`
+      let cursorValue: string
+      if (activeSortField === 'captured_at') {
+        cursorValue = lastPhoto.captured_at ?? lastPhoto.imported_at
+      } else if (activeSortField === 'best_score') {
+        // Encode the score, or the literal 'null' once paging crosses into the
+        // un-scored tail (best_score sorts NULLS LAST). The service decodes both.
+        cursorValue = lastPhoto.best_score === null ? 'null' : String(lastPhoto.best_score)
+      } else {
+        cursorValue = lastPhoto.imported_at
+      }
+      nextCursor = `${cursorValue}::${lastPhoto.id}`
     }
 
     // Fetch quality status and generate signed URLs in parallel for performance

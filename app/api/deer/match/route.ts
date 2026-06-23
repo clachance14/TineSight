@@ -35,40 +35,39 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => ({})) as MatchRequest
 
-  // Get unassigned buck detections to match
+  // Each detection fans out to a paid compare-deer Gemini job, so an unbounded
+  // sweep over every unassigned buck (thousands of them) would be a cost trap.
+  // Default sweep: only fingerprinted bucks (the re-ID blend needs a fingerprint),
+  // capped. An explicit detection_ids list bypasses the cap for targeted re-runs.
+  const MATCH_BATCH_LIMIT = 25
+
+  // Unassigned buck detections owned by this user, joined to images for tenancy.
   let detectionsQuery = supabase
-    .from('detections')
-    .select('id, image_id')
-    .eq('sex', 'buck')
-    .is('deer_id', null)
-
-  if (body.detection_ids && body.detection_ids.length > 0) {
-    detectionsQuery = detectionsQuery.in('id', body.detection_ids)
-  }
-
-  // Join with images to filter by user
-  const { data: detections, error: detectionsError } = await supabase
     .from('detections')
     .select('id, images!inner(user_id)')
     .eq('sex', 'buck')
     .is('deer_id', null)
     .eq('images.user_id', user.id)
 
+  if (body.detection_ids && body.detection_ids.length > 0) {
+    detectionsQuery = detectionsQuery.in('id', body.detection_ids)
+  } else {
+    detectionsQuery = detectionsQuery
+      .not('antler_fingerprint', 'is', null)
+      .limit(MATCH_BATCH_LIMIT)
+  }
+
+  const { data: detectionsToMatch, error: detectionsError } = await detectionsQuery
+
   if (detectionsError) {
     return NextResponse.json({ error: 'Failed to fetch detections' }, { status: 500 })
   }
 
-  if (!detections || detections.length === 0) {
+  if (!detectionsToMatch || detectionsToMatch.length === 0) {
     return NextResponse.json(
-      { error: 'No unassigned buck detections to match' },
+      { error: 'No unassigned fingerprinted buck detections to match' },
       { status: 400 }
     )
-  }
-
-  // Filter by provided IDs if any
-  let detectionsToMatch = detections
-  if (body.detection_ids && body.detection_ids.length > 0) {
-    detectionsToMatch = detections.filter(d => body.detection_ids!.includes(d.id))
   }
 
   // Trigger compare-deer job for each detection
@@ -90,9 +89,13 @@ export async function POST(request: NextRequest) {
     // Continue - some may have succeeded
   }
 
+  const limited = !(body.detection_ids && body.detection_ids.length > 0)
+    && detectionsToMatch.length === MATCH_BATCH_LIMIT
+
   return NextResponse.json({
     message: 'Matching job queued',
     job_id: 'batch',
     detection_count: detectionsToMatch.length,
+    limited,
   }, { status: 202 })
 }

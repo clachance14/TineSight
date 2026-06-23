@@ -1,51 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { DeerCatalog } from '@/components/deer/deer-catalog'
-import { CreateDeerModal } from '@/components/deer/create-deer-modal'
 
-interface DeerProfile {
-  id: string
-  name: string
-  notes: string | null
-  sighting_count: number
-}
-
+/**
+ * Catalog page wrapper. Bucks are never "added" blank here — a Buck is only ever
+ * identified from a Detection in the photo flow (see CONTEXT.md / ADR 0005), so
+ * this page is read-and-navigate only; tapping a card opens the Buck's profile.
+ */
 export function DeerCatalogClient() {
-  const router = useRouter()
-  const [createModalOpen, setCreateModalOpen] = useState(false)
-  const [selectedDetectionId, setSelectedDetectionId] = useState<string | null>(null)
-
-  const handleDeerClick = (deer: DeerProfile) => {
-    // Navigate to deer detail page (or open modal)
-    router.push(`/deer/${deer.id}`)
-  }
-
-  const handleCreateClick = () => {
-    // This would normally be triggered from a detection view
-    // For now, show a message or redirect to photos
-    router.push('/photos')
-  }
-
-  return (
-    <>
-      <DeerCatalog
-        onDeerClick={handleDeerClick}
-        onCreateClick={handleCreateClick}
-      />
-
-      {selectedDetectionId && (
-        <CreateDeerModal
-          open={createModalOpen}
-          onOpenChange={setCreateModalOpen}
-          detectionId={selectedDetectionId}
-          onSuccess={(deer) => {
-            setSelectedDetectionId(null)
-            router.push(`/deer/${deer.id}`)
-          }}
-        />
-      )}
-    </>
-  )
+  return <DeerCatalog />
 }

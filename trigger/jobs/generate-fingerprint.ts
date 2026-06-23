@@ -3,6 +3,14 @@ import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractAntlerFingerprint } from "@/lib/gemini/client";
 import { isTrophyScore, DEFAULT_TROPHY_THRESHOLD_INCHES } from "@/lib/scoring/gates";
+import {
+  computeBcScores,
+  rawFromFingerprintMeasurements,
+  scoreClassFor,
+} from "@/lib/scoring/boone-crockett";
+import { assertFullResolutionPath, assertFullResolutionDimensions, ANALYSIS_GUARD_DIMS } from "@/lib/image/analysis-source";
+import { reverseReidScan } from "./reverse-reid-scan";
+import sharp from "sharp";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
@@ -67,7 +75,7 @@ export const generateFingerprint = task({
 
       const { data: detection, error: fetchError } = await supabase
         .from("detections")
-        .select("id, image_id, crop_file_path, size_class, estimated_point_range")
+        .select("id, image_id, crop_file_path, size_class, estimated_point_range, deer_id")
         .eq("id", detectionId)
         .single();
 
@@ -91,6 +99,12 @@ export const generateFingerprint = task({
           error: "No crop image available",
         };
       }
+
+      // Full-resolution guard (ADR 0003): the fingerprint is the resolution-
+      // sensitive stage — at variant scale a drop tine reads as a kicker and the
+      // gross score / trophy decision silently corrupt. The crop must come from
+      // the original (a `crops/…` path), never a display variant.
+      assertFullResolutionPath(detection.crop_file_path, "generate-fingerprint:crop");
 
       logger.info("Detection record fetched", {
         detectionId,
@@ -143,9 +157,21 @@ export const generateFingerprint = task({
       const cropArrayBuffer = await cropResponse.arrayBuffer();
       const cropBuffer = Buffer.from(cropArrayBuffer);
 
+      // Full-resolution guard (ADR 0003), dimension half: reject a crop that is
+      // thumbnail-scale (i.e. taken from a variant). Uses the thumbnail floor so
+      // a legitimately small crop of a distant buck still passes.
+      const cropMeta = await sharp(cropBuffer).metadata();
+      assertFullResolutionDimensions(
+        cropMeta.width,
+        cropMeta.height,
+        "generate-fingerprint:crop",
+        ANALYSIS_GUARD_DIMS.THUMBNAIL_MAX_DIM
+      );
+
       logger.info("Crop image downloaded", {
         detectionId,
         sizeBytes: cropBuffer.byteLength,
+        dimensions: `${cropMeta.width}x${cropMeta.height}`,
       });
 
       // Step 4: Call extractAntlerFingerprint() with Gemini Thinking enabled
@@ -169,17 +195,40 @@ export const generateFingerprint = task({
         retryCount: metrics.retryCount,
       });
 
-      // Step 5: Authoritative trophy decision on the fingerprint's gross score.
-      // This is the automatic promote/demote: the estimate only gated entry to
-      // the fingerprint; the fingerprint's gross score is the final word.
-      // See docs/adr/0004-trophy-gated-ai-cost-cascade.md.
+      // Step 5: Compute the authoritative B&C scores in code from the model's raw
+      // measurements (ADR 0006). The model EXTRACTS measurements; it is not trusted
+      // to do the arithmetic. We overwrite fingerprint.scores with the deterministic
+      // values so the persisted JSONB, score_gross, and is_trophy all agree.
+      const bc = computeBcScores(
+        rawFromFingerprintMeasurements(
+          fingerprint.measurements,
+          fingerprint.scores?.abnormal_points_total ?? null,
+        ),
+      );
+      fingerprint.scores = {
+        ...fingerprint.scores,
+        gross_score: bc.grossScore,
+        gross_typical: bc.grossTypical,
+        deductions: bc.asymmetryDeductions,
+        net_score: bc.netTypical,
+        net_typical: bc.netTypical,
+        net_non_typical: bc.netNonTypical,
+        abnormal_points_total: bc.abnormalPointsTotal,
+        score_class: scoreClassFor(bc.grossScore),
+        // typical_status is a character call (drop tines/stickers), left to the model
+        typical_status: fingerprint.scores?.typical_status ?? "typical",
+      };
+
+      // Step 5a: Authoritative trophy decision on the computed gross score. The
+      // estimate only gated entry to the fingerprint; this gross score is the final
+      // word. See docs/adr/0004-trophy-gated-ai-cost-cascade.md.
       const { data: ownerProfile } = await supabase
         .from("profiles")
         .select("trophy_threshold")
         .eq("id", userId)
         .single();
       const trophyThreshold = ownerProfile?.trophy_threshold ?? DEFAULT_TROPHY_THRESHOLD_INCHES;
-      const grossScore = fingerprint.scores.gross_score;
+      const grossScore = bc.grossScore;
       const trophy = isTrophyScore(grossScore, trophyThreshold);
 
       logger.info("Authoritative trophy decision", {
@@ -196,7 +245,11 @@ export const generateFingerprint = task({
         .from("detections")
         .update({
           antler_fingerprint: fingerprint as any, // JSONB column
-          score_gross: grossScore,
+          // score_gross is an INTEGER column; the model returns a fractional
+          // gross score (e.g. 178.2). Round to match the migration-043 backfill
+          // convention — writing the raw float fails with Postgres 22P02 and
+          // silently drops the entire fingerprint update (incl. is_trophy).
+          score_gross: Math.round(grossScore),
           is_trophy: trophy,
         })
         .eq("id", detectionId);
@@ -214,6 +267,21 @@ export const generateFingerprint = task({
       }
 
       logger.info("Antler fingerprint saved successfully", { detectionId });
+
+      // Step 5c: Ongoing re-ID (ADR 0005). A freshly-fingerprinted, UNASSIGNED buck
+      // is a re-ID candidate — scan it against the Catalog to propose Sightings.
+      // Reference detections already carry a deer_id (post-creation-scan covers the
+      // forward direction), so skip those.
+      if (detection.deer_id == null) {
+        try {
+          await reverseReidScan.trigger({ detectionId, userId });
+        } catch (scanErr) {
+          logger.error("Failed to queue reverse re-ID scan", {
+            detectionId,
+            error: scanErr instanceof Error ? scanErr.message : String(scanErr),
+          });
+        }
+      }
 
       // Step 6: Return success with key fingerprint details
       return {

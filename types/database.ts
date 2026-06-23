@@ -484,6 +484,8 @@ export type Database = {
           analysis_notes: string | null
           analyzed_at: string | null
           batch_id: string | null
+          best_score: number | null
+          best_score_is_estimate: boolean
           blur_data_url: string | null
           camera_id: string | null
           captured_at: string | null
@@ -524,6 +526,8 @@ export type Database = {
           analysis_notes?: string | null
           analyzed_at?: string | null
           batch_id?: string | null
+          best_score?: number | null
+          best_score_is_estimate?: boolean
           blur_data_url?: string | null
           camera_id?: string | null
           captured_at?: string | null
@@ -564,6 +568,8 @@ export type Database = {
           analysis_notes?: string | null
           analyzed_at?: string | null
           batch_id?: string | null
+          best_score?: number | null
+          best_score_is_estimate?: boolean
           blur_data_url?: string | null
           camera_id?: string | null
           captured_at?: string | null

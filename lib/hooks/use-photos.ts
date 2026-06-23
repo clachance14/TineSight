@@ -51,6 +51,8 @@ interface PhotosResponse {
     thumbnail_path?: string | null
     medium_path?: string | null
     bestQualityStatus: string | null
+    best_score?: number | null
+    best_score_is_estimate?: boolean
   }>
   total: number
   nextCursor: string | null
@@ -159,6 +161,9 @@ export function usePhotos(filters?: PhotoFilters) {
       if (filters?.sizeClass !== undefined) {
         params.append('sizeClass', filters.sizeClass)
       }
+      if (filters?.minScore !== undefined) {
+        params.append('minScore', String(filters.minScore))
+      }
       if (filters?.dateFrom !== undefined) {
         params.append('dateFrom', filters.dateFrom)
       }
@@ -170,6 +175,9 @@ export function usePhotos(filters?: PhotoFilters) {
       }
       if (filters?.areaName !== undefined) {
         params.append('areaName', filters.areaName)
+      }
+      if (filters?.areaNames?.length) {
+        params.append('areaNames', filters.areaNames.join(','))
       }
       if (filters?.sortBy !== undefined) {
         params.append('sortBy', filters.sortBy)
@@ -285,6 +293,9 @@ export function usePhotosInfinite(
       if (filters?.sizeClass !== undefined) {
         params.append('sizeClass', filters.sizeClass)
       }
+      if (filters?.minScore !== undefined) {
+        params.append('minScore', String(filters.minScore))
+      }
       if (filters?.dateFrom !== undefined) {
         params.append('dateFrom', filters.dateFrom)
       }
@@ -296,6 +307,9 @@ export function usePhotosInfinite(
       }
       if (filters?.areaName !== undefined) {
         params.append('areaName', filters.areaName)
+      }
+      if (filters?.areaNames?.length) {
+        params.append('areaNames', filters.areaNames.join(','))
       }
       if (filters?.sortBy !== undefined) {
         params.append('sortBy', filters.sortBy)

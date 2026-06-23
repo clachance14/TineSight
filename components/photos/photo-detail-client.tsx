@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { ImageOff, Eye, EyeOff, ZoomIn } from "lucide-react"
@@ -82,8 +82,9 @@ export function PhotoDetailClient({
 }: PhotoDetailClientProps) {
   const router = useRouter()
 
-  // Shared hover state with detection cards
-  const { hoveredDetectionId, setHoveredDetectionId } = useDetectionHover()
+  // Shared hover + pinned (tap-to-locate) state with detection cards
+  const { hoveredDetectionId, setHoveredDetectionId, pinnedDetectionId, setPinnedDetectionId } =
+    useDetectionHover()
 
   // Horizontal swipe -> navigate to adjacent photo (mobile). Vertical swipes are
   // ignored so page scroll is unaffected.
@@ -117,7 +118,7 @@ export function PhotoDetailClient({
   )
 
   // Detection edit panel state
-  const { openPanel } = useDetectionEdit()
+  const { openPanel, isOpen: isEditPanelOpen } = useDetectionEdit()
 
   // Ref for container to calculate object-contain bounds
   const containerRef = useRef<HTMLDivElement>(null)
@@ -136,10 +137,38 @@ export function PhotoDetailClient({
   const { showBoundingBoxes, toggleBoundingBoxes } = useUIStore()
   const [isLightboxOpen, setIsLightboxOpen] = useState(false)
 
-  // Handle detection click - open edit panel
+  // Tap-to-locate, second-tap-to-edit:
+  //  - first tap on a detection pins it (its box draws, row expands)
+  //  - tapping the already-pinned detection opens the edit panel
   const handleDetectionClick = useCallback((detectionId: string) => {
-    openPanel(detectionId)
-  }, [openPanel])
+    if (pinnedDetectionId === detectionId) {
+      openPanel(detectionId)
+    } else {
+      setPinnedDetectionId(detectionId)
+    }
+  }, [pinnedDetectionId, setPinnedDetectionId, openPanel])
+
+  // Clicking anywhere that isn't a detection pin / box / row clears the located
+  // detection; Escape does the same. Skipped while the edit panel is open — that
+  // surface manages its own dismissal.
+  useEffect(() => {
+    if (pinnedDetectionId === null || isEditPanelOpen) return
+    const clear = () => setPinnedDetectionId(null)
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest("[data-detection-interactive]")) return
+      clear()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clear()
+    }
+    document.addEventListener("click", onClick)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("click", onClick)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [pinnedDetectionId, isEditPanelOpen, setPinnedDetectionId])
 
   return (
     <div className="relative">
@@ -195,7 +224,9 @@ export function PhotoDetailClient({
                   imageHeight={imageHeight}
                   visible={showDetections}
                   showAll={showBoundingBoxes}
+                  showPins
                   hoveredDetectionId={hoveredDetectionId}
+                  pinnedDetectionId={pinnedDetectionId}
                   onDetectionClick={handleDetectionClick}
                   onDetectionHover={setHoveredDetectionId}
                   imageBounds={imageBounds.ready ? imageBounds : undefined}

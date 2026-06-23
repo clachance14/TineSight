@@ -46,3 +46,7 @@ supabase/.temp/
 
 # trigger.dev
 .trigger/
+.gstack/
+
+# playwright mcp (removed — browser QA is gstack only, ADR 0002)
+.playwright-mcp/

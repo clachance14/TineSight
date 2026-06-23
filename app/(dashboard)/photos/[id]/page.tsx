@@ -270,66 +270,33 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
             navQueryString={filterQueryString}
           />
 
-          {/* Photo metadata */}
-          <Card>
-            <CardHeader className="hidden md:block">
-              <CardTitle>Photo Information</CardTitle>
-            </CardHeader>
-            <CardContent className="p-3 md:p-6 pt-3">
-              {/* Mobile: Dense inline layout */}
-              <div className="md:hidden space-y-2">
-                <h3 className="text-base font-semibold text-cream mb-2">Photo Info</h3>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                  <span><span className="text-cream-dark">Captured:</span> <span className="text-cream">{formatShortDate(photo.captured_at)}</span></span>
-                  <span><span className="text-cream-dark">Imported:</span> <span className="text-cream">{formatShortDate(photo.imported_at)}</span></span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {getStatusBadge(photo.detection_status)}
-                  {getClassificationBadge(photo.classification)}
-                  {photo.confidence !== null && (
-                    <span className="text-sm text-cream">{Math.round(photo.confidence * 100)}%</span>
-                  )}
-                  {formatFileSize(photo.file_size_bytes) && (
-                    <span className="text-sm text-cream-dark">{formatFileSize(photo.file_size_bytes)}</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Desktop: Original grid layout */}
-              <div className="hidden md:grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-cream-dark">Captured</p>
-                  <p className="text-cream">{formatDate(photo.captured_at)}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-cream-dark">Imported</p>
-                  <p className="text-cream">{formatDate(photo.imported_at)}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-cream-dark">Detection Status</p>
-                  <div className="mt-1">{getStatusBadge(photo.detection_status)}</div>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-cream-dark">Classification</p>
-                  <div className="mt-1">{getClassificationBadge(photo.classification)}</div>
-                </div>
-                {photo.confidence !== null && (
-                  <div>
-                    <p className="text-sm font-medium text-cream-dark">Confidence</p>
-                    <p className="text-cream">{Math.round(photo.confidence * 100)}%</p>
-                  </div>
-                )}
-                {photo.file_size_bytes !== null && (
-                  <div>
-                    <p className="text-sm font-medium text-cream-dark">File Size</p>
-                    <p className="text-cream">
-                      {(photo.file_size_bytes / 1024 / 1024).toFixed(2)} MB
-                    </p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          {/* Photo metadata — a light inline strip, not its own card. The photo
+              is the focus; these details sit quietly beneath it. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1 text-sm text-cream-dark">
+            <span>
+              <span className="text-cream-dark">Captured</span>{' '}
+              <span className="font-medium text-cream">{formatDate(photo.captured_at)}</span>
+            </span>
+            <span className="text-cream-dark/40">·</span>
+            {getStatusBadge(photo.detection_status)}
+            {getClassificationBadge(photo.classification)}
+            {photo.confidence !== null && (
+              <>
+                <span className="text-cream-dark/40">·</span>
+                <span className="text-cream">{Math.round(photo.confidence * 100)}%</span>
+              </>
+            )}
+            {formatFileSize(photo.file_size_bytes) && (
+              <>
+                <span className="text-cream-dark/40">·</span>
+                <span>{formatFileSize(photo.file_size_bytes)}</span>
+              </>
+            )}
+            <span className="hidden text-cream-dark/40 md:inline">·</span>
+            <span className="hidden md:inline">
+              Imported {formatShortDate(photo.imported_at)}
+            </span>
+          </div>
         </div>
 
         {/* Detections panel */}
@@ -339,7 +306,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
             <CardHeader className="pb-2 md:pb-4 px-3 md:px-6 pt-3 md:pt-6">
               <CardTitle className="text-base md:text-lg">Detections ({detections.length})</CardTitle>
               <CardDescription className="hidden md:block">
-                Animals detected in this photo - click to select for ROI
+                Tap to locate on the photo · tap again to adjust
               </CardDescription>
             </CardHeader>
             <CardContent className="px-3 md:px-6 pb-3 md:pb-6 pt-0">
@@ -348,7 +315,7 @@ export default async function PhotoDetailPage({ params, searchParams }: PhotoDet
                   No detections found
                 </p>
               ) : (
-                <div className="space-y-2 md:space-y-3">
+                <div className="space-y-1.5 md:space-y-2">
                   {detections.map((detection, index) => (
                     <DetectionCardWithFeedback
                       key={detection.id}

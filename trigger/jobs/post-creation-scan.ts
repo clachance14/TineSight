@@ -243,19 +243,42 @@ export const postCreationScan = task({
           matchCount: matches.length,
         });
 
-        const matchCandidateRecords = matches.map((match) => ({
-          deer_id: deerId,
-          detection_id: match.detectionId,
-          antler_print_similarity: match.similarity / 100, // Convert to 0-1 range for DECIMAL(3,2)
-          similarity: null, // Visual similarity not computed yet
-          status: "pending",
-          reviewed_by: null,
-          reviewed_at: null,
-        }));
-
-        const { error: insertError } = await supabase
+        // A reject/confirm is an operator decision and must be sticky — never
+        // resurrect a decided (detection, deer) pair back to pending on a rescan
+        // (human-in-the-loop, constitution). Drop matches the operator already
+        // decided for THIS buck.
+        const { data: decidedRows } = await supabase
           .from("match_candidates")
-          .insert(matchCandidateRecords as never);
+          .select("detection_id")
+          .eq("candidate_deer_id", deerId)
+          .in("status", ["rejected", "confirmed"]);
+        const decidedDetectionIds = new Set(
+          (decidedRows ?? []).map((r) => r.detection_id)
+        );
+
+        // Correct match_candidates columns: candidate_deer_id (not deer_id),
+        // similarity_score (NOT NULL, not "similarity"), antler_print_similarity.
+        // The previous column names silently failed under this file's @ts-nocheck,
+        // which is why this scan never produced rows.
+        const matchCandidateRecords = matches
+          .filter((match) => !decidedDetectionIds.has(match.detectionId))
+          .map((match) => {
+            const sim01 = Math.round((match.similarity / 100) * 10000) / 10000;
+            return {
+              candidate_deer_id: deerId,
+              detection_id: match.detectionId,
+              similarity_score: sim01,
+              antler_print_similarity: sim01, // 0-1 for DECIMAL(3,2)
+              status: "pending",
+              reviewed_at: null,
+            };
+          });
+
+        const { error: insertError } = matchCandidateRecords.length === 0
+          ? { error: null }
+          : await supabase
+              .from("match_candidates")
+              .upsert(matchCandidateRecords as never, { onConflict: "detection_id,candidate_deer_id" });
 
         if (insertError) {
           logger.error("Failed to create match candidates", {

@@ -35,7 +35,13 @@ differentiator. The North Star event is the **First Buck Re-Identified**.
 
 ### Catalog
 The collection of distinct Bucks an account has identified — the browsable
-roster of individual trophy deer, each with its history of Photos.
+roster of individual deer, each with its history of Photos. A Buck below the
+Trophy threshold is still in the Catalog; the Catalog is **all** identified
+Bucks, not only Trophies. **UI naming:** the catalog page is branded
+"The Trophy Room" for showpiece feel — that is a marketing label for the
+*Catalog page*, not a claim that every Buck on it is a Trophy. Confirm/identify
+actions stay precise ("confirm sighting", "identify buck"), never "add to the
+trophy room".
 
 ### Trophy buck
 A **Buck whose antler Score crosses the threshold** that makes it worth
@@ -68,6 +74,30 @@ to drive Re-identification and matching between Detections.
 ### Match candidate
 A proposed re-identification awaiting human confirmation — the AI suggests "this
 Detection may be Buck X"; a Lease operator confirms or rejects. (Human-in-the-loop.)
+Surfaced on the **Review** page (formerly "Trophy Dashboard") under **Matches**.
+
+### New buck candidate
+A group of lookalike trophy **Detections** the AI believes are one **Buck** that
+is not yet in the **Catalog** — naming the group creates the Buck and links every
+member Detection as a **Sighting**. Shown on the **Review** page under **New Bucks**.
+**Naming drift:** generated and persisted in code as a *cluster* (the grouping
+algorithm's term); "cluster" is engineering jargon and must never appear in the
+UI — the operator-facing term is **New buck** / **New buck candidate**.
+
+### Unsorted detection
+A trophy **Detection** that is neither a **Match candidate** for a known **Buck**
+nor part of a **New buck candidate** group — a loner awaiting review. Shown on the
+**Review** page under **Unsorted**. **Naming drift:** referred to in code as
+*unclustered*; the operator-facing term is **Unsorted**.
+
+### Sighting
+A confirmed instance of a **Buck** appearing in a Photo — a **Detection** that has
+been assigned to a Buck, whether by confirming a **Match candidate** (Re-ID) or by
+manual linking. Counted **one per assigned Detection**: if a Buck appears in five
+Photos, that is five Sightings (burst photos are not yet de-duplicated into visits).
+A Buck's `sighting_count` is the number of its assigned Detections, and its Sightings
+are the history shown on its profile. **Adding a Sighting is the act of
+Re-identification** — confirming that a new Detection is an already-catalogued Buck.
 
 ### Showcase
 A curated, **public, no-login** collection of trophy Bucks (their profiles and

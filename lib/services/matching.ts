@@ -1,4 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { compareFingerprints } from '@/lib/fingerprint/compare'
+import type { AntlerFingerprint } from '@/types/fingerprint'
 
 export interface MatchCandidate {
   id: string
@@ -19,6 +22,7 @@ export interface MatchReview extends MatchCandidate {
     sex: string
     antler_points: number | null
     age_class: string | null
+    crop_url: string | null
   }
   suggested_deer: {
     id: string
@@ -40,7 +44,7 @@ export async function getPendingMatches(
     .select(`
       *,
       detection:detections!detection_id(
-        id, image_id, species, sex, antler_points, age_class,
+        id, image_id, species, sex, antler_points, age_class, crop_file_path,
         images!inner(user_id)
       ),
       suggested_deer:deer!candidate_deer_id(id, name)
@@ -59,7 +63,33 @@ export async function getPendingMatches(
     return { data: null, error }
   }
 
-  return { data: data as unknown as MatchReview[], error: null }
+  const rows = (data ?? []) as unknown as Array<
+    MatchReview & { detection: { crop_file_path: string | null } }
+  >
+
+  // Sign each candidate's crop so the operator can visually verify the sighting.
+  // Signed in parallel; a deduped path map avoids re-signing shared crops.
+  const paths = Array.from(
+    new Set(rows.map((r) => r.detection?.crop_file_path).filter((p): p is string => p != null && p !== ''))
+  )
+  const signed = await Promise.all(
+    paths.map((path) => supabase.storage.from('photos').createSignedUrl(path, 3600))
+  )
+  const urlByPath = new Map<string, string>()
+  paths.forEach((path, i) => {
+    const url = signed[i]?.data?.signedUrl
+    if (url != null) urlByPath.set(path, url)
+  })
+
+  const matches: MatchReview[] = rows.map((r) => ({
+    ...r,
+    detection: {
+      ...r.detection,
+      crop_url: r.detection?.crop_file_path != null ? urlByPath.get(r.detection.crop_file_path) ?? null : null,
+    },
+  }))
+
+  return { data: matches, error: null }
 }
 
 /**
@@ -563,4 +593,256 @@ export async function batchRejectMatches(
   }
 
   return { data: { rejected_count: matchesData.length }, error: null }
+}
+
+// ============================================================================
+// "Find sightings" — operator-driven, on-demand ranked re-ID (ADR 0005)
+//
+// The automatic reverse-reid-scan only proposes match_candidates at/above the
+// strong threshold. This is the manual complement: for one Buck, rank ALL of the
+// user's unassigned fingerprinted Detections by antler-print similarity and let
+// the operator confirm/reject crop-by-crop. Ranked-manual is resilient to the
+// fingerprint's weak identity discrimination (it scores "is this a big typical
+// rack", not "is this *this* buck"), so we surface a shortlist, never auto-assign.
+//
+// State model: transient + sticky rejects. The search writes nothing on its own;
+// a confirm sets detections.deer_id (adds the Sighting) and a reject writes a
+// status='rejected' match_candidate so the crop is suppressed on future searches.
+// ============================================================================
+
+export interface SightingCandidate {
+  detection_id: string
+  crop_url: string | null
+  similarity: number // 0–100, antler-print similarity to the Buck's reference
+  score_gross: number | null
+  point_range: string | null // e.g. "8-10 points" (detections.estimated_point_range)
+  age_class: string | null
+  captured_at: string | null // when the source Photo was taken (re-ID context)
+}
+
+const SIGHTING_CANDIDATE_LIMIT = 15
+// Pure-compute compare is cheap, but cap the rows we pull (each carries a
+// fingerprint JSON blob) so a huge unassigned pool can't blow up the request.
+const MAX_FINGERPRINTED_SCAN = 2000
+
+/**
+ * Rank the user's unassigned, fingerprinted Detections by antler-print similarity
+ * to a Buck's reference, for manual review. Returns top-N with signed crops.
+ * Returns [] (not an error) when the Buck has no reference fingerprint — only
+ * trophy-band Bucks get one (ADR 0004), so non-trophy Bucks have nothing to rank.
+ */
+export async function findSightingCandidates(
+  userId: string,
+  deerId: string,
+  limit = SIGHTING_CANDIDATE_LIMIT
+): Promise<{ data: SightingCandidate[] | null; error: Error | null }> {
+  const supabase = await createClient()
+
+  // 1. The Buck + its reference fingerprint (what we rank against).
+  const { data: deer, error: deerErr } = await supabase
+    .from('deer')
+    .select('id, reference_detection_id')
+    .eq('id', deerId)
+    .single()
+  if (deerErr || !deer) {
+    return { data: null, error: new Error('Buck not found') }
+  }
+  if (!deer.reference_detection_id) {
+    return { data: [], error: null }
+  }
+
+  const { data: refDetection } = await supabase
+    .from('detections')
+    .select('antler_fingerprint')
+    .eq('id', deer.reference_detection_id)
+    .single()
+  const refFp = (refDetection?.antler_fingerprint as AntlerFingerprint | null) ?? null
+  if (!refFp) {
+    return { data: [], error: null }
+  }
+
+  // 2. Detections already decided for THIS Buck are off the table. Confirmed ones
+  //    also carry deer_id (excluded by the pool filter), but rejected ones don't —
+  //    the sticky-reject rows are what keep them from re-surfacing here.
+  const { data: decided } = await supabase
+    .from('match_candidates')
+    .select('detection_id')
+    .eq('candidate_deer_id', deerId)
+    .in('status', ['rejected', 'confirmed'])
+  const excluded = new Set((decided ?? []).map((r) => r.detection_id))
+
+  // 3. The candidate pool: unassigned, fingerprinted Detections the user owns
+  //    (detections have no user_id — scope via images.user_id per CLAUDE.md).
+  const { data: pool, error: poolErr } = await supabase
+    .from('detections')
+    .select('id, crop_file_path, score_gross, estimated_point_range, age_class, antler_fingerprint, images!inner(user_id, captured_at)')
+    .is('deer_id', null)
+    .not('antler_fingerprint', 'is', null)
+    .eq('images.user_id', userId)
+    .limit(MAX_FINGERPRINTED_SCAN)
+  if (poolErr) {
+    return { data: null, error: poolErr }
+  }
+
+  const rows = (pool ?? []) as unknown as Array<{
+    id: string
+    crop_file_path: string | null
+    score_gross: number | null
+    estimated_point_range: string | null
+    age_class: string | null
+    antler_fingerprint: AntlerFingerprint | null
+    images: { captured_at: string | null } | null
+  }>
+
+  // 4. Rank by fingerprint similarity (free, pure compute).
+  const ranked = rows
+    .filter((d) => !excluded.has(d.id) && d.antler_fingerprint != null)
+    .map((d) => {
+      let similarity = -1
+      try {
+        similarity = compareFingerprints(refFp, d.antler_fingerprint as AntlerFingerprint).overall_similarity
+      } catch {
+        similarity = -1
+      }
+      return { d, similarity }
+    })
+    .filter((r) => r.similarity >= 0)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, limit)
+
+  // 5. Sign crops (dedup shared paths). Crops live at a FLAT `crops/{id}.jpg`
+  //    prefix, which the photos-bucket RLS doesn't grant to the user session
+  //    (see migration 047/049 — the same gap that "?"-blanked these thumbnails).
+  //    Ownership is already enforced above (the pool is filtered to this user's
+  //    images), so we sign with the service role — the same authorize-then-
+  //    service-role-sign pattern the public Showcase uses (ADR 0001).
+  const admin = createAdminClient()
+  const paths = Array.from(
+    new Set(ranked.map((r) => r.d.crop_file_path).filter((p): p is string => p != null && p !== ''))
+  )
+  const signed = await Promise.all(
+    paths.map((p) => admin.storage.from('photos').createSignedUrl(p, 3600))
+  )
+  const urlByPath = new Map<string, string>()
+  paths.forEach((p, i) => {
+    const url = signed[i]?.data?.signedUrl
+    if (url != null) urlByPath.set(p, url)
+  })
+
+  const candidates: SightingCandidate[] = ranked.map((r) => ({
+    detection_id: r.d.id,
+    crop_url: r.d.crop_file_path != null ? urlByPath.get(r.d.crop_file_path) ?? null : null,
+    similarity: Math.round(r.similarity * 10) / 10,
+    score_gross: r.d.score_gross,
+    point_range: r.d.estimated_point_range,
+    age_class: r.d.age_class,
+    captured_at: r.d.images?.captured_at ?? null,
+  }))
+
+  return { data: candidates, error: null }
+}
+
+/**
+ * Confirm a "Find sightings" candidate: assign the Detection to the Buck. THIS is
+ * the act of adding a Sighting (no-auto-merge — it took a human confirm to land
+ * here). Verifies ownership of both sides; RLS guards the writes regardless.
+ */
+export async function addSighting(
+  userId: string,
+  deerId: string,
+  detectionId: string,
+  similarity = 0
+): Promise<{ data: { detection_id: string; deer_id: string } | null; error: Error | null }> {
+  const supabase = await createClient()
+
+  // The Buck must belong to the user.
+  const { data: deer } = await supabase.from('deer').select('id, user_id').eq('id', deerId).single()
+  if (!deer || (deer as { user_id: string }).user_id !== userId) {
+    return { data: null, error: new Error('Buck not found') }
+  }
+
+  // The Detection must belong to the user (via images) and be unassigned.
+  const { data: detection } = await supabase
+    .from('detections')
+    .select('id, deer_id, images!inner(user_id)')
+    .eq('id', detectionId)
+    .single()
+  const det = detection as unknown as { id: string; deer_id: string | null; images: { user_id: string } } | null
+  if (!det || det.images.user_id !== userId) {
+    return { data: null, error: new Error('Detection not found') }
+  }
+  if (det.deer_id != null) {
+    return { data: null, error: new Error('Detection already assigned') }
+  }
+
+  // Assign — adding the Sighting.
+  const { error: updErr } = await supabase
+    .from('detections')
+    .update({ deer_id: deerId } as never)
+    .eq('id', detectionId)
+  if (updErr) {
+    return { data: null, error: updErr }
+  }
+
+  // Record a confirmed candidate for audit + to keep it out of future searches.
+  const sim01 = similarityToUnit(similarity)
+  await supabase.from('match_candidates').upsert(
+    {
+      detection_id: detectionId,
+      candidate_deer_id: deerId,
+      similarity_score: sim01,
+      antler_print_similarity: sim01,
+      status: 'confirmed',
+      reviewed_at: new Date().toISOString(),
+    } as never,
+    { onConflict: 'detection_id,candidate_deer_id' }
+  )
+
+  return { data: { detection_id: detectionId, deer_id: deerId }, error: null }
+}
+
+/**
+ * Sticky reject for a "Find sightings" candidate: write a status='rejected'
+ * match_candidate so this Detection is suppressed in future searches for this
+ * Buck. Leaves the Detection unassigned (it may still be some OTHER Buck).
+ */
+export async function rejectSightingCandidate(
+  userId: string,
+  deerId: string,
+  detectionId: string,
+  similarity = 0
+): Promise<{ error: Error | null }> {
+  const supabase = await createClient()
+
+  // Verify ownership explicitly for a clean 404 instead of a silent RLS drop.
+  const { data: detection } = await supabase
+    .from('detections')
+    .select('id, images!inner(user_id)')
+    .eq('id', detectionId)
+    .single()
+  const det = detection as unknown as { id: string; images: { user_id: string } } | null
+  if (!det || det.images.user_id !== userId) {
+    return { error: new Error('Detection not found') }
+  }
+
+  const sim01 = similarityToUnit(similarity)
+  const { error } = await supabase.from('match_candidates').upsert(
+    {
+      detection_id: detectionId,
+      candidate_deer_id: deerId,
+      similarity_score: sim01,
+      antler_print_similarity: sim01,
+      status: 'rejected',
+      reviewed_at: new Date().toISOString(),
+    } as never,
+    { onConflict: 'detection_id,candidate_deer_id' }
+  )
+
+  return { error }
+}
+
+/** Clamp a 0–100 similarity into the DECIMAL(5,4) 0–1 unit scale the table stores. */
+function similarityToUnit(similarity: number): number {
+  const unit = Math.round((similarity / 100) * 10000) / 10000
+  return Math.min(1, Math.max(0, unit))
 }
