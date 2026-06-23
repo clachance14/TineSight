@@ -31,27 +31,40 @@ they exist to manage service workers / offline caching, which is out of scope.)
 
 ### 1. Web app manifest — `app/manifest.ts`
 
-Next.js serves this at `/manifest.webmanifest`. Fields:
+Next.js serves this at `/manifest.webmanifest` (verify the emitted route + the
+`<link rel="manifest">` in `next build` output — do not assume). Fields:
 
 - `name: "TineSight"`, `short_name: "TineSight"`
 - `description`: reuse the product one-liner.
-- `display: "standalone"` — fullscreen, no browser bar (the native feel).
-- `start_url: "/"`
+- `display: "standalone"` — removes browser chrome when installed (the native
+  feel). NOT true fullscreen: the OS status/nav bars remain.
+- `start_url: "/"`, `scope: "/"`, `id: "/"` (stable installed-app identity even if
+  `start_url` later changes).
 - `background_color: "#232B2D"`, `theme_color: "#232B2D"` (forest bg from DESIGN.md).
-- `icons`: reference the generated PNGs (192, 512; 512 also marked `purpose:
-  "maskable"` so Android masks it cleanly).
+- `icons`: reference the generated PNGs — `icon-192.png` and `icon-512.png` with
+  `purpose: "any"`, plus a dedicated `icon-512-maskable.png` with `purpose:
+  "maskable"`. Separate maskable file so Android masking can't clip the antler
+  (the `any` icons keep full artwork; the maskable one has extra safe-area padding).
+
+Note: HTTPS is required off-localhost (we have it via Vercel). Asset/manifest
+paths are absolute (`/icons/...`, `/`, `/manifest.webmanifest`) — fine unless a
+`basePath` is ever introduced (none today).
 
 ### 2. Branded icon — generated with `sharp`
 
 `sharp` is already a dependency (image-variant pipeline), so no new install.
 
-- A throwaway generator script `scripts/generate-pwa-icons.mjs` (loads
-  `./env.mjs` first per repo convention) rasterizes an inline SVG to PNGs.
+- A generator script `scripts/generate-pwa-icons.mjs` rasterizes an inline SVG to
+  PNGs. It does **not** import `./env.mjs` — this is pure asset generation and must
+  not require DB/API secrets (would needlessly fail CI/local runs).
 - Icon design: forest `#232B2D` rounded-square background with a simple
-  **tine/antler mark** in score-gold `#D6B16F` (per DESIGN.md palette).
-- Outputs committed to `public/icons/`:
-  - `icon-192.png` (192×192)
-  - `icon-512.png` (512×512)
+  **tine/antler mark** in score-gold `#D6B16F` (per DESIGN.md palette). Keep the
+  mark within the center ~80% so the maskable variant survives Android cropping.
+- Outputs **committed** to `public/icons/` (so a missing `node` step can never ship
+  a broken manifest):
+  - `icon-192.png` (192×192, `purpose: any`)
+  - `icon-512.png` (512×512, `purpose: any`)
+  - `icon-512-maskable.png` (512×512, extra safe-area padding, `purpose: maskable`)
   - `apple-touch-icon-180.png` (180×180, opaque bg — iOS ignores transparency)
 - Re-runnable so the icon can be tweaked or replaced with a real logo later.
 
@@ -60,15 +73,23 @@ Next.js serves this at `/manifest.webmanifest`. Fields:
 - In `app/layout.tsx`, extend the `metadata` export with `manifest:
   "/manifest.webmanifest"`, `appleWebApp: { capable: true, statusBarStyle:
   "default", title: "TineSight" }`, and `icons` (incl. `apple-touch-icon`). Add a
-  `viewport` export with `themeColor: "#232B2D"`. `appleWebApp.capable` is what
-  makes iPhone launch the app fullscreen.
+  separate `viewport` export (`export const viewport: Viewport`) with `themeColor:
+  "#232B2D"` — `themeColor` belongs in `viewport`, not `metadata`, in Next 16.
+  `appleWebApp.capable` makes iPhone launch the app in standalone mode.
+  - **Build-time verification:** confirm the rendered `<head>` actually emits
+    `apple-mobile-web-app-capable`. If Next omits it, add it via `metadata.other`.
 - A small dismissible **"Install TineSight" hint** component, rendered client-side
-  only when:
-  - the browser is **iOS Safari**, AND
+  only when ALL of:
+  - the browser is **real iOS Safari** — detect iOS (`/iPad|iPhone|iPod/` on UA,
+    PLUS the iPadOS desktop-UA case: `navigator.platform === "MacIntel" &&
+    navigator.maxTouchPoints > 1`) AND **exclude in-app browsers that can't install
+    PWAs** (`CriOS` Chrome, `FxiOS` Firefox, `EdgiOS` Edge → no hint), AND
   - the app is **not already in standalone mode**
     (`window.navigator.standalone !== true` and the `display-mode: standalone`
     media query is false), AND
-  - the user hasn't dismissed it before (`localStorage` flag).
+  - the user hasn't dismissed it before (`localStorage` flag, read/written inside a
+    **`try/catch`** — Safari private mode throws on `localStorage` and must not
+    crash hydration).
   - Content: "Install TineSight — tap Share, then 'Add to Home Screen'." Styled
     per DESIGN.md (forest surface, brass border, cream text). Dismiss "×" sets the
     localStorage flag.
@@ -92,11 +113,16 @@ changes.
 
 - `npm run type-check` green (the real gate).
 - `npm run build` green.
-- Confirm `/manifest.webmanifest` serves valid JSON and the three icon files exist
-  under `public/icons/`.
+- Against the running dev/prod server, assert:
+  - `GET /manifest.webmanifest` → 200, valid JSON, expected fields present.
+  - Every icon URL in the manifest → 200 (`/icons/icon-192.png`, `icon-512.png`,
+    `icon-512-maskable.png`, `apple-touch-icon-180.png`).
+  - Rendered `<head>` contains the `manifest` link, `apple-mobile-web-app-capable`,
+    `apple-mobile-web-app-title`, and the `theme-color` meta.
+- All four icon files exist under `public/icons/` and are committed.
 - Manual: on the user's iPhone via Safari — Share → Add to Home Screen → launch →
-  confirm fullscreen (no Safari bar) and correct icon. Confirm the install hint
-  shows in Safari and not in standalone mode.
+  confirm standalone (no Safari address bar) and correct icon. Confirm the install
+  hint shows in Safari and is absent in standalone mode and in Chrome-on-iOS.
 
 ## Known limitations (documented, accepted)
 
