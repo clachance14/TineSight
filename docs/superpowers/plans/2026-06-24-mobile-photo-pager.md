@@ -17,11 +17,37 @@ Design context: this was scoped in conversation on 2026-06-24 — "finger-follow
 - `lib/services/photo-view.ts` — **new.** `loadPhotoView(userId, id, filters)` → `PhotoViewDTO` (metadata + normalized detections + signed `imageUrl`/`fullResUrl` + `prevId`/`nextId`). DRY core reused by the page and the API. Plus a pure helper `resolveSwipe()` (unit-tested) for snap decisions.
 - `lib/services/photo-view.test.ts` — **new.** `node:test` for `resolveSwipe()`.
 - `app/api/photos/[id]/view/route.ts` — **new.** Auth-gated GET returning `PhotoViewDTO` JSON for one id (+ filters). The pager calls this to prefetch neighbors.
-- `components/photos/photo-viewer.tsx` — **new client.** Owns `current: PhotoViewDTO` state + the neighbor window; renders the photo zone (pager on mobile, static image on desktop) and feeds the current DTO to the info zone and header nav. Replaces the per-id server render of the photo+info region.
-- `components/photos/photo-pager.tsx` — **new client.** The finger-follow track (prev/current/next slides) for the photo zone only; emits `onSettle(direction)`. Mobile only.
+- `components/photos/photo-detail-viewer.tsx` — **new client.** (NOT `photo-viewer.tsx` — that name is already taken by the existing modal viewer.) Component `PhotoDetailViewer`. Owns `current: PhotoViewDTO` + the neighbor window IN STATE; renders the photo zone (pager on mobile, static on desktop), the info zone, AND the per-photo header actions (prev/next + delete) so they track the current photo.
+- `components/photos/photo-pager.tsx` — **new client.** The finger-follow track (prev/current/next slides) for the photo zone only; runs the drag→settle state machine and emits `onSettle(direction)` only AFTER the slide animation completes. Mobile only.
 - `components/photos/photo-info.tsx` — **new client.** The metadata strip + detections panel, rendered from a `PhotoViewDTO`. Moved out of the server page so it can swap without a reload.
-- `app/(dashboard)/photos/[id]/page.tsx` — **modify.** Becomes thin: auth + `loadPhotoView()` for the initial id → render `<PhotoViewer initial={dto} filters={...} />`. Keeps the back button + delete; prev/next + image + info move into the client viewer.
-- `components/photos/photo-detail-client.tsx` — **modify.** Keep the single-photo image+overlay+lightbox responsibilities, but make it render ONE DTO passed in (drop the internal `router.push` swipe nav — the pager owns navigation now).
+- `lib/photos/detail-filters.ts` — **new (shared).** One `parseDetailFilters(searchParams)` used by the page AND the route handler, covering the FULL grid filter+sort set. Fixes a pre-existing mismatch (the page currently drops `sortBy/sortDirection/minScore/areaNames/otherAnimals`, so prev/next can already disagree with the grid).
+- `app/(dashboard)/photos/[id]/page.tsx` — **modify.** Becomes thin: auth + `loadPhotoView()` for the initial id → render `<PhotoDetailViewer initial={dto} navQueryString={...} returnUrl={...} />`. Keeps ONLY the back button + title; prev/next + delete + image + info move into the client viewer.
+- `components/photos/photo-detail-client.tsx` — **modify.** Keep the single-photo image+overlay+lightbox responsibilities, render ONE DTO passed in, drop the internal `router.push` swipe nav, and make `priority`/eager loading conditional on `interactive` (center slide only).
+
+---
+
+## Codex cross-reference revisions (BINDING — these override the task sketches below)
+
+Codex reviewed this plan against the repo (2026-06-24). The task code blocks below are the starting shape; the following corrections are mandatory and supersede them where they conflict.
+
+**R1 [P1] — Pager must animate to the neighbor, not snap back.** In Task 5, do NOT `setDx(0)` + `onSettle` on release. Implement a two-phase state machine inside `PhotoPager`:
+- `phase: 'idle' | 'dragging' | 'settling'`, plus `settleOffset` (px target).
+- On release, call `resolveSwipe`. If `current`, animate `dx → 0`. If `next`, animate the track to `translateX(-200%)`; if `prev`, to `translateX(0%)` (both with the 220ms transition).
+- On the track's `onTransitionEnd` (only when `phase==='settling'` and it was a commit), call `onSettle(direction)`. The parent swaps `current`; because the new center slide is keyed by id, then the pager resets to the resting `-100%` with transition disabled for one frame (set a `noTransition` flag, clear it in a `requestAnimationFrame`/`useLayoutEffect`). This yields a continuous slide with no flash and no animate-in-then-snap.
+
+**R2 [P1] — Neighbor window must live in STATE, not just a ref.** In Task 6 (`PhotoDetailViewer`), keep `const [window, setWindow] = useState<{prev?: PhotoViewDTO; current: PhotoViewDTO; next?: PhotoViewDTO}>(...)`. After a prefetch resolves, `setWindow(w => ({...w, prev/next: dto}))` so the slides actually re-render (a `ref` mutation will not). The `cacheRef` Map may stay as a dedup/prune cache, but rendering reads from `window` state. `renderSlide` reads `window.prev/current/next` — never a bare ref.
+
+**R3 [P1] — Move per-photo actions into the client viewer (delete-targets-wrong-photo bug).** Because we use `history.replaceState`, any action built from the server `id` goes stale after a swipe. `PhotoDeleteButton photoId={id}` would delete the photo you swiped AWAY from. Render `PhotoDeleteButton` and the prev/next chevrons INSIDE `PhotoDetailViewer`, driven by `window.current.id` / `current.prevId` / `current.nextId`. The server page keeps only the back button + title. Pass `returnUrl` into the viewer.
+
+**R4 [P1] — Rename to avoid collision.** `components/photos/photo-viewer.tsx` already exists (modal viewer using `usePhotoDetail`). Name the new one `photo-detail-viewer.tsx` / `PhotoDetailViewer`. Do not touch the existing file.
+
+**R5 [P1] — Mirror the FULL grid filter+sort set.** Create `lib/photos/detail-filters.ts` exporting `parseDetailFilters(sp: URLSearchParams): ViewFilters` covering `status, hasDeer, qualityStatus, minConfidence, sex, minPoints, maxPoints, dateFrom, dateTo, sizeClass, cameraId, deerId` PLUS `minScore` (int), `areaNames` (array — repeated params), `otherAnimals` (array), `sortBy`, `sortDirection`. Use it in BOTH `page.tsx` and the route handler (replaces the inline parser in Task 3 and the page's lines 40-72). `PhotoFilters` already supports these (`lib/services/photos.ts:155-163`) and `getAdjacentPhotos` honors `sortBy/sortDirection` ordering — passing them fixes prev/next order, not just filtering. Confirm array param encoding matches the grid (`app/(dashboard)/photos/page.tsx:34-48`) and replicate it exactly.
+
+**R6 [P2] — Signed-URL expiry.** Signed URLs live ~1h (`lib/services/photos.ts:1429`). Add `expiresAt: number` (epoch ms, ~`Date.now()+55*60_000`) to `PhotoViewDTO` in Task 2 — but note scripts/`new Date()` constraints don't apply here (runtime server code). Before `settle` consumes a cached neighbor DTO, if `expiresAt` is past, refetch it. Also add `onError` on each slide `<img>` that refetches the DTO once (covers an expired URL mid-session). 
+
+**R7 [P2] — Image memory / priority.** Only the center slide may use `priority`/eager decoding; neighbor slides use `loading="lazy"` and `decoding="async"`. In Task 7, gate `priority` on `interactive`. Verify in Task 9 Step 3 by counting live `<img>` in the DOM (≈3) separately from heap — and note that pruning `window`/cache to ±1 bounds DTO refs, while the browser may still retain decoded bitmaps briefly; the DOM-count check is the real guard.
+
+**R8 [P2] — `referenceCount` confirmed unused.** `PhotoDetailClient` already ignores it (`referenceCount: _referenceCount = 0`). Safe to drop from the DTO and props. No ROI regression.
 
 ---
 
