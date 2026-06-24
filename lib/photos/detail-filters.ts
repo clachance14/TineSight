@@ -53,13 +53,18 @@ export function parseDetailFilters(searchParams: URLSearchParams): ViewFilters {
     if (!Number.isNaN(parsed)) f.minConfidence = parsed
   }
 
-  const minPoints = searchParams.get('minPoints')
+  // Points filters: the grid→detail navigation URL uses camelCase
+  // (photo-filters.tsx shareable URL + the existing [id]/page.tsx reader). The
+  // snake_case `min_points`/`max_points` form is only emitted by the use-photos
+  // API-fetch hook (NOT a navigation URL), but we read it as a fallback so
+  // neither path can silently drop the filter. camelCase wins when both present.
+  const minPoints = searchParams.get('minPoints') ?? searchParams.get('min_points')
   if (minPoints !== null && minPoints !== '') {
     const parsed = parseInt(minPoints, 10)
     if (!Number.isNaN(parsed)) f.minPoints = parsed
   }
 
-  const maxPoints = searchParams.get('maxPoints')
+  const maxPoints = searchParams.get('maxPoints') ?? searchParams.get('max_points')
   if (maxPoints !== null && maxPoints !== '') {
     const parsed = parseInt(maxPoints, 10)
     if (!Number.isNaN(parsed)) f.maxPoints = parsed
