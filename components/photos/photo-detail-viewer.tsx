@@ -9,6 +9,8 @@ import { PhotoDetailClient } from '@/components/photos/photo-detail-client'
 import { PhotoInfo } from '@/components/photos/photo-info'
 import { PhotoDeleteButton } from '@/components/photos/photo-delete-button'
 import { DetectionEditPanel } from '@/components/photos/detection-edit-panel'
+import { useDetectionEdit } from '@/lib/stores/detection-edit'
+import { useDetectionHover } from '@/lib/stores/detection-hover'
 import type { PhotoViewDTO } from '@/lib/services/photo-view'
 
 const IMG_W = 10000
@@ -20,17 +22,25 @@ interface PhotoDetailViewerProps {
   returnUrl: string
 }
 
-interface Window3 {
+interface NeighborWindow {
   prev: PhotoViewDTO | null
   current: PhotoViewDTO
   next: PhotoViewDTO | null
 }
 
 export function PhotoDetailViewer({ initial, navQueryString, returnUrl }: PhotoDetailViewerProps) {
-  const [win, setWin] = useState<Window3>({ prev: null, current: initial, next: null })
+  const [win, setWin] = useState<NeighborWindow>({ prev: null, current: initial, next: null })
   const cacheRef = useRef<Map<string, PhotoViewDTO>>(new Map([[initial.id, initial]]))
+  // Photo ids whose signed URLs we've already force-refreshed once after a load
+  // error — prevents an unbounded error→refetch→error loop on a genuinely
+  // missing storage object (each new signed URL would 404 the same way).
+  const refreshedRef = useRef<Set<string>>(new Set())
   const qs = navQueryString ? `?${navQueryString}` : ''
   const current = win.current
+
+  const closeEditPanel = useDetectionEdit((s) => s.closePanel)
+  const setPinnedDetectionId = useDetectionHover((s) => s.setPinnedDetectionId)
+  const setHoveredDetectionId = useDetectionHover((s) => s.setHoveredDetectionId)
 
   const fetchView = useCallback(
     async (id: string, force = false): Promise<PhotoViewDTO | null> => {
@@ -69,6 +79,16 @@ export function PhotoDetailViewer({ initial, navQueryString, returnUrl }: PhotoD
     }
   }, [current.id, current.prevId, current.nextId, fetchView])
 
+  // The shallow swipe keeps this component mounted (no route reload), so global
+  // detection state — the open edit panel and the pinned/hovered detection — would
+  // otherwise persist across photos and keep targeting a detection that belongs to
+  // the photo you swiped AWAY from. A full route push used to reset it; reset on id change.
+  useEffect(() => {
+    closeEditPanel()
+    setPinnedDetectionId(null)
+    setHoveredDetectionId(null)
+  }, [current.id, closeEditPanel, setPinnedDetectionId, setHoveredDetectionId])
+
   const settle = useCallback(
     async (direction: 'prev' | 'next') => {
       const targetId = direction === 'next' ? current.nextId : current.prevId
@@ -85,10 +105,14 @@ export function PhotoDetailViewer({ initial, navQueryString, returnUrl }: PhotoD
     [current.nextId, current.prevId, win.next, win.prev, fetchView, qs],
   )
 
-  // Force-refresh the current photo's signed URLs if the image fails (expired link).
+  // Force-refresh the current photo's signed URLs if the image fails (expired
+  // link) — but ONCE per photo id, so a genuinely-missing file can't spin an
+  // infinite error→refetch→error loop.
   const refreshCurrent = useCallback(async () => {
+    if (refreshedRef.current.has(current.id)) return
+    refreshedRef.current.add(current.id)
     const dto = await fetchView(current.id, true)
-    if (dto) setWin((w) => ({ ...w, current: dto }))
+    if (dto) setWin((w) => (w.current.id === current.id ? { ...w, current: dto } : w))
   }, [current.id, fetchView])
 
   const renderSlide = useCallback(

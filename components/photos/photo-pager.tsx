@@ -79,7 +79,12 @@ export function PhotoPager({ hasPrev, hasNext, renderSlide, onSettle }: PhotoPag
     setPhase({ kind: 'settling', toPercent: result === 'next' ? -200 : result === 'prev' ? 0 : -100 })
   }, [hasPrev, hasNext])
 
-  const onTransitionEnd = useCallback(() => {
+  const onTransitionEnd = useCallback((e: React.TransitionEvent<HTMLDivElement>) => {
+    // transitionend BUBBLES — only react to the track's own transform finishing,
+    // not a descendant's (detection-overlay boxes use transition-all, control
+    // buttons use transition-colors). Without this guard a child transition
+    // completing mid-settle would commit the swipe early / to the wrong photo.
+    if (e.target !== e.currentTarget || e.propertyName !== 'transform') return
     if (phase.kind !== 'settling') return
     const commit = commitRef.current
     commitRef.current = null
