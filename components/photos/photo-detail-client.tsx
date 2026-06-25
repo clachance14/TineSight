@@ -1,158 +1,66 @@
 "use client"
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { ImageOff, Eye, EyeOff, ZoomIn } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { DetectionOverlay } from "./detection-overlay"
 import { PhotoLightbox } from "./photo-lightbox"
-import { DetectionEditPanel } from "./detection-edit-panel"
 import { useObjectContainBounds } from "@/lib/hooks/use-object-contain-bounds"
 import { useDetectionHover } from "@/lib/stores/detection-hover"
 import { useDetectionEdit } from "@/lib/stores/detection-edit"
 import { useUIStore } from "@/lib/stores/ui"
 import { BLUR_DATA_URL } from "@/lib/constants/image"
-
-interface Detection {
-  id: string
-  bboxX: number
-  bboxY: number
-  bboxWidth: number
-  bboxHeight: number
-  confidence: number
-  class: string | null
-  deerId: string | null
-  deerName: string | null
-  qualityStatus?: string | null
-  qualityScore?: number | null
-  antlerBbox?: { x: number; y: number; width: number; height: number } | null
-}
+import type { PhotoViewDTO } from "@/lib/services/photo-view"
 
 interface PhotoDetailClientProps {
-  /**
-   * Signed URL for the displayed image — the MEDIUM variant (budget: never the
-   * full-res original just to show a contained image). Null if missing.
-   */
-  imageUrl: string | null
-  /**
-   * Signed URL for the full-resolution original, used ONLY for explicit zoom in
-   * the lightbox. Null if missing.
-   */
-  fullResUrl?: string | null
-  /**
-   * List of detections for this photo
-   */
-  detections: Detection[]
-  /**
-   * Image dimensions
-   */
+  photo: PhotoViewDTO
   imageWidth: number
   imageHeight: number
-  /**
-   * Whether detection overlay should be visible
-   */
-  showDetections?: boolean
-  /**
-   * User's current reference ROI count
-   */
-  referenceCount?: number
-  /** Adjacent photo ids for swipe navigation (mobile). */
-  prevId?: string | null
-  nextId?: string | null
-  /** Filter query string preserved across prev/next navigation. */
-  navQueryString?: string
+  /** Only the centered slide is interactive (tap-to-zoom, detection editing) and eager-loaded. */
+  interactive?: boolean
+  /** Called when the signed image URL fails to load (e.g. expired) so the parent can refetch. */
+  onImageError?: () => void
 }
 
-/**
- * Client-side wrapper for photo detail page that manages detection interaction
- * and displays the detection edit panel.
- */
 export function PhotoDetailClient({
-  imageUrl,
-  fullResUrl = null,
-  detections,
+  photo,
   imageWidth,
   imageHeight,
-  showDetections = true,
-  referenceCount: _referenceCount = 0,
-  prevId = null,
-  nextId = null,
-  navQueryString = "",
+  interactive = false,
+  onImageError,
 }: PhotoDetailClientProps) {
-  const router = useRouter()
+  const imageUrl = photo.imageUrl
+  const fullResUrl = photo.fullResUrl
+  const detections = photo.detections
+  const showDetections = photo.detectionStatus === "completed"
 
-  // Shared hover + pinned (tap-to-locate) state with detection cards
   const { hoveredDetectionId, setHoveredDetectionId, pinnedDetectionId, setPinnedDetectionId } =
     useDetectionHover()
 
-  // Horizontal swipe -> navigate to adjacent photo (mobile). Vertical swipes are
-  // ignored so page scroll is unaffected.
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null)
-  const navTo = useCallback(
-    (id: string | null) => {
-      if (id === null || id === "") return
-      router.push(navQueryString !== "" ? `/photos/${id}?${navQueryString}` : `/photos/${id}`)
-    },
-    [router, navQueryString]
-  )
-  const handleSwipeStart = useCallback((e: React.TouchEvent) => {
-    const t = e.touches[0]
-    touchStartRef.current = t ? { x: t.clientX, y: t.clientY } : null
-  }, [])
-  const handleSwipeEnd = useCallback(
-    (e: React.TouchEvent) => {
-      const start = touchStartRef.current
-      const t = e.changedTouches[0]
-      touchStartRef.current = null
-      if (!start || !t) return
-      const dx = t.clientX - start.x
-      const dy = t.clientY - start.y
-      // Horizontal intent: dominant X movement past a threshold.
-      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-        if (dx < 0) navTo(nextId)
-        else navTo(prevId)
-      }
-    },
-    [navTo, nextId, prevId]
-  )
-
-  // Detection edit panel state
+  const tapStartRef = useRef<{ x: number; y: number } | null>(null)
   const { openPanel, isOpen: isEditPanelOpen } = useDetectionEdit()
-
-  // Ref for container to calculate object-contain bounds
   const containerRef = useRef<HTMLDivElement>(null)
-
-  // State for natural image dimensions (detected on load)
   const [naturalDimensions, setNaturalDimensions] = useState({ width: 0, height: 0 })
-
-  // Calculate object-contain bounds for proper overlay positioning
   const imageBounds = useObjectContainBounds({
     containerRef,
     naturalWidth: naturalDimensions.width,
     naturalHeight: naturalDimensions.height,
   })
-
-  // State for UI controls - bounding box visibility persists across sessions
   const { showBoundingBoxes, toggleBoundingBoxes } = useUIStore()
   const [isLightboxOpen, setIsLightboxOpen] = useState(false)
 
-  // Tap-to-locate, second-tap-to-edit:
-  //  - first tap on a detection pins it (its box draws, row expands)
-  //  - tapping the already-pinned detection opens the edit panel
   const handleDetectionClick = useCallback((detectionId: string) => {
+    if (!interactive) return
     if (pinnedDetectionId === detectionId) {
       openPanel(detectionId)
     } else {
       setPinnedDetectionId(detectionId)
     }
-  }, [pinnedDetectionId, setPinnedDetectionId, openPanel])
+  }, [interactive, pinnedDetectionId, setPinnedDetectionId, openPanel])
 
-  // Clicking anywhere that isn't a detection pin / box / row clears the located
-  // detection; Escape does the same. Skipped while the edit panel is open — that
-  // surface manages its own dismissal.
   useEffect(() => {
-    if (pinnedDetectionId === null || isEditPanelOpen) return
+    if (!interactive || pinnedDetectionId === null || isEditPanelOpen) return
     const clear = () => setPinnedDetectionId(null)
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null
@@ -168,11 +76,10 @@ export function PhotoDetailClient({
       document.removeEventListener("click", onClick)
       document.removeEventListener("keydown", onKey)
     }
-  }, [pinnedDetectionId, isEditPanelOpen, setPinnedDetectionId])
+  }, [interactive, pinnedDetectionId, isEditPanelOpen, setPinnedDetectionId])
 
   return (
     <div className="relative">
-      {/* Main photo view with overlays */}
       <Card>
         <CardContent className="p-0">
           <div
@@ -187,37 +94,38 @@ export function PhotoDetailClient({
                   fill
                   sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
                   className="object-contain pointer-events-none"
-                  priority
+                  priority={interactive}
                   placeholder="blur"
                   blurDataURL={BLUR_DATA_URL}
+                  onError={() => onImageError?.()}
                   onLoad={(e) => {
                     const img = e.currentTarget as HTMLImageElement
-                    setNaturalDimensions({
-                      width: img.naturalWidth,
-                      height: img.naturalHeight,
-                    })
+                    setNaturalDimensions({ width: img.naturalWidth, height: img.naturalHeight })
                   }}
                 />
 
-                {/* Mobile gesture overlay: tap to zoom, horizontal swipe to
-                    move between photos. */}
-                <div
-                  className="absolute inset-0 z-10 md:hidden"
-                  onTouchStart={handleSwipeStart}
-                  onTouchEnd={(e) => {
-                    const start = touchStartRef.current
-                    const t = e.changedTouches[0]
-                    handleSwipeEnd(e)
-                    // Treat a near-stationary touch as a tap -> open zoom.
-                    if (start && t && Math.abs(t.clientX - start.x) < 10 && Math.abs(t.clientY - start.y) < 10) {
-                      setIsLightboxOpen(true)
-                    }
-                  }}
-                  role="button"
-                  aria-label="Tap to zoom, swipe to change photo"
-                />
+                {/* Tap-to-zoom (centered/interactive slide only). Horizontal swipe is
+                    handled by the parent PhotoPager. */}
+                {interactive && (
+                  <div
+                    className="absolute inset-0 z-10 md:hidden"
+                    onTouchStart={(e) => {
+                      const t = e.touches[0]
+                      tapStartRef.current = t ? { x: t.clientX, y: t.clientY } : null
+                    }}
+                    onTouchEnd={(e) => {
+                      const t = e.changedTouches[0]
+                      const s = tapStartRef.current
+                      tapStartRef.current = null
+                      if (s && t && Math.abs(t.clientX - s.x) < 10 && Math.abs(t.clientY - s.y) < 10) {
+                        setIsLightboxOpen(true)
+                      }
+                    }}
+                    role="button"
+                    aria-label="Tap to zoom"
+                  />
+                )}
 
-                {/* Detection overlay */}
                 <DetectionOverlay
                   detections={detections}
                   imageWidth={imageWidth}
@@ -232,36 +140,30 @@ export function PhotoDetailClient({
                   imageBounds={imageBounds.ready ? imageBounds : undefined}
                 />
 
-                {/* Controls */}
-                <div className="absolute top-2 right-2 md:top-3 md:right-3 z-50 flex gap-1.5 md:gap-2">
-                  {detections.length > 0 && (
+                {interactive && (
+                  <div className="absolute top-2 right-2 md:top-3 md:right-3 z-50 flex gap-1.5 md:gap-2">
+                    {detections.length > 0 && (
+                      <button
+                        onClick={toggleBoundingBoxes}
+                        className="p-2 md:px-3 md:py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
+                        aria-label={showBoundingBoxes ? "Hide detection boxes" : "Show detection boxes"}
+                      >
+                        {showBoundingBoxes ? (
+                          <><EyeOff className="h-4 w-4 md:hidden" /><span className="hidden md:inline">Hide Boxes</span></>
+                        ) : (
+                          <><Eye className="h-4 w-4 md:hidden" /><span className="hidden md:inline">Show Boxes</span></>
+                        )}
+                      </button>
+                    )}
                     <button
-                      onClick={toggleBoundingBoxes}
+                      onClick={() => setIsLightboxOpen(true)}
                       className="p-2 md:px-3 md:py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
-                      aria-label={showBoundingBoxes ? "Hide detection boxes" : "Show detection boxes"}
+                      aria-label="Zoom in on photo"
                     >
-                      {showBoundingBoxes ? (
-                        <>
-                          <EyeOff className="h-4 w-4 md:hidden" />
-                          <span className="hidden md:inline">Hide Boxes</span>
-                        </>
-                      ) : (
-                        <>
-                          <Eye className="h-4 w-4 md:hidden" />
-                          <span className="hidden md:inline">Show Boxes</span>
-                        </>
-                      )}
+                      <ZoomIn className="h-4 w-4 md:hidden" /><span className="hidden md:inline">Zoom</span>
                     </button>
-                  )}
-                  <button
-                    onClick={() => setIsLightboxOpen(true)}
-                    className="p-2 md:px-3 md:py-1.5 bg-slate-deep/90 hover:bg-slate-deep text-cream text-sm font-medium rounded-md border border-cream/20 backdrop-blur-sm transition-colors"
-                    aria-label="Zoom in on photo"
-                  >
-                    <ZoomIn className="h-4 w-4 md:hidden" />
-                    <span className="hidden md:inline">Zoom</span>
-                  </button>
-                </div>
+                  </div>
+                )}
               </>
             ) : (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-cream-dark">
@@ -274,21 +176,13 @@ export function PhotoDetailClient({
         </CardContent>
       </Card>
 
-      {/* Photo Lightbox for zooming — uses the full-resolution original (the one
-          place we deliberately load full-res, on explicit user zoom). Falls back
-          to the medium display URL if no original is available. */}
-      {imageUrl && (
+      {interactive && imageUrl && (
         <PhotoLightbox
           imageUrl={fullResUrl ?? imageUrl}
           isOpen={isLightboxOpen}
           onClose={() => setIsLightboxOpen(false)}
         />
       )}
-
-      {/* Detection Edit Panel */}
-      <DetectionEditPanel />
-
-      {/* Crop Lightbox removed - was covering main photo when edit panel opened */}
     </div>
   )
 }
