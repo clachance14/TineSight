@@ -26,6 +26,10 @@ interface Photo {
   // grid is thumbnail-only by invariant (ADR 0003). Do not reintroduce it.
   blurDataUrl?: string | null
   detection_status: string
+  // Variant pipeline status ('pending' | 'processing' | 'ready' | 'failed'). Variants
+  // lag analysis, so this is what decides whether there is a preview to paint — a
+  // photo can be fully analyzed and still have no thumbnail.
+  variant_status?: string | null
   bestQualityStatus: string | null
   // Authoritative photo score (gross else estimate). Surfaced as a chip only at
   // the desktop breakpoint — the mobile thumbnail grid stays clean (ADR 0003).
@@ -75,8 +79,28 @@ function PhotoGridItem({
   // Data-backed processing state: while a photo is still being analyzed it carries
   // no detection signal, so we dim it and show an "Analyzing…" affordance instead
   // of presenting it as a finished, empty frame.
-  const isProcessing =
+  const isAnalyzing =
     photo.detection_status === 'pending' || photo.detection_status === 'processing'
+
+  const hasThumbnail = photo.thumbnailUrl != null && photo.thumbnailUrl !== ''
+
+  // A photo with no thumbnail renders nothing at all — the grid is thumbnail-only by
+  // invariant (ADR 0003), so there is no fallback image to show. Without an affordance
+  // that is a silent blank square with no explanation, which is exactly what a stalled
+  // variant backlog looked like in the field (an account with 89% of its photos at
+  // variant_status='pending' showed thousands of empty tiles).
+  //
+  // Key this on the ABSENCE OF A PREVIEW rather than on either pipeline's status:
+  // variants lag analysis, so a photo can be fully analyzed and still have nothing to
+  // paint. A failed variant is called out separately — a spinner that never resolves
+  // would be a lie.
+  const variantFailed = photo.variant_status === 'failed'
+  const showPendingOverlay = !hasThumbnail || isAnalyzing
+  const pendingLabel = isAnalyzing
+    ? 'Analyzing…'
+    : variantFailed
+      ? 'No preview'
+      : 'Preparing…'
 
   return (
     <button
@@ -96,22 +120,28 @@ function PhotoGridItem({
           decoding="async"
         />
       ) : (
-        // No thumbnail yet (variant still generating): the blurhash background
-        // shows through. We deliberately do NOT fall back to the full-res image.
-        <span className="sr-only">Preview generating</span>
+        // No thumbnail yet (variant still generating or failed): the blurhash
+        // background shows through, and the overlay below states why. We
+        // deliberately do NOT fall back to the full-res image.
+        null
       )}
 
-      {isProcessing && (
+      {showPendingOverlay && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-deep-forest/55 backdrop-blur-[1px]">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-brass/40 border-t-brass" />
-          <span className="text-[10px] font-medium text-weathered">Analyzing…</span>
+          {variantFailed && !isAnalyzing ? (
+            // Terminal state — a spinner here would imply work still in flight.
+            <div className="h-5 w-5 rounded-full border-2 border-weathered/40" />
+          ) : (
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-brass/40 border-t-brass" />
+          )}
+          <span className="text-[10px] font-medium text-weathered">{pendingLabel}</span>
         </div>
       )}
 
       {/* Desktop-only score chip. Mobile thumbnails stay clean (ADR 0003). The
           "est." marker is shown when the value is the Gemini estimate, not the
           authoritative fingerprint gross — honest labeling. */}
-      {!isProcessing && photo.best_score != null && (
+      {!showPendingOverlay && photo.best_score != null && (
         <span className="absolute left-1.5 top-1.5 z-10 hidden items-center gap-1 rounded-md bg-deep-forest/80 px-1.5 py-0.5 backdrop-blur-[1px] md:inline-flex">
           <span className="font-mono text-[12px] font-semibold leading-none tabular-nums text-score-gold">
             {photo.best_score}

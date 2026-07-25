@@ -23,6 +23,47 @@ interface AreaFilterResult {
 }
 
 /**
+ * Resolve the DISTINCT set of image ids matching the detection-level filters.
+ *
+ * One round-trip via the `get_filtered_detection_images` RPC (migration 050), which
+ * does the filtering and the DISTINCT in Postgres and returns the ids as a single-row
+ * uuid[]. An array is ONE row, so the `max-rows` ceiling cannot truncate it however
+ * many photos the account has.
+ *
+ * This replaced a prefetch that selected every matching `detections` row and de-duped
+ * in JS: unbounded it was silently capped at `max-rows` (losing ~97% of a large
+ * account's photos), and paged it cost ~42 sequential round-trips (~5.7s measured).
+ *
+ * Pass no filters to get every image that has any live detection.
+ */
+async function resolveMatchedImageIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  filters?: PhotoFilters
+): Promise<{ ids: string[]; error: Error | null }> {
+  // Built conditionally: `exactOptionalPropertyTypes` rejects explicit undefined,
+  // and an omitted arg is what makes the SQL predicate fall through to "no filter".
+  const args = {
+    p_user_id: userId,
+    ...(filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all'
+      ? { p_quality_status: filters.qualityStatus }
+      : {}),
+    ...(filters?.minConfidence !== undefined ? { p_min_confidence: filters.minConfidence / 100 } : {}),
+    ...(filters?.sex !== undefined ? { p_sex: filters.sex } : {}),
+    ...(filters?.sizeClass !== undefined ? { p_size_class: filters.sizeClass } : {}),
+    ...(filters?.deerId !== undefined ? { p_deer_id: filters.deerId } : {}),
+    ...(filters?.minPoints !== undefined ? { p_min_points: filters.minPoints } : {}),
+    ...(filters?.maxPoints !== undefined ? { p_max_points: filters.maxPoints } : {}),
+  }
+
+  const { data, error } = await supabase.rpc('get_filtered_detection_images', args)
+  if (error !== null) {
+    return { ids: [], error }
+  }
+  return { ids: data?.[0]?.image_ids ?? [], error: null }
+}
+
+/**
  * Helper to get batch IDs for area filtering
  * Returns batch IDs to filter by, or indicates if no filter is needed
  */
@@ -234,61 +275,27 @@ export async function getPhotos(
     //          on `estimated_point_range`) or detection ABSENCE
     //          (hasDetections === false), neither expressible as an embedded
     //          predicate. Both are selective, so the id list stays small.
-    const canUseInnerJoin = !needsPointsFilter && filters?.hasDetections !== false
+    // Point-range is expressible as a SQL predicate since migration 051 (generated
+    // point_min/point_max columns), so it no longer forces the id-list fallback.
+    // Detection ABSENCE takes a left-join/is-null shape instead, also server-side.
+    // Net effect: no image-id list is ever serialized into the query string, which
+    // PostgREST rejects somewhere between 250 and 500 uuids (~18KB).
+    const canUseInnerJoin = filters?.hasDetections !== false
 
-    // --- Prefetch the distinct matching image-id set (exact count source) ---
-    let allImageIdsWithDetections: string[] = []
-    if (needsHasDetectionsFilter) {
-      const { data: allDetections } = await supabase
-        .from('detections')
-        .select('image_id')
-        .is('deleted_at', null)
-      allImageIdsWithDetections = [...new Set((allDetections ?? []).map((d: { image_id: string }) => d.image_id))]
+    // --- Distinct matching image-id set (the exact-count source) ---
+    // Only the inner-join path needs it, and only for the COUNT — the data query
+    // filters server-side. The absence branch takes its count from its own query,
+    // so it skips this entirely rather than scanning detections for a discarded
+    // result. With no detection filters the RPC receives no filter args and returns
+    // every image that has a live detection, which is the hasDetections===true case.
+    let matchedImageIds: string[] = []
+    if (canUseInnerJoin) {
+      const { ids, error: matchedError } = await resolveMatchedImageIds(supabase, userId, filters)
+      if (matchedError !== null) {
+        return { data: null, error: matchedError, count: null }
+      }
+      matchedImageIds = ids
     }
-
-    let detectionQuery = supabase.from('detections').select('image_id, estimated_point_range')
-      .is('deleted_at', null)  // Exclude soft-deleted detections
-    if (needsQualityFilter) {
-      detectionQuery = detectionQuery.eq('quality_status', filters!.qualityStatus!)
-    }
-    if (needsConfidenceFilter) {
-      detectionQuery = detectionQuery.gte('confidence', filters!.minConfidence! / 100)
-    }
-    if (needsSexFilter) {
-      detectionQuery = detectionQuery.eq('sex', filters!.sex!)
-    }
-    if (needsSizeClassFilter) {
-      detectionQuery = detectionQuery.eq('size_class', filters!.sizeClass!)
-    }
-    if (needsDeerFilter) {
-      detectionQuery = detectionQuery.eq('deer_id', filters!.deerId!)
-    }
-    const { data: detections, error: detectionsError } = await detectionQuery
-    if (detectionsError !== null) {
-      return { data: null, error: detectionsError, count: null }
-    }
-
-    let filteredDetections = detections ?? []
-    if (needsPointsFilter) {
-      filteredDetections = filteredDetections.filter((d: { estimated_point_range: string | null }) => {
-        if (!d.estimated_point_range) return false
-        // Parse point range (e.g., "8-10" or "10-12")
-        const match = d.estimated_point_range.match(/(\d+)-(\d+)/)
-        if (!match) return false
-        const minRange = parseInt(match[1]!, 10)
-        const maxRange = parseInt(match[2]!, 10)
-        if (filters?.minPoints !== undefined && maxRange < filters.minPoints) return false
-        if (filters?.maxPoints !== undefined && minRange > filters.maxPoints) return false
-        return true
-      })
-    }
-    const filteredImageIds = [...new Set(filteredDetections.map((d: { image_id: string }) => d.image_id))]
-
-    // The distinct id set this filter selects.
-    const hasOtherDetectionFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter
-    const matchedImageIds = (filters?.hasDetections === true && !hasOtherDetectionFilters)
-      ? allImageIdsWithDetections
-      : filteredImageIds
 
     // Are any NON-detection, NON-pagination filters active? If so the count must
     // also reflect those, so matchedImageIds.length is no longer the total and we
@@ -339,19 +346,26 @@ export async function getPhotos(
       if (needsDeerFilter) {
         query = query.eq('detections.deer_id', filters!.deerId!)
       }
+      if (needsPointsFilter) {
+        // Range OVERLAP, same semantics as before: the detection's range must
+        // intersect the requested one. Rows whose estimated_point_range does not
+        // parse have NULL bounds and are excluded by these comparisons.
+        if (filters?.minPoints !== undefined) {
+          query = query.gte('detections.point_max', filters.minPoints)
+        }
+        if (filters?.maxPoints !== undefined) {
+          query = query.lte('detections.point_min', filters.maxPoints)
+        }
+      }
     } else {
-      // Fallback (point-range / absence): filter by the resolved id list.
+      // Detection ABSENCE. Expressed as a left-join that must come back empty, so
+      // Postgres evaluates it — the old form sent every id that HAS a detection as
+      // a `.not('id','in',(...))` list and overflowed the query string.
       query = supabase
         .from('images')
-        .select('*', { count: 'exact' })
+        .select('*, detections!left(id)', { count: 'exact' })
         .eq('user_id', userId)
-      if (filters?.hasDetections === false) {
-        if (allImageIdsWithDetections.length > 0) {
-          query = query.not('id', 'in', `(${allImageIdsWithDetections.join(',')})`)
-        }
-      } else {
-        query = query.in('id', matchedImageIds)
-      }
+        .is('detections', null)
     }
 
     // Apply dynamic ordering based on sortBy (default: imported_at) and sortDirection (default: desc)
@@ -736,59 +750,18 @@ export async function getPhotoIds(
   // If filtering by detection-related fields, we need to join with detections
   if (needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter) {
 
-    // See getPhotos for the full rationale. Resolve the distinct matching image-id
-    // set from `detections` (response data, never a URL → no overflow).
-    let allImageIdsWithDetections: string[] = []
-    if (needsHasDetectionsFilter) {
-      const { data: allDetections } = await supabase
-        .from('detections')
-        .select('image_id')
-        .is('deleted_at', null)
-      allImageIdsWithDetections = [...new Set((allDetections ?? []).map((d: { image_id: string }) => d.image_id))]
+    // See getPhotos. The RPC resolves the distinct matching id set in one round-trip,
+    // and it is the ANSWER this function returns on the detection-only path below —
+    // exact, uncapped, and never serialized into a URL. The absence branch derives
+    // its answer from the images query instead, so it skips this.
+    let matchedImageIds: string[] = []
+    if (filters?.hasDetections !== false) {
+      const { ids, error: matchedError } = await resolveMatchedImageIds(supabase, userId, filters)
+      if (matchedError !== null) {
+        return { data: null, error: matchedError, count: 0 }
+      }
+      matchedImageIds = ids
     }
-
-    let detectionQuery = supabase.from('detections').select('image_id, estimated_point_range')
-      .is('deleted_at', null)
-    if (needsQualityFilter) {
-      detectionQuery = detectionQuery.eq('quality_status', filters!.qualityStatus!)
-    }
-    if (needsConfidenceFilter) {
-      detectionQuery = detectionQuery.gte('confidence', filters!.minConfidence! / 100)
-    }
-    if (needsSexFilter) {
-      detectionQuery = detectionQuery.eq('sex', filters!.sex!)
-    }
-    if (needsSizeClassFilter) {
-      detectionQuery = detectionQuery.eq('size_class', filters!.sizeClass!)
-    }
-    if (needsDeerFilter) {
-      detectionQuery = detectionQuery.eq('deer_id', filters!.deerId!)
-    }
-
-    const { data: detections, error: detectionsError } = await detectionQuery
-    if (detectionsError !== null) {
-      return { data: null, error: detectionsError, count: 0 }
-    }
-
-    let filteredDetections = detections ?? []
-    if (needsPointsFilter) {
-      filteredDetections = filteredDetections.filter((d: { estimated_point_range: string | null }) => {
-        if (!d.estimated_point_range) return false
-        const match = d.estimated_point_range.match(/(\d+)-(\d+)/)
-        if (!match) return false
-        const minRange = parseInt(match[1]!, 10)
-        const maxRange = parseInt(match[2]!, 10)
-        if (filters?.minPoints !== undefined && maxRange < filters.minPoints) return false
-        if (filters?.maxPoints !== undefined && minRange > filters.maxPoints) return false
-        return true
-      })
-    }
-
-    const filteredImageIds = [...new Set(filteredDetections.map((d: { image_id: string }) => d.image_id))]
-    const hasOtherDetectionFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter
-    const matchedImageIds = (filters?.hasDetections === true && !hasOtherDetectionFilters)
-      ? allImageIdsWithDetections
-      : filteredImageIds
 
     const hasOtherImageFilters =
       (filters?.status !== undefined && filters.status !== 'all') ||
@@ -813,18 +786,47 @@ export async function getPhotoIds(
       return { data: [], error: null, count: 0 }
     }
 
-    // Otherwise filter an images query by the resolved id set + the other filters.
+    // Otherwise filter an images query by the detection predicates + the other
+    // filters. The predicates go server-side rather than as an id list: PostgREST
+    // serializes `.in()` into the query string and rejects it somewhere between 250
+    // and 500 uuids (~18KB, measured).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types vary by select shape; behaviour is verified empirically
-    let query: any = supabase
-      .from('images')
-      .select('id')
-      .eq('user_id', userId)
+    let query: any
     if (filters?.hasDetections === false) {
-      if (allImageIdsWithDetections.length > 0) {
-        query = query.not('id', 'in', `(${allImageIdsWithDetections.join(',')})`)
-      }
+      query = supabase
+        .from('images')
+        .select('id, detections!left(id)')
+        .eq('user_id', userId)
+        .is('detections', null)
     } else {
-      query = query.in('id', matchedImageIds)
+      query = supabase
+        .from('images')
+        .select('id, detections!inner(id)')
+        .eq('user_id', userId)
+        .is('detections.deleted_at', null)
+      if (needsQualityFilter) {
+        query = query.eq('detections.quality_status', filters!.qualityStatus!)
+      }
+      if (needsConfidenceFilter) {
+        query = query.gte('detections.confidence', filters!.minConfidence! / 100)
+      }
+      if (needsSexFilter) {
+        query = query.eq('detections.sex', filters!.sex!)
+      }
+      if (needsSizeClassFilter) {
+        query = query.eq('detections.size_class', filters!.sizeClass!)
+      }
+      if (needsDeerFilter) {
+        query = query.eq('detections.deer_id', filters!.deerId!)
+      }
+      if (needsPointsFilter) {
+        if (filters?.minPoints !== undefined) {
+          query = query.gte('detections.point_max', filters.minPoints)
+        }
+        if (filters?.maxPoints !== undefined) {
+          query = query.lte('detections.point_min', filters.maxPoints)
+        }
+      }
     }
 
     // Apply remaining filters (same as getPhotos)
@@ -894,7 +896,13 @@ export async function getPhotoIds(
       return { data: null, error, count: 0 }
     }
 
-    const ids = (data ?? []).map((row: { id: string }) => row.id)
+    // De-duplicate: the inner join emits one row per matching detection, so an image
+    // with several matching detections would otherwise repeat.
+    // NOTE (pre-existing, not addressed here): this select is unbounded, so it is
+    // still subject to the max-rows ceiling. The detection-only path above returns
+    // the RPC's complete set and is unaffected; only the combination of a detection
+    // filter AND another image-level filter reaches this branch.
+    const ids = [...new Set<string>((data ?? []).map((row: { id: string }) => row.id))]
     return { data: ids, error: null, count: ids.length }
   }
 
@@ -1042,16 +1050,23 @@ export async function getAdjacentPhotos(
   const needsHasDetectionsFilter = filters?.hasDetections !== undefined
   const hasDetectionFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter
 
-  // See getPhotos for the rationale: a scalable `detections!inner(...)` embedded
-  // filter by default, JS id-list fallback only for point-range / absence cases.
-  const canUseInnerJoin = !needsPointsFilter && filters?.hasDetections !== false
+  // See getPhotos for the rationale: every detection predicate is evaluated by
+  // Postgres. Nothing resolves to an image-id list here, because PostgREST puts
+  // `.in()` in the query string and rejects it past ~250-500 uuids — which would
+  // dead-end lightbox next/prev on exactly the large accounts that need it.
+  const canUseInnerJoin = filters?.hasDetections !== false
 
-  // Build query for photo IDs. When inner-joining we also embed detections so the
-  // predicates below can constrain it (the embed is never read; we map row.id).
+  // Build query for photo IDs. We embed detections so the predicates below can
+  // constrain it (the embed is never read; we map row.id). Absence uses a left
+  // join that must come back empty.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types don't unify across the two select shapes; behaviour is verified empirically
   let query: any = supabase
     .from('images')
-    .select(hasDetectionFilters && canUseInnerJoin ? 'id, detections!inner(id)' : 'id')
+    .select(
+      hasDetectionFilters
+        ? (canUseInnerJoin ? 'id, detections!inner(id)' : 'id, detections!left(id)')
+        : 'id'
+    )
     .eq('user_id', userId)
     .order('imported_at', { ascending: false })
     .order('id', { ascending: false })
@@ -1074,75 +1089,19 @@ export async function getAdjacentPhotos(
       if (needsDeerFilter) {
         query = query.eq('detections.deer_id', filters!.deerId!)
       }
-    } else {
-      // ----- Fallback: resolve matching image ids in JS (point-range / absence) -----
-      let allImageIdsWithDetections: string[] = []
-      if (needsHasDetectionsFilter) {
-        const { data: allDetections } = await supabase
-          .from('detections')
-          .select('image_id')
-          .is('deleted_at', null)
-        allImageIdsWithDetections = [...new Set((allDetections ?? []).map((d: { image_id: string }) => d.image_id))]
-      }
-
-      let detectionQuery = supabase.from('detections').select('image_id, estimated_point_range')
-        .is('deleted_at', null)  // Exclude soft-deleted detections
-
-      if (needsQualityFilter) {
-        detectionQuery = detectionQuery.eq('quality_status', filters!.qualityStatus!)
-      }
-      if (needsConfidenceFilter) {
-        const threshold = filters!.minConfidence! / 100
-        detectionQuery = detectionQuery.gte('confidence', threshold)
-      }
-      if (needsSexFilter) {
-        detectionQuery = detectionQuery.eq('sex', filters!.sex!)
-      }
-      if (needsSizeClassFilter) {
-        detectionQuery = detectionQuery.eq('size_class', filters!.sizeClass!)
-      }
-      if (needsDeerFilter) {
-        detectionQuery = detectionQuery.eq('deer_id', filters!.deerId!)
-      }
-
-      const { data: detections } = await detectionQuery
-
-      let filteredDetections = detections ?? []
       if (needsPointsFilter) {
-        filteredDetections = filteredDetections.filter((d: { estimated_point_range: string | null }) => {
-          if (!d.estimated_point_range) return false
-          const match = d.estimated_point_range.match(/(\d+)-(\d+)/)
-          if (!match) return false
-          const minRange = parseInt(match[1]!, 10)
-          const maxRange = parseInt(match[2]!, 10)
-          if (filters?.minPoints !== undefined && maxRange < filters.minPoints) return false
-          if (filters?.maxPoints !== undefined && minRange > filters.maxPoints) return false
-          return true
-        })
-      }
-
-      const filteredImageIds = [...new Set(filteredDetections.map((d: { image_id: string }) => d.image_id))]
-
-      if (filters?.hasDetections === false) {
-        // Show images WITHOUT any detections
-        if (allImageIdsWithDetections.length > 0) {
-          query = query.not('id', 'in', `(${allImageIdsWithDetections.join(',')})`)
+        // Range overlap via the generated bounds (migration 051). Unparseable
+        // ranges have NULL bounds and are excluded, matching the old JS predicate.
+        if (filters?.minPoints !== undefined) {
+          query = query.gte('detections.point_max', filters.minPoints)
         }
-      } else if (filters?.hasDetections === true) {
-        // Show images WITH detections
-        const hasOtherFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter
-        const imageIdsToUse = hasOtherFilters ? filteredImageIds : allImageIdsWithDetections
-        if (imageIdsToUse.length === 0) {
-          return { prevId: null, nextId: null }
+        if (filters?.maxPoints !== undefined) {
+          query = query.lte('detections.point_min', filters.maxPoints)
         }
-        query = query.in('id', imageIdsToUse)
-      } else if (filteredImageIds.length > 0) {
-        // Other detection filters are active (not hasDetections)
-        query = query.in('id', filteredImageIds)
-      } else {
-        // Other detection filters active but no matches
-        return { prevId: null, nextId: null }
       }
+    } else {
+      // Detection ABSENCE: the left-joined embed must come back empty.
+      query = query.is('detections', null)
     }
   }
 
@@ -1173,10 +1132,22 @@ export async function getAdjacentPhotos(
     query = query.gte('best_score', filters.minScore)
   }
 
-  const { data: photos } = await query
+  const { data: rows } = await query
 
-  if (!photos || photos.length === 0) {
+  if (!rows || rows.length === 0) {
     return { prevId: null, nextId: null }
+  }
+
+  // De-duplicate. The inner join emits one row per matching detection, so a photo
+  // with several would otherwise appear twice and make next/prev land on a repeat
+  // of the photo you are already looking at.
+  const seen = new Set<string>()
+  const photos: Array<{ id: string }> = []
+  for (const row of rows as Array<{ id: string }>) {
+    if (!seen.has(row.id)) {
+      seen.add(row.id)
+      photos.push(row)
+    }
   }
 
   // Find current photo index

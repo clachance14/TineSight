@@ -1232,6 +1232,22 @@ export type Database = {
           status: string
         }[]
       }
+      get_filtered_detection_images: {
+        Args: {
+          p_deer_id?: string
+          p_max_points?: number
+          p_min_confidence?: number
+          p_min_points?: number
+          p_quality_status?: string
+          p_sex?: string
+          p_size_class?: string
+          p_user_id: string
+        }
+        Returns: {
+          image_ids: string[]
+          total_count: number
+        }[]
+      }
       get_deer_sightings: {
         Args: {
           p_deer_id: string

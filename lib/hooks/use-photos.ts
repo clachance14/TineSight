@@ -50,6 +50,10 @@ interface PhotosResponse {
     blurDataUrl?: string | null
     thumbnail_path?: string | null
     medium_path?: string | null
+    // Variant pipeline status. Present on the wire (the route spreads the whole
+    // images row); the grid needs it to tell "preview still generating" apart from
+    // "preview failed" instead of rendering a silent blank tile.
+    variant_status?: string | null
     bestQualityStatus: string | null
     best_score?: number | null
     best_score_is_estimate?: boolean
