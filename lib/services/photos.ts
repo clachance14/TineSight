@@ -22,6 +22,10 @@ interface AreaFilterResult {
   includeNullBatchId: boolean  // Whether to also include batch_id IS NULL
 }
 
+// Page size for id sweeps that must return a complete set. Requests are clamped by the
+// project's PostgREST max-rows regardless; the loops advance by rows actually returned.
+const PHOTO_ID_PAGE_SIZE = 1000
+
 /**
  * Resolve the DISTINCT set of image ids matching the detection-level filters.
  *
@@ -796,7 +800,38 @@ export async function getPhotoIds(
     // filters. The predicates go server-side rather than as an id list: PostgREST
     // serializes `.in()` into the query string and rejects it somewhere between 250
     // and 500 uuids (~18KB, measured).
+    // Resolve the two filters that need their own round-trip BEFORE building the
+    // query, so the factory below stays synchronous and can be re-invoked per page
+    // without re-issuing these lookups.
+    let sessionBatchIds: string[] | null = null
+    if (filters?.uploadSessionId !== undefined) {
+      const { data: sessionBatches } = await supabase
+        .from('processing_batches')
+        .select('id')
+        .eq('upload_session_id', filters.uploadSessionId)
+      sessionBatchIds = (sessionBatches ?? []).map(b => b.id)
+      if (sessionBatchIds.length === 0) {
+        return { data: [], error: null, count: 0 }
+      }
+    }
+
+    let areaResult: AreaFilterResult | null = null
+    if (filters?.areaNames?.length) {
+      areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
+      if ((areaResult.batchIds ?? []).length === 0 && !areaResult.includeNullBatchId) {
+        return { data: [], error: null, count: 0 }
+      }
+    }
+
+    // A factory, not a builder: the result set has to be paged past max-rows, and a
+    // PostgrestFilterBuilder resolves once.
+    //
+    // The unsafe-* disables below are the cost of that `any`: supabase-js builder
+    // types don't unify across select shapes, so every chained call off the factory
+    // trips them. Scoped to the builder chain only — re-enabled immediately after.
+    /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types vary by select shape; behaviour is verified empirically
+    const buildQuery = (): any => {
     let query: any
     if (filters?.hasDetections === false) {
       query = supabase
@@ -849,23 +884,11 @@ export async function getPhotoIds(
         query = query.is('classification', null)
       }
     }
-    if (filters?.uploadSessionId !== undefined) {
-      const { data: sessionBatches } = await supabase
-        .from('processing_batches')
-        .select('id')
-        .eq('upload_session_id', filters.uploadSessionId)
-      if (sessionBatches && sessionBatches.length > 0) {
-        query = query.in('batch_id', sessionBatches.map(b => b.id))
-      } else {
-        return { data: [], error: null, count: 0 }
-      }
+    if (sessionBatchIds !== null) {
+      query = query.in('batch_id', sessionBatchIds)
     }
-    if (filters?.areaNames?.length) {
-      const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
+    if (areaResult !== null) {
       const batchIds = areaResult.batchIds ?? []
-      if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
-        return { data: [], error: null, count: 0 }
-      }
       if (areaResult.includeNullBatchId) {
         if (batchIds.length > 0) {
           query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
@@ -899,29 +922,74 @@ export async function getPhotoIds(
       query = query.gte('best_score', filters.minScore)
     }
 
-    const { data, error } = await query
-
-    if (error !== null) {
-      return { data: null, error, count: 0 }
+      // Stable order is required for offset paging — without it Postgres may repeat
+      // or skip rows across pages.
+      return query.order('id')
     }
 
-    // Defensive de-dup. PostgREST aggregates a to-many embed into a nested array —
-    // one row per PARENT, not per match (verified: 300 rows, 300 distinct ids, each
-    // carrying 10 embedded detections) — so this is a no-op today. It is kept so the
-    // contract holds if the embed shape ever changes.
+    // Page past the max-rows ceiling. This function's contract is the COMPLETE id
+    // set: /api/photos/ids backs "Select All", so a truncated result here means a
+    // bulk archive or delete silently acts on a subset of what the user selected.
+    // Every hasDetections === false query reaches this branch (the early return
+    // above is gated on `hasDetections !== false`), so it is not a rare path.
     //
-    // KNOWN GAP (pre-existing): this select is unbounded and so is still subject to
-    // the max-rows ceiling. It is reached by ANY hasDetections === false query (the
-    // early return above is gated on `hasDetections !== false`), not only by a
-    // detection filter combined with an image-level one. Since /api/photos/ids backs
-    // "Select All", a "No Deer" select-all on a large account silently selects the
-    // first max-rows only, and a bulk archive/delete then acts on that subset.
-    const ids = [...new Set<string>((data ?? []).map((row: { id: string }) => row.id))]
+    // De-dup is defensive: PostgREST aggregates a to-many embed into a nested array,
+    // one row per PARENT (verified: 300 rows, 300 distinct ids, each carrying 10
+    // embedded detections), so it is a no-op with today's embed shape.
+    const seen = new Set<string>()
+    const ids: string[] = []
+    for (let from = 0; ; ) {
+      const { data, error } = await buildQuery().range(from, from + PHOTO_ID_PAGE_SIZE - 1)
+      if (error !== null) {
+        return { data: null, error, count: 0 }
+      }
+      const rows = (data ?? []) as Array<{ id: string }>
+      if (rows.length === 0) break
+      for (const row of rows) {
+        if (!seen.has(row.id)) {
+          seen.add(row.id)
+          ids.push(row.id)
+        }
+      }
+      // Advance by rows actually returned, so this stays correct whatever max-rows is.
+      from += rows.length
+    }
+
+    /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+
     return { data: ids, error: null, count: ids.length }
   }
 
-  // Standard query without detection-based filters - select only id
-  let query = supabase
+  // Standard query without detection-based filters - select only id.
+  // Same treatment as the detection-filtered branch above: the two filters that need
+  // a round-trip are resolved up front so the query builder can be a synchronous
+  // factory, then the result is paged past max-rows. This is the DEFAULT "Select All"
+  // path — no filters at all — so truncation here silently under-selects for every
+  // account over the ceiling.
+  let stdSessionBatchIds: string[] | null = null
+  if (filters?.uploadSessionId !== undefined) {
+    const { data: sessionBatches } = await supabase
+      .from('processing_batches')
+      .select('id')
+      .eq('upload_session_id', filters.uploadSessionId)
+    stdSessionBatchIds = (sessionBatches ?? []).map(b => b.id)
+    if (stdSessionBatchIds.length === 0) {
+      return { data: [], error: null, count: 0 }
+    }
+  }
+
+  let stdAreaResult: AreaFilterResult | null = null
+  if (filters?.areaNames?.length) {
+    stdAreaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
+    if ((stdAreaResult.batchIds ?? []).length === 0 && !stdAreaResult.includeNullBatchId) {
+      return { data: [], error: null, count: 0 }
+    }
+  }
+
+  /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types vary by select shape
+  const buildStdQuery = (): any => {
+  let query: any = supabase
     .from('images')
     .select('id')
     .eq('user_id', userId)
@@ -936,24 +1004,12 @@ export async function getPhotoIds(
       query = query.is('classification', null)
     }
   }
-  if (filters?.uploadSessionId !== undefined) {
-    const { data: sessionBatches } = await supabase
-      .from('processing_batches')
-      .select('id')
-      .eq('upload_session_id', filters.uploadSessionId)
-    if (sessionBatches && sessionBatches.length > 0) {
-      query = query.in('batch_id', sessionBatches.map(b => b.id))
-    } else {
-      return { data: [], error: null, count: 0 }
-    }
+  if (stdSessionBatchIds !== null) {
+    query = query.in('batch_id', stdSessionBatchIds)
   }
-  if (filters?.areaNames?.length) {
-    const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
-    const batchIds = areaResult.batchIds ?? []
-    if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
-      return { data: [], error: null, count: 0 }
-    }
-    if (areaResult.includeNullBatchId) {
+  if (stdAreaResult !== null) {
+    const batchIds = stdAreaResult.batchIds ?? []
+    if (stdAreaResult.includeNullBatchId) {
       if (batchIds.length > 0) {
         query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
       } else {
@@ -986,13 +1042,23 @@ export async function getPhotoIds(
     query = query.gte('best_score', filters.minScore)
   }
 
-  const { data, error } = await query
-
-  if (error !== null) {
-    return { data: null, error, count: 0 }
+    // Stable order — offset paging over an unordered query can skip or repeat.
+    return query.order('id')
   }
 
-  const ids = (data ?? []).map((row: { id: string }) => row.id)
+  const ids: string[] = []
+  for (let from = 0; ; ) {
+    const { data, error } = await buildStdQuery().range(from, from + PHOTO_ID_PAGE_SIZE - 1)
+    if (error !== null) {
+      return { data: null, error, count: 0 }
+    }
+    const rows = (data ?? []) as Array<{ id: string }>
+    if (rows.length === 0) break
+    for (const row of rows) ids.push(row.id)
+    from += rows.length
+  }
+  /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+
   return { data: ids, error: null, count: ids.length }
 }
 
@@ -1070,10 +1136,12 @@ export async function getAdjacentPhotos(
   // dead-end lightbox next/prev on exactly the large accounts that need it.
   const canUseInnerJoin = filters?.hasDetections !== false
 
-  // Build query for photo IDs. We embed detections so the predicates below can
-  // constrain it (the embed is never read; we map row.id). Absence uses a left
-  // join that must come back empty.
+  // A factory, not a builder. Neighbours are resolved with two independent bounded
+  // queries (one either side of the cursor), and a PostgrestFilterBuilder resolves
+  // once — so each side needs its own fully-filtered query.
+  /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types don't unify across the two select shapes; behaviour is verified empirically
+  const buildQuery = (): any => {
   let query: any = supabase
     .from('images')
     .select(
@@ -1082,8 +1150,6 @@ export async function getAdjacentPhotos(
         : 'id'
     )
     .eq('user_id', userId)
-    .order('imported_at', { ascending: false })
-    .order('id', { ascending: false })
 
   if (hasDetectionFilters) {
     if (canUseInnerJoin) {
@@ -1148,41 +1214,52 @@ export async function getAdjacentPhotos(
     query = query.gte('best_score', filters.minScore)
   }
 
-  const { data: rows } = await query
+    return query
+  }
 
-  if (!rows || rows.length === 0) {
+  // Locate the cursor row. Everything below compares against it by key rather than
+  // fetching every matching id and scanning in JS: that older approach was capped by
+  // max-rows, so any photo past position ~1000 fell outside the window, findIndex
+  // returned -1, and the viewer reported no neighbours at all.
+  const { data: current } = await supabase
+    .from('images')
+    .select('imported_at')
+    .eq('id', currentPhotoId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (!current) {
     return { prevId: null, nextId: null }
   }
 
-  // Defensive de-dup — a no-op with PostgREST's current embed shape (to-many embeds
-  // aggregate into a nested array, one row per parent), kept so next/prev cannot land
-  // on a repeat of the current photo if that ever changes.
-  //
-  // KNOWN GAP (pre-existing): this query is unbounded, so past max-rows the current
-  // photo falls outside the fetched window, findIndex returns -1, and next/prev
-  // dead-end. Fixing it properly needs two bounded queries around the cursor rather
-  // than fetching every id — tracked as follow-up, not addressed here.
-  const seen = new Set<string>()
-  const photos: Array<{ id: string }> = []
-  for (const row of rows as Array<{ id: string }>) {
-    if (!seen.has(row.id)) {
-      seen.add(row.id)
-      photos.push(row)
-    }
+  const cursor = current.imported_at
+
+  // Grid order is (imported_at DESC, id DESC), so prev = newer = a strictly GREATER
+  // key, next = older = a strictly LESS one. Each side is one indexed row, whatever
+  // the account size. The `.or(...)` row-value comparison mirrors the cursor logic
+  // getPhotos already uses.
+  const [prevRes, nextRes] = await Promise.all([
+    buildQuery()
+      .or(`imported_at.gt.${cursor},and(imported_at.eq.${cursor},id.gt.${currentPhotoId})`)
+      .order('imported_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(1),
+    buildQuery()
+      .or(`imported_at.lt.${cursor},and(imported_at.eq.${cursor},id.lt.${currentPhotoId})`)
+      .order('imported_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1),
+  ])
+
+  // Note: neighbours are now resolved from the cursor's POSITION, so a photo that
+  // does not itself match the active filters still navigates into the filtered set.
+  // Previously findIndex missed it and returned nothing, which dead-ended deep links.
+  const result = {
+    prevId: (prevRes.data as Array<{ id: string }> | null)?.[0]?.id ?? null,
+    nextId: (nextRes.data as Array<{ id: string }> | null)?.[0]?.id ?? null,
   }
-
-  // Find current photo index
-  const currentIndex = photos.findIndex((p: { id: string }) => p.id === currentPhotoId)
-
-  if (currentIndex === -1) {
-    return { prevId: null, nextId: null }
-  }
-
-  // prev = newer photo (lower index), next = older photo (higher index)
-  const prevId = currentIndex > 0 ? photos[currentIndex - 1]?.id ?? null : null
-  const nextId = currentIndex < photos.length - 1 ? photos[currentIndex + 1]?.id ?? null : null
-
-  return { prevId, nextId }
+  /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+  return result
 }
 
 /**
