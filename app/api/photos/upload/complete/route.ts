@@ -111,8 +111,7 @@ export async function POST(request: NextRequest) {
     const { data: updatedBatch, error: updateError } = await updateBatchStatus(
       body.batchId,
       'processing',
-      undefined,
-      imageIds.length
+      { totalImages: imageIds.length }
     )
 
     if (updateError !== null || updatedBatch === null) {

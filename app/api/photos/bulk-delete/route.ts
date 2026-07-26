@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { deletePhotos } from '@/lib/services/photos'
-import { isValidUUID } from '@/lib/utils/validation'
+import { parsePhotoIdBatch } from '@/lib/services/photos'
 
 // TODO: Add RBAC check when team features are implemented
 // Currently RLS on images table enforces user_id = auth.uid()
@@ -23,30 +23,15 @@ export async function DELETE(request: Request) {
     const body = await request.json()
     const { photoIds } = body
 
-    if (!Array.isArray(photoIds) || photoIds.length === 0) {
-      return NextResponse.json(
-        { error: 'photoIds must be a non-empty array' },
-        { status: 400 }
-      )
+    // One shared guard across all three bulk routes (see parsePhotoIdBatch). The
+    // former 500-id cap is gone: "Select All" now returns the complete set, and the
+    // service layer chunks `.in()` instead of the route refusing the request.
+    const parsed = parsePhotoIdBatch(photoIds)
+    if ('error' in parsed) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
     }
 
-    if (photoIds.length > 500) {
-      return NextResponse.json(
-        { error: 'Maximum 500 photos per bulk operation' },
-        { status: 400 }
-      )
-    }
-
-    // Validate UUIDs
-    const invalidIds = photoIds.filter((id: unknown) => !isValidUUID(id))
-    if (invalidIds.length > 0) {
-      return NextResponse.json(
-        { error: 'All photoIds must be valid UUIDs' },
-        { status: 400 }
-      )
-    }
-
-    const { data, error } = await deletePhotos(user.id, photoIds)
+    const { data, error } = await deletePhotos(user.id, parsed.ids)
 
     if (error) {
       console.error('Bulk delete error:', error)

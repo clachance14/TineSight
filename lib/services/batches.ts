@@ -114,8 +114,7 @@ export async function getBatches(
 export async function updateBatchStatus(
   batchId: string,
   status: BatchStatus,
-  errorMessage?: string,
-  totalImages?: number
+  opts?: { errorMessage?: string; totalImages?: number }
 ): Promise<{
   data: ProcessingBatch | null
   error: Error | null
@@ -126,8 +125,8 @@ export async function updateBatchStatus(
     status,
   }
 
-  if (errorMessage !== undefined) {
-    updateData['error_message'] = errorMessage
+  if (opts?.errorMessage !== undefined) {
+    updateData['error_message'] = opts.errorMessage
   }
 
   // Reconcile the optimistic count against what actually uploaded. `total_images` is
@@ -135,8 +134,8 @@ export async function updateBatchStatus(
   // the batch_auto_complete trigger (migration 016) then waits for
   // processed_images >= total_images, so a batch that lost even one file to a failed
   // upload never completes and sits at 'processing' forever.
-  if (totalImages !== undefined) {
-    updateData['total_images'] = totalImages
+  if (opts?.totalImages !== undefined) {
+    updateData['total_images'] = opts.totalImages
   }
 
   const { data, error } = await supabase

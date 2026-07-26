@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { updatePhotosLocation } from '@/lib/services/photos'
+import { parsePhotoIdBatch } from '@/lib/services/photos'
 import { isValidUUID } from '@/lib/utils/validation'
 
 export async function PATCH(request: Request) {
@@ -19,27 +20,12 @@ export async function PATCH(request: Request) {
     const body = await request.json()
     const { photoIds, locationId } = body
 
-    if (!Array.isArray(photoIds) || photoIds.length === 0) {
-      return NextResponse.json(
-        { error: 'photoIds must be a non-empty array' },
-        { status: 400 }
-      )
-    }
-
-    if (photoIds.length > 500) {
-      return NextResponse.json(
-        { error: 'Maximum 500 photos per bulk operation' },
-        { status: 400 }
-      )
-    }
-
-    // Validate UUIDs
-    const invalidIds = photoIds.filter((id: unknown) => !isValidUUID(id))
-    if (invalidIds.length > 0) {
-      return NextResponse.json(
-        { error: 'All photoIds must be valid UUIDs' },
-        { status: 400 }
-      )
+    // One shared guard across all three bulk routes (see parsePhotoIdBatch). The
+    // former 500-id cap is gone: "Select All" now returns the complete set, and the
+    // service layer chunks `.in()` instead of the route refusing the request.
+    const parsed = parsePhotoIdBatch(photoIds)
+    if ('error' in parsed) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
     }
 
     if (locationId !== undefined && locationId !== null && !isValidUUID(locationId)) {
@@ -51,7 +37,7 @@ export async function PATCH(request: Request) {
 
     const { data, error } = await updatePhotosLocation(
       user.id,
-      photoIds,
+      parsed.ids,
       locationId ?? null
     )
 

@@ -3,7 +3,7 @@
 import { type JSX, useCallback, useMemo, useRef, useEffect, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
-import type { PhotoFilters } from '@/lib/services/photos'
+import type { PhotoFilters, VariantStatus } from '@/lib/services/photos'
 import { Skeleton } from '@/components/ui/skeleton'
 
 interface PhotoGridProps {
@@ -26,10 +26,9 @@ interface Photo {
   // grid is thumbnail-only by invariant (ADR 0003). Do not reintroduce it.
   blurDataUrl?: string | null
   detection_status: string
-  // Variant pipeline status ('pending' | 'processing' | 'ready' | 'failed'). Variants
-  // lag analysis, so this is what decides whether there is a preview to paint — a
-  // photo can be fully analyzed and still have no thumbnail.
-  variant_status?: string | null
+  // Variants lag analysis, so this is what decides whether there is a preview to
+  // paint — a photo can be fully analyzed and still have no thumbnail.
+  variant_status?: VariantStatus | null
   bestQualityStatus: string | null
   // Authoritative photo score (gross else estimate). Surfaced as a chip only at
   // the desktop breakpoint — the mobile thumbnail grid stays clean (ADR 0003).
@@ -110,20 +109,18 @@ function PhotoGridItem({
       onClick={handleClick}
       aria-label="Open trail camera photo"
     >
-      {photo.thumbnailUrl != null && photo.thumbnailUrl !== '' ? (
+      {/* No thumbnail yet (variant still generating or failed): the blurhash
+          background shows through and the overlay below states why. We
+          deliberately do NOT fall back to the full-res image (ADR 0003). */}
+      {hasThumbnail && (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
-          src={photo.thumbnailUrl}
+          src={photo.thumbnailUrl ?? ''}
           alt="Trail camera photo"
           className="absolute inset-0 h-full w-full object-cover"
           loading={priority ? 'eager' : 'lazy'}
           decoding="async"
         />
-      ) : (
-        // No thumbnail yet (variant still generating or failed): the blurhash
-        // background shows through, and the overlay below states why. We
-        // deliberately do NOT fall back to the full-res image.
-        null
       )}
 
       {showPendingOverlay && (
