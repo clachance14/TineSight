@@ -103,10 +103,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Update batch status to processing
+    // Update batch status to processing, reconciling total_images to what actually
+    // uploaded. The upload is finished at this point, so imageIds.length is
+    // authoritative — whereas the value set at batch creation was the intended count
+    // and overshoots whenever a file fails to upload, leaving the batch permanently
+    // 'processing' (see the batch_auto_complete trigger, migration 016).
     const { data: updatedBatch, error: updateError } = await updateBatchStatus(
       body.batchId,
-      'processing'
+      'processing',
+      undefined,
+      imageIds.length
     )
 
     if (updateError !== null || updatedBatch === null) {
