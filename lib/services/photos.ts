@@ -365,6 +365,12 @@ export async function getPhotos(
         .from('images')
         .select('*, detections!left(id)', { count: 'exact' })
         .eq('user_id', userId)
+        // Constrain the embed to LIVE detections before testing it for emptiness.
+        // Without this a photo whose only detection was soft-deleted still has a
+        // non-empty embed, so it drops out of "No Deer" — and the RPC that backs
+        // "With Deer" filters deleted_at IS NULL, so it drops out of that too. The
+        // photo would exist in neither view.
+        .is('detections.deleted_at', null)
         .is('detections', null)
     }
 
@@ -797,6 +803,9 @@ export async function getPhotoIds(
         .from('images')
         .select('id, detections!left(id)')
         .eq('user_id', userId)
+        // See getPhotos: constrain the embed to live detections, or a photo whose
+        // only detection was soft-deleted falls out of both filters.
+        .is('detections.deleted_at', null)
         .is('detections', null)
     } else {
       query = supabase
@@ -896,12 +905,17 @@ export async function getPhotoIds(
       return { data: null, error, count: 0 }
     }
 
-    // De-duplicate: the inner join emits one row per matching detection, so an image
-    // with several matching detections would otherwise repeat.
-    // NOTE (pre-existing, not addressed here): this select is unbounded, so it is
-    // still subject to the max-rows ceiling. The detection-only path above returns
-    // the RPC's complete set and is unaffected; only the combination of a detection
-    // filter AND another image-level filter reaches this branch.
+    // Defensive de-dup. PostgREST aggregates a to-many embed into a nested array —
+    // one row per PARENT, not per match (verified: 300 rows, 300 distinct ids, each
+    // carrying 10 embedded detections) — so this is a no-op today. It is kept so the
+    // contract holds if the embed shape ever changes.
+    //
+    // KNOWN GAP (pre-existing): this select is unbounded and so is still subject to
+    // the max-rows ceiling. It is reached by ANY hasDetections === false query (the
+    // early return above is gated on `hasDetections !== false`), not only by a
+    // detection filter combined with an image-level one. Since /api/photos/ids backs
+    // "Select All", a "No Deer" select-all on a large account silently selects the
+    // first max-rows only, and a bulk archive/delete then acts on that subset.
     const ids = [...new Set<string>((data ?? []).map((row: { id: string }) => row.id))]
     return { data: ids, error: null, count: ids.length }
   }
@@ -1100,8 +1114,10 @@ export async function getAdjacentPhotos(
         }
       }
     } else {
-      // Detection ABSENCE: the left-joined embed must come back empty.
-      query = query.is('detections', null)
+      // Detection ABSENCE: the left-joined embed must come back empty, counting
+      // only LIVE detections — see getPhotos. A soft-deleted-only photo otherwise
+      // belongs to neither the "with" nor the "without" view.
+      query = query.is('detections.deleted_at', null).is('detections', null)
     }
   }
 
@@ -1138,9 +1154,14 @@ export async function getAdjacentPhotos(
     return { prevId: null, nextId: null }
   }
 
-  // De-duplicate. The inner join emits one row per matching detection, so a photo
-  // with several would otherwise appear twice and make next/prev land on a repeat
-  // of the photo you are already looking at.
+  // Defensive de-dup — a no-op with PostgREST's current embed shape (to-many embeds
+  // aggregate into a nested array, one row per parent), kept so next/prev cannot land
+  // on a repeat of the current photo if that ever changes.
+  //
+  // KNOWN GAP (pre-existing): this query is unbounded, so past max-rows the current
+  // photo falls outside the fetched window, findIndex returns -1, and next/prev
+  // dead-end. Fixing it properly needs two bounded queries around the cursor rather
+  // than fetching every id — tracked as follow-up, not addressed here.
   const seen = new Set<string>()
   const photos: Array<{ id: string }> = []
   for (const row of rows as Array<{ id: string }>) {

@@ -338,6 +338,11 @@ export type Database = {
           gemini_confidence: number | null
           head_bbox: Json | null
           id: string
+          // Generated (STORED) antler-point bounds derived from
+          // estimated_point_range — see migrations 051/052. Read-only: they are
+          // GENERATED ALWAYS, so they never appear in Insert/Update.
+          point_min: number | null
+          point_max: number | null
           image_id: string
           is_reference: boolean | null
           quality_score: number | null

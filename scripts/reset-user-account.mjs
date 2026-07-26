@@ -35,7 +35,11 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
 const BUCKET = 'photos'
 const EXPORTS_BUCKET = 'exports'
 const PAGE_SIZE = 1000        // Supabase caps a single select at 1000 rows
-const DELETE_CHUNK = 250      // images per delete statement (per-row trigger on cascade)
+// Images per delete statement. Bounded by two things: the per-row
+// detection_best_score trigger (migration 049) fires on every cascaded detection, and
+// `.in('id', ...)` is serialized into the query string, which PostgREST rejects
+// somewhere between 250 and 500 uuids. 150 keeps clear margin under both.
+const DELETE_CHUNK = 150
 const STORAGE_BATCH = 1000    // Supabase storage.remove() limit per call
 
 const args = process.argv.slice(2)
