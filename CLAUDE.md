@@ -162,6 +162,19 @@ material (brass top-light), not a badge.
    optional props — build the object conditionally.
 8. **node:test files** use `.ts` import extensions → excluded from tsconfig+eslint;
    run via `npm run test:unit`.
+9. **Two PostgREST ceilings, both silent.** (a) Every response is truncated at the
+   project's **max-rows** (1000) — no error, no flag; `.limit()`/`.range()` cannot
+   raise it. Any query whose correctness needs the FULL set must page, or return an
+   array in a single row (see `get_filtered_detection_images`, migration 050).
+   (b) `.in('id', [...])` is serialized into the **query string** and starts failing
+   between 250 and 500 uuids (~18KB). Prefer an embedded `detections!inner(...)`
+   predicate over shipping an id list. These two interact: fixing (a) makes (b)
+   reachable.
+10. **Trigger.dev deploys separately from Vercel.** `npx trigger.dev@<sdk-version>
+   deploy` — a Vercel deploy does NOT ship `trigger/` jobs, and the CLI refuses to run
+   if its version differs from the installed `@trigger.dev/sdk`. A worker running
+   older code fails silently: the job simply never appears in the run list, and rows
+   sit in their pending status forever with nothing marked failed.
 
 ## Skill routing
 

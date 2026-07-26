@@ -338,6 +338,11 @@ export type Database = {
           gemini_confidence: number | null
           head_bbox: Json | null
           id: string
+          // Generated (STORED) antler-point bounds derived from
+          // estimated_point_range — see migrations 051/052. Read-only: they are
+          // GENERATED ALWAYS, so they never appear in Insert/Update.
+          point_min: number | null
+          point_max: number | null
           image_id: string
           is_reference: boolean | null
           quality_score: number | null
@@ -1230,6 +1235,22 @@ export type Database = {
           representative_image_id: string
           sighting_count: number
           status: string
+        }[]
+      }
+      get_filtered_detection_images: {
+        Args: {
+          p_deer_id?: string
+          p_max_points?: number
+          p_min_confidence?: number
+          p_min_points?: number
+          p_quality_status?: string
+          p_sex?: string
+          p_size_class?: string
+          p_user_id: string
+        }
+        Returns: {
+          image_ids: string[]
+          total_count: number
         }[]
       }
       get_deer_sightings: {

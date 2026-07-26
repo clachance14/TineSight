@@ -16,10 +16,66 @@ export type PhotoSortField =
 // Sort direction
 export type PhotoSortDirection = 'asc' | 'desc'
 
+// Variant pipeline state (images.variant_status). Declared as a union rather than
+// `string` so a typo in a comparison is a compile error — the grid branches on
+// 'failed' to decide between "Preparing…" and a terminal "No preview".
+export type VariantStatus = 'pending' | 'processing' | 'ready' | 'failed'
+
 // Result type for area filter helper
 interface AreaFilterResult {
   batchIds: string[] | null  // null means no filter needed, [] means no matches
   includeNullBatchId: boolean  // Whether to also include batch_id IS NULL
+}
+
+// Page size for id sweeps that must return a complete set. Requests are clamped by the
+// project's PostgREST max-rows regardless; the loops advance by rows actually returned.
+const PHOTO_ID_PAGE_SIZE = 1000
+
+/**
+ * Resolve the DISTINCT set of image ids matching the detection-level filters.
+ *
+ * One round-trip via the `get_filtered_detection_images` RPC (migration 050), which
+ * does the filtering and the DISTINCT in Postgres and returns the ids as a single-row
+ * uuid[]. An array is ONE row, so the `max-rows` ceiling cannot truncate it however
+ * many photos the account has.
+ *
+ * This replaced a prefetch that selected every matching `detections` row and de-duped
+ * in JS: unbounded it was silently capped at `max-rows` (losing ~97% of a large
+ * account's photos), and paged it cost ~42 sequential round-trips (~5.7s measured).
+ *
+ * Pass no filters to get every image that has any live detection.
+ */
+async function resolveMatchedImageIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  filters?: PhotoFilters,
+  // Callers that only need the count pass false: the RPC then skips array_agg and
+  // returns an empty array, so the id set never crosses the wire. getPhotos reads
+  // only `total`, and on a large account the ids were ~1.5MB of JSON per page.
+  returnIds = true
+): Promise<{ ids: string[]; total: number; error: Error | null }> {
+  // Built conditionally: `exactOptionalPropertyTypes` rejects explicit undefined,
+  // and an omitted arg is what makes the SQL predicate fall through to "no filter".
+  const args = {
+    p_user_id: userId,
+    ...(filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all'
+      ? { p_quality_status: filters.qualityStatus }
+      : {}),
+    ...(filters?.minConfidence !== undefined ? { p_min_confidence: filters.minConfidence / 100 } : {}),
+    ...(filters?.sex !== undefined ? { p_sex: filters.sex } : {}),
+    ...(filters?.sizeClass !== undefined ? { p_size_class: filters.sizeClass } : {}),
+    ...(filters?.deerId !== undefined ? { p_deer_id: filters.deerId } : {}),
+    ...(filters?.minPoints !== undefined ? { p_min_points: filters.minPoints } : {}),
+    ...(filters?.maxPoints !== undefined ? { p_max_points: filters.maxPoints } : {}),
+    ...(returnIds ? {} : { p_return_ids: false }),
+  }
+
+  const { data, error } = await supabase.rpc('get_filtered_detection_images', args)
+  if (error !== null) {
+    return { ids: [], total: 0, error }
+  }
+  const row = data?.[0]
+  return { ids: row?.image_ids ?? [], total: Number(row?.total_count ?? 0), error: null }
 }
 
 /**
@@ -166,6 +222,219 @@ export interface PhotoFilters {
   cursor?: string  // Format: timestamp::id for cursor-based pagination
 }
 
+// Photo ids per `.in()` call. PostgREST serializes `.in()` into the query string and
+// rejects it somewhere between 250 and 500 uuids (~18KB, measured), so any caller
+// handed a user-sized id set must chunk rather than cap. 150 keeps clear margin.
+export const PHOTO_ID_BATCH_SIZE = 150
+
+/**
+ * Validate a client-supplied photo-id batch.
+ *
+ * Shared so that every bulk route applies the SAME guard: the archive route used to
+ * plain-assign `body.photo_ids` into `.in('id', ...)` while its two sibling routes
+ * validated uuids first — same field, same shape, one guarded and one not.
+ */
+export function parsePhotoIdBatch(ids: unknown): { ids: string[] } | { error: string } {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return { error: 'photoIds must be a non-empty array' }
+  }
+  if (ids.some((id: unknown) => typeof id !== 'string' || !UUID_RE.test(id))) {
+    return { error: 'All photoIds must be valid UUIDs' }
+  }
+  return { ids: ids as string[] }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Split ids into `.in()`-safe chunks. */
+function idChunks(ids: string[]): string[][] {
+  const out: string[][] = []
+  for (let i = 0; i < ids.length; i += PHOTO_ID_BATCH_SIZE) {
+    out.push(ids.slice(i, i + PHOTO_ID_BATCH_SIZE))
+  }
+  return out
+}
+
+/**
+ * Narrow an untyped PostgREST payload to id-bearing rows.
+ *
+ * The query builders below are `any` (supabase-js builder types don't unify across
+ * select shapes), so their results arrive untyped. Asserting `as Array<{id: string}>`
+ * would be unchecked: if a select shape ever changed, `row.id` would silently become
+ * `undefined` and flow into a delete payload. This checks instead of asserting.
+ */
+function asIdRows(data: unknown): Array<{ id: string }> {
+  if (!Array.isArray(data)) return []
+  return data.filter(
+    (row): row is { id: string } =>
+      typeof row === 'object' && row !== null && typeof (row as { id?: unknown }).id === 'string'
+  )
+}
+
+/**
+ * Batch-id lookups that need their own round-trip, resolved ONCE up front.
+ *
+ * Two reasons this is separate from filter application: the builders below have to be
+ * synchronous (they are re-invoked per page, and re-running these per page would issue
+ * the same queries repeatedly), and an active filter that matches nothing has to
+ * short-circuit the whole call rather than produce a query that matches everything.
+ */
+interface ResolvedBatchFilters {
+  /** null = filter inactive. Otherwise the batch ids to constrain to. */
+  sessionBatchIds: string[] | null
+  /** null = inactive. Covers `areaName` (legacy single) and `areaNames` (multi). */
+  areaResult: AreaFilterResult | null
+  /** An active filter resolved to nothing — the caller must return an empty result. */
+  matchesNothing: boolean
+}
+
+async function resolveBatchIdFilters(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  filters?: PhotoFilters
+): Promise<ResolvedBatchFilters> {
+  const resolved: ResolvedBatchFilters = {
+    sessionBatchIds: null,
+    areaResult: null,
+    matchesNothing: false,
+  }
+
+  if (filters?.uploadSessionId !== undefined) {
+    const { data: sessionBatches } = await supabase
+      .from('processing_batches')
+      .select('id')
+      .eq('upload_session_id', filters.uploadSessionId)
+    resolved.sessionBatchIds = (sessionBatches ?? []).map(b => b.id)
+    if (resolved.sessionBatchIds.length === 0) {
+      resolved.matchesNothing = true
+      return resolved
+    }
+  }
+
+  // areaNames (multi) wins over areaName (legacy single) — they are alternatives,
+  // never combined, matching the precedence getPhotos has always used.
+  if (filters?.areaNames?.length) {
+    resolved.areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
+  } else if (filters?.areaName !== undefined) {
+    resolved.areaResult = await getAreaFilterBatchIds(supabase, userId, filters.areaName)
+  }
+
+  if (resolved.areaResult !== null) {
+    const ids = resolved.areaResult.batchIds ?? []
+    if (ids.length === 0 && !resolved.areaResult.includeNullBatchId) {
+      resolved.matchesNothing = true
+    }
+  }
+
+  return resolved
+}
+
+/**
+ * Apply every PHOTO-level predicate. One definition, used by all five query builders.
+ *
+ * These had drifted into five hand-maintained copies with materially different filter
+ * sets — Select All applied `has_deer=false` to `otherAnimals` while the grid did not
+ * (so it selected fewer photos than were displayed), `areaName` was honoured by the
+ * grid but ignored entirely by Select All (so it selected far MORE), and lightbox
+ * navigation applied neither. Keeping one definition is what makes that class of bug
+ * impossible rather than merely fixed.
+ *
+ * Canonical semantics are the GRID's, because that is what the user can see:
+ * `otherAnimals` means "contains any of these animals", NOT "and no deer".
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types don't unify across select shapes
+function applyPhotoLevelFilters(query: any, filters: PhotoFilters | undefined, resolved: ResolvedBatchFilters): any {
+  /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+  // 'all' is the UI's "no filter" sentinel; passing it through would filter
+  // detection_status to the literal string 'all' and match nothing.
+  if (filters?.status !== undefined && filters.status !== 'all') {
+    query = query.eq('detection_status', filters.status)
+  }
+
+  if (filters?.hasDeer !== undefined) {
+    query = filters.hasDeer
+      ? query.not('classification', 'is', null)
+      : query.is('classification', null)
+  }
+
+  if (resolved.sessionBatchIds !== null) {
+    query = query.in('batch_id', resolved.sessionBatchIds)
+  }
+
+  if (resolved.areaResult !== null) {
+    const batchIds = resolved.areaResult.batchIds ?? []
+    if (resolved.areaResult.includeNullBatchId) {
+      query = batchIds.length > 0
+        ? query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
+        : query.is('batch_id', null)
+    } else if (batchIds.length > 0) {
+      query = query.in('batch_id', batchIds)
+    }
+  }
+
+  if (filters?.otherAnimals?.length) {
+    const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
+    if (orFilter) {
+      query = query.or(orFilter)
+    }
+  }
+
+  if (filters?.cameraId !== undefined) {
+    query = query.eq('camera_id', filters.cameraId)
+  }
+  if (filters?.isArchived !== undefined) {
+    query = query.eq('is_archived', filters.isArchived)
+  }
+  if (filters?.dateFrom !== undefined) {
+    query = query.gte('captured_at', filters.dateFrom)
+  }
+  if (filters?.dateTo !== undefined) {
+    query = query.lte('captured_at', filters.dateTo)
+  }
+  if (filters?.minScore !== undefined) {
+    query = query.gte('best_score', filters.minScore)
+  }
+  return query
+  /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+}
+
+/**
+ * Apply every DETECTION-level predicate to an embedded `detections!inner(...)` select.
+ * Evaluated by Postgres — no image-id list is ever serialized into the query string,
+ * which PostgREST rejects past ~250-500 uuids.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above
+function applyDetectionEmbedFilters(query: any, filters: PhotoFilters | undefined): any {
+  /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+  query = query.is('detections.deleted_at', null)
+
+  if (filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all') {
+    query = query.eq('detections.quality_status', filters.qualityStatus)
+  }
+  if (filters?.minConfidence !== undefined) {
+    query = query.gte('detections.confidence', filters.minConfidence / 100)
+  }
+  if (filters?.sex !== undefined) {
+    query = query.eq('detections.sex', filters.sex)
+  }
+  if (filters?.sizeClass !== undefined) {
+    query = query.eq('detections.size_class', filters.sizeClass)
+  }
+  if (filters?.deerId !== undefined) {
+    query = query.eq('detections.deer_id', filters.deerId)
+  }
+  // Range overlap via the generated bounds (migrations 051/052). Unparseable ranges
+  // have NULL bounds and are excluded by these comparisons.
+  if (filters?.minPoints !== undefined) {
+    query = query.gte('detections.point_max', filters.minPoints)
+  }
+  if (filters?.maxPoints !== undefined) {
+    query = query.lte('detections.point_min', filters.maxPoints)
+  }
+  return query
+  /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+}
+
 // Data types for creating and updating photos
 export interface CreatePhotoData {
   file_path: string
@@ -234,61 +503,40 @@ export async function getPhotos(
     //          on `estimated_point_range`) or detection ABSENCE
     //          (hasDetections === false), neither expressible as an embedded
     //          predicate. Both are selective, so the id list stays small.
-    const canUseInnerJoin = !needsPointsFilter && filters?.hasDetections !== false
+    // Point-range is expressible as a SQL predicate since migration 051 (generated
+    // point_min/point_max columns), so it no longer forces the id-list fallback.
+    // Detection ABSENCE takes a left-join/is-null shape instead, also server-side.
+    // Net effect: no image-id list is ever serialized into the query string, which
+    // PostgREST rejects somewhere between 250 and 500 uuids (~18KB).
+    const canUseInnerJoin = filters?.hasDetections !== false
 
-    // --- Prefetch the distinct matching image-id set (exact count source) ---
-    let allImageIdsWithDetections: string[] = []
-    if (needsHasDetectionsFilter) {
-      const { data: allDetections } = await supabase
-        .from('detections')
-        .select('image_id')
-        .is('deleted_at', null)
-      allImageIdsWithDetections = [...new Set((allDetections ?? []).map((d: { image_id: string }) => d.image_id))]
-    }
-
-    let detectionQuery = supabase.from('detections').select('image_id, estimated_point_range')
-      .is('deleted_at', null)  // Exclude soft-deleted detections
-    if (needsQualityFilter) {
-      detectionQuery = detectionQuery.eq('quality_status', filters!.qualityStatus!)
-    }
-    if (needsConfidenceFilter) {
-      detectionQuery = detectionQuery.gte('confidence', filters!.minConfidence! / 100)
-    }
-    if (needsSexFilter) {
-      detectionQuery = detectionQuery.eq('sex', filters!.sex!)
-    }
-    if (needsSizeClassFilter) {
-      detectionQuery = detectionQuery.eq('size_class', filters!.sizeClass!)
-    }
-    if (needsDeerFilter) {
-      detectionQuery = detectionQuery.eq('deer_id', filters!.deerId!)
-    }
-    const { data: detections, error: detectionsError } = await detectionQuery
-    if (detectionsError !== null) {
-      return { data: null, error: detectionsError, count: null }
+    // Batch-id lookups that need a round-trip, resolved once for this call.
+    const resolved = await resolveBatchIdFilters(supabase, userId, filters)
+    if (resolved.matchesNothing) {
+      return { data: [], error: null, count: 0 }
     }
 
-    let filteredDetections = detections ?? []
-    if (needsPointsFilter) {
-      filteredDetections = filteredDetections.filter((d: { estimated_point_range: string | null }) => {
-        if (!d.estimated_point_range) return false
-        // Parse point range (e.g., "8-10" or "10-12")
-        const match = d.estimated_point_range.match(/(\d+)-(\d+)/)
-        if (!match) return false
-        const minRange = parseInt(match[1]!, 10)
-        const maxRange = parseInt(match[2]!, 10)
-        if (filters?.minPoints !== undefined && maxRange < filters.minPoints) return false
-        if (filters?.maxPoints !== undefined && minRange > filters.maxPoints) return false
-        return true
-      })
+    // --- Distinct matching image-id set (the exact-count source) ---
+    // Only the inner-join path needs it, and only for the COUNT — the data query
+    // filters server-side. The absence branch takes its count from its own query,
+    // so it skips this entirely rather than scanning detections for a discarded
+    // result. With no detection filters the RPC receives no filter args and returns
+    // every image that has a live detection, which is the hasDetections===true case.
+    let matchedCount = 0
+    if (canUseInnerJoin) {
+      // Count only — getPhotos never filters by this id set (the data query applies
+      // the predicates server-side), so the array would be pure wire cost.
+      const { total, error: matchedError } = await resolveMatchedImageIds(
+        supabase,
+        userId,
+        filters,
+        false
+      )
+      if (matchedError !== null) {
+        return { data: null, error: matchedError, count: null }
+      }
+      matchedCount = total
     }
-    const filteredImageIds = [...new Set(filteredDetections.map((d: { image_id: string }) => d.image_id))]
-
-    // The distinct id set this filter selects.
-    const hasOtherDetectionFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter
-    const matchedImageIds = (filters?.hasDetections === true && !hasOtherDetectionFilters)
-      ? allImageIdsWithDetections
-      : filteredImageIds
 
     // Are any NON-detection, NON-pagination filters active? If so the count must
     // also reflect those, so matchedImageIds.length is no longer the total and we
@@ -308,7 +556,7 @@ export async function getPhotos(
 
     // Short-circuit when a membership filter matches nothing. (hasDetections ===
     // false is the "absence" case and legitimately matches detection-less images.)
-    if (filters?.hasDetections !== false && matchedImageIds.length === 0) {
+    if (filters?.hasDetections !== false && matchedCount === 0) {
       return { data: [], error: null, count: 0 }
     }
 
@@ -319,39 +567,28 @@ export async function getPhotos(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types don't unify across the two select shapes; behaviour is verified empirically
     let query: any
     if (canUseInnerJoin) {
-      query = supabase
-        .from('images')
-        .select('*, detections!inner(id)', useExactCount ? {} : { count: 'exact' })
-        .eq('user_id', userId)
-        .is('detections.deleted_at', null) // ignore soft-deleted detections
-      if (needsQualityFilter) {
-        query = query.eq('detections.quality_status', filters!.qualityStatus!)
-      }
-      if (needsConfidenceFilter) {
-        query = query.gte('detections.confidence', filters!.minConfidence! / 100)
-      }
-      if (needsSexFilter) {
-        query = query.eq('detections.sex', filters!.sex!)
-      }
-      if (needsSizeClassFilter) {
-        query = query.eq('detections.size_class', filters!.sizeClass!)
-      }
-      if (needsDeerFilter) {
-        query = query.eq('detections.deer_id', filters!.deerId!)
-      }
+      query = applyDetectionEmbedFilters(
+        supabase
+          .from('images')
+          .select('*, detections!inner(id)', useExactCount ? {} : { count: 'exact' })
+          .eq('user_id', userId),
+        filters
+      )
     } else {
-      // Fallback (point-range / absence): filter by the resolved id list.
+      // Detection ABSENCE. Expressed as a left-join that must come back empty, so
+      // Postgres evaluates it — the old form sent every id that HAS a detection as
+      // a `.not('id','in',(...))` list and overflowed the query string.
       query = supabase
         .from('images')
-        .select('*', { count: 'exact' })
+        .select('*, detections!left(id)', { count: 'exact' })
         .eq('user_id', userId)
-      if (filters?.hasDetections === false) {
-        if (allImageIdsWithDetections.length > 0) {
-          query = query.not('id', 'in', `(${allImageIdsWithDetections.join(',')})`)
-        }
-      } else {
-        query = query.in('id', matchedImageIds)
-      }
+        // Constrain the embed to LIVE detections before testing it for emptiness.
+        // Without this a photo whose only detection was soft-deleted still has a
+        // non-empty embed, so it drops out of "No Deer" — and the RPC that backs
+        // "With Deer" filters deleted_at IS NULL, so it drops out of that too. The
+        // photo would exist in neither view.
+        .is('detections.deleted_at', null)
+        .is('detections', null)
     }
 
     // Apply dynamic ordering based on sortBy (default: imported_at) and sortDirection (default: desc)
@@ -376,144 +613,10 @@ export async function getPhotos(
     }
 
     // Apply other filters
-    if (filters?.status !== undefined) {
-      query = query.eq('detection_status', filters.status)
-    }
-
-    if (filters?.hasDeer !== undefined) {
-      if (filters.hasDeer) {
-        query = query.not('classification', 'is', null)
-      } else {
-        query = query.is('classification', null)
-      }
-    }
-
-    // Filter by upload session (batches linked to session)
-    if (filters?.uploadSessionId !== undefined) {
-      // Subquery to get batch IDs that belong to this session
-      const { data: sessionBatches } = await supabase
-        .from('processing_batches')
-        .select('id')
-        .eq('upload_session_id', filters.uploadSessionId)
-
-      if (sessionBatches && sessionBatches.length > 0) {
-        const batchIds = sessionBatches.map(b => b.id)
-        query = query.in('batch_id', batchIds)
-      } else {
-        // No batches found for this session, return empty
-        return { data: [], error: null, count: 0 }
-      }
-    }
-
-    // Filter by area name (via processing_batches) - legacy single select
-    if (filters?.areaName !== undefined && !filters?.areaNames?.length) {
-      const areaResult = await getAreaFilterBatchIds(supabase, userId, filters.areaName)
-      if (areaResult.batchIds !== null) {
-        if (areaResult.batchIds.length === 0 && !areaResult.includeNullBatchId) {
-          // No matches found
-          return { data: [], error: null, count: 0 }
-        }
-        if (areaResult.includeNullBatchId) {
-          // Include both batches with null area AND images with null batch_id
-          if (areaResult.batchIds.length > 0) {
-            query = query.or(`batch_id.in.(${areaResult.batchIds.join(',')}),batch_id.is.null`)
-          } else {
-            query = query.is('batch_id', null)
-          }
-        } else {
-          query = query.in('batch_id', areaResult.batchIds)
-        }
-      }
-    }
-
-    // Filter by multiple area names (OR logic) - new multi-select
-    if (filters?.areaNames?.length) {
-      const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
-      const batchIds = areaResult.batchIds ?? []
-      if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
-        // No matches found
-        return { data: [], error: null, count: 0 }
-      }
-      if (areaResult.includeNullBatchId) {
-        // Include both batches matching areas AND images with null batch_id
-        if (batchIds.length > 0) {
-          query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
-        } else {
-          query = query.is('batch_id', null)
-        }
-      } else if (batchIds.length > 0) {
-        query = query.in('batch_id', batchIds)
-      }
-    }
-
-    // Filter by other animals (OR logic) - show photos with ANY selected animal
-    if (filters?.otherAnimals?.length) {
-      const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
-      if (orFilter) {
-        query = query.or(orFilter)
-      }
-    }
-
-    if (filters?.cameraId !== undefined) {
-      query = query.eq('camera_id', filters.cameraId)
-    }
-
-    if (filters?.isArchived !== undefined) {
-      query = query.eq('is_archived', filters.isArchived)
-    }
-
-    // Apply date range filters
-    if (filters?.dateFrom !== undefined) {
-      query = query.gte('captured_at', filters.dateFrom)
-    }
-
-    if (filters?.dateTo !== undefined) {
-      query = query.lte('captured_at', filters.dateTo)
-    }
-
-    // Photo-level authoritative-score floor (images.best_score = gross else estimate).
-    if (filters?.minScore !== undefined) {
-      query = query.gte('best_score', filters.minScore)
-    }
-
-    // Apply cursor-based pagination using the active sort field
-    // Cursor format: timestamp::id (no DB lookup needed)
-    if (filters?.cursor !== undefined) {
-      const [cursorTimestamp, cursorId] = filters.cursor.split('::')
-      if (cursorTimestamp && cursorId) {
-        // Filter for photos that come after the cursor
-        // Use .lt for descending (smaller values after), .gt for ascending (larger values after)
-        const cmp = ascending ? 'gt' : 'lt'
-        // Special handling for captured_at which can be NULL - cursor uses imported_at as fallback
-        if (sortField === 'captured_at') {
-          // Handle NULL captured_at: compare against both captured_at AND imported_at (for NULL cases)
-          query = query.or(
-            `captured_at.${cmp}.${cursorTimestamp},` +
-            `and(captured_at.eq.${cursorTimestamp},id.${cmp}.${cursorId}),` +
-            `and(captured_at.is.null,imported_at.${cmp}.${cursorTimestamp}),` +
-            `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
-          )
-        } else if (sortField === 'best_score') {
-          // best_score sorts desc NULLS LAST. The API encodes the cursor value as
-          // the numeric score, or the literal 'null' once paging crosses into the
-          // un-scored tail. Scored page: also admit all NULLs (they order after).
-          // Null page: only remaining NULLs, tie-broken by id.
-          if (cursorTimestamp === 'null') {
-            query = query.is('best_score', null).filter('id', cmp, cursorId)
-          } else {
-            query = query.or(
-              `best_score.${cmp}.${cursorTimestamp},` +
-              `and(best_score.eq.${cursorTimestamp},id.${cmp}.${cursorId}),` +
-              `best_score.is.null`
-            )
-          }
-        } else {
-          query = query.or(
-            `${sortField}.${cmp}.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
-          )
-        }
-      }
-    }
+    // Photo-level predicates come from ONE shared definition (see
+    // applyPhotoLevelFilters) — these had drifted into five hand-maintained
+    // copies with materially different filter sets.
+    query = applyPhotoLevelFilters(query, filters, resolved)
 
     // Apply pagination
     const limit = filters?.limit ?? 50
@@ -541,7 +644,13 @@ export async function getPhotos(
     // Prefer the exact distinct count from the prefetch; only fall back to the
     // query's own count when other image-level filters made the prefetch count
     // insufficient (see useExactCount).
-    return { data: cleaned, error: null, count: useExactCount ? matchedImageIds.length : count }
+    return { data: cleaned, error: null, count: useExactCount ? matchedCount : count }
+  }
+
+  // Batch-id lookups that need a round-trip, resolved once for this call.
+  const stdResolved = await resolveBatchIdFilters(supabase, userId, filters)
+  if (stdResolved.matchesNothing) {
+    return { data: [], error: null, count: 0 }
   }
 
   // Standard query without detection-based filters
@@ -570,131 +679,9 @@ export async function getPhotos(
       .order('id', { ascending })
   }
 
-  // Apply filters
-  if (filters?.status !== undefined) {
-    query = query.eq('detection_status', filters.status)
-  }
-
-  if (filters?.hasDeer !== undefined) {
-    if (filters.hasDeer) {
-      query = query.not('classification', 'is', null)
-    } else {
-      query = query.is('classification', null)
-    }
-  }
-
-  // Filter by upload session (batches linked to session)
-  if (filters?.uploadSessionId !== undefined) {
-    // Subquery to get batch IDs that belong to this session
-    const { data: sessionBatches } = await supabase
-      .from('processing_batches')
-      .select('id')
-      .eq('upload_session_id', filters.uploadSessionId)
-
-    if (sessionBatches && sessionBatches.length > 0) {
-      const batchIds = sessionBatches.map(b => b.id)
-      query = query.in('batch_id', batchIds)
-    } else {
-      // No batches found for this session, return empty
-      return { data: [], error: null, count: 0 }
-    }
-  }
-
-  // Filter by area name (via processing_batches) - legacy single select
-  if (filters?.areaName !== undefined && !filters?.areaNames?.length) {
-    const areaResult = await getAreaFilterBatchIds(supabase, userId, filters.areaName)
-    if (areaResult.batchIds !== null) {
-      if (areaResult.batchIds.length === 0 && !areaResult.includeNullBatchId) {
-        // No matches found
-        return { data: [], error: null, count: 0 }
-      }
-      if (areaResult.includeNullBatchId) {
-        // Include both batches with null area AND images with null batch_id
-        if (areaResult.batchIds.length > 0) {
-          query = query.or(`batch_id.in.(${areaResult.batchIds.join(',')}),batch_id.is.null`)
-        } else {
-          query = query.is('batch_id', null)
-        }
-      } else {
-        query = query.in('batch_id', areaResult.batchIds)
-      }
-    }
-  }
-
-  // Filter by multiple area names (OR logic) - new multi-select
-  if (filters?.areaNames?.length) {
-    const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
-    const batchIds = areaResult.batchIds ?? []
-    if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
-      // No matches found
-      return { data: [], error: null, count: 0 }
-    }
-    if (areaResult.includeNullBatchId) {
-      // Include both batches matching areas AND images with null batch_id
-      if (batchIds.length > 0) {
-        query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
-      } else {
-        query = query.is('batch_id', null)
-      }
-    } else if (batchIds.length > 0) {
-      query = query.in('batch_id', batchIds)
-    }
-  }
-
-  // Filter by other animals (OR logic) - show photos with ANY selected animal
-  if (filters?.otherAnimals?.length) {
-    const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
-    if (orFilter) {
-      query = query.or(orFilter)
-    }
-  }
-
-  if (filters?.cameraId !== undefined) {
-    query = query.eq('camera_id', filters.cameraId)
-  }
-
-  if (filters?.isArchived !== undefined) {
-    query = query.eq('is_archived', filters.isArchived)
-  }
-
-  // Apply date range filters
-  if (filters?.dateFrom !== undefined) {
-    query = query.gte('captured_at', filters.dateFrom)
-  }
-
-  if (filters?.dateTo !== undefined) {
-    query = query.lte('captured_at', filters.dateTo)
-  }
-
-  // Photo-level authoritative-score floor (images.best_score = gross else estimate).
-  if (filters?.minScore !== undefined) {
-    query = query.gte('best_score', filters.minScore)
-  }
-
-  // Apply cursor-based pagination using the active sort field
-  // Cursor format: timestamp::id (no DB lookup needed)
-  if (filters?.cursor !== undefined) {
-    const [cursorTimestamp, cursorId] = filters.cursor.split('::')
-    if (cursorTimestamp && cursorId) {
-      // Filter for photos that come after the cursor
-      // Use .lt for descending (smaller values after), .gt for ascending (larger values after)
-      const cmp = ascending ? 'gt' : 'lt'
-      // Special handling for captured_at which can be NULL - cursor uses imported_at as fallback
-      if (sortField === 'captured_at') {
-        // Handle NULL captured_at: compare against both captured_at AND imported_at (for NULL cases)
-        query = query.or(
-          `captured_at.${cmp}.${cursorTimestamp},` +
-          `and(captured_at.eq.${cursorTimestamp},id.${cmp}.${cursorId}),` +
-          `and(captured_at.is.null,imported_at.${cmp}.${cursorTimestamp}),` +
-          `and(captured_at.is.null,imported_at.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
-        )
-      } else {
-        query = query.or(
-          `${sortField}.${cmp}.${cursorTimestamp},and(${sortField}.eq.${cursorTimestamp},id.${cmp}.${cursorId})`
-        )
-      }
-    }
-  }
+  // Photo-level predicates come from ONE shared definition (see
+  // applyPhotoLevelFilters).
+  query = applyPhotoLevelFilters(query, filters, stdResolved)
 
   // Apply pagination
   const limit = filters?.limit ?? 50
@@ -736,59 +723,18 @@ export async function getPhotoIds(
   // If filtering by detection-related fields, we need to join with detections
   if (needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter) {
 
-    // See getPhotos for the full rationale. Resolve the distinct matching image-id
-    // set from `detections` (response data, never a URL → no overflow).
-    let allImageIdsWithDetections: string[] = []
-    if (needsHasDetectionsFilter) {
-      const { data: allDetections } = await supabase
-        .from('detections')
-        .select('image_id')
-        .is('deleted_at', null)
-      allImageIdsWithDetections = [...new Set((allDetections ?? []).map((d: { image_id: string }) => d.image_id))]
+    // See getPhotos. The RPC resolves the distinct matching id set in one round-trip,
+    // and it is the ANSWER this function returns on the detection-only path below —
+    // exact, uncapped, and never serialized into a URL. The absence branch derives
+    // its answer from the images query instead, so it skips this.
+    let matchedImageIds: string[] = []
+    if (filters?.hasDetections !== false) {
+      const { ids, error: matchedError } = await resolveMatchedImageIds(supabase, userId, filters)
+      if (matchedError !== null) {
+        return { data: null, error: matchedError, count: 0 }
+      }
+      matchedImageIds = ids
     }
-
-    let detectionQuery = supabase.from('detections').select('image_id, estimated_point_range')
-      .is('deleted_at', null)
-    if (needsQualityFilter) {
-      detectionQuery = detectionQuery.eq('quality_status', filters!.qualityStatus!)
-    }
-    if (needsConfidenceFilter) {
-      detectionQuery = detectionQuery.gte('confidence', filters!.minConfidence! / 100)
-    }
-    if (needsSexFilter) {
-      detectionQuery = detectionQuery.eq('sex', filters!.sex!)
-    }
-    if (needsSizeClassFilter) {
-      detectionQuery = detectionQuery.eq('size_class', filters!.sizeClass!)
-    }
-    if (needsDeerFilter) {
-      detectionQuery = detectionQuery.eq('deer_id', filters!.deerId!)
-    }
-
-    const { data: detections, error: detectionsError } = await detectionQuery
-    if (detectionsError !== null) {
-      return { data: null, error: detectionsError, count: 0 }
-    }
-
-    let filteredDetections = detections ?? []
-    if (needsPointsFilter) {
-      filteredDetections = filteredDetections.filter((d: { estimated_point_range: string | null }) => {
-        if (!d.estimated_point_range) return false
-        const match = d.estimated_point_range.match(/(\d+)-(\d+)/)
-        if (!match) return false
-        const minRange = parseInt(match[1]!, 10)
-        const maxRange = parseInt(match[2]!, 10)
-        if (filters?.minPoints !== undefined && maxRange < filters.minPoints) return false
-        if (filters?.maxPoints !== undefined && minRange > filters.maxPoints) return false
-        return true
-      })
-    }
-
-    const filteredImageIds = [...new Set(filteredDetections.map((d: { image_id: string }) => d.image_id))]
-    const hasOtherDetectionFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter
-    const matchedImageIds = (filters?.hasDetections === true && !hasOtherDetectionFilters)
-      ? allImageIdsWithDetections
-      : filteredImageIds
 
     const hasOtherImageFilters =
       (filters?.status !== undefined && filters.status !== 'all') ||
@@ -813,164 +759,97 @@ export async function getPhotoIds(
       return { data: [], error: null, count: 0 }
     }
 
-    // Otherwise filter an images query by the resolved id set + the other filters.
+    // Otherwise filter an images query by the detection predicates + the other
+    // filters. The predicates go server-side rather than as an id list: PostgREST
+    // serializes `.in()` into the query string and rejects it somewhere between 250
+    // and 500 uuids (~18KB, measured).
+    // Resolve batch-id lookups once, up front: the factory below is re-invoked per
+    // page and must stay synchronous.
+    const resolved = await resolveBatchIdFilters(supabase, userId, filters)
+    if (resolved.matchesNothing) {
+      return { data: [], error: null, count: 0 }
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types vary by select shape; behaviour is verified empirically
-    let query: any = supabase
-      .from('images')
-      .select('id')
-      .eq('user_id', userId)
-    if (filters?.hasDetections === false) {
-      if (allImageIdsWithDetections.length > 0) {
-        query = query.not('id', 'in', `(${allImageIdsWithDetections.join(',')})`)
-      }
-    } else {
-      query = query.in('id', matchedImageIds)
-    }
-
-    // Apply remaining filters (same as getPhotos)
-    if (filters?.status !== undefined && filters.status !== 'all') {
-      query = query.eq('detection_status', filters.status)
-    }
-    if (filters?.hasDeer !== undefined) {
-      if (filters.hasDeer) {
-        query = query.not('classification', 'is', null)
+    const buildQuery = (): any => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      let query: any
+      if (filters?.hasDetections === false) {
+        query = supabase
+          .from('images')
+          .select('id, detections!left(id)')
+          .eq('user_id', userId)
+          // Constrain the embed to live detections before testing it for emptiness,
+          // or a photo whose only detection was soft-deleted falls out of BOTH the
+          // "with" and "without" views.
+          .is('detections.deleted_at', null)
+          .is('detections', null)
       } else {
-        query = query.is('classification', null)
+        query = applyDetectionEmbedFilters(
+          supabase
+            .from('images')
+            .select('id, detections!inner(id)')
+            .eq('user_id', userId),
+          filters
+        )
       }
-    }
-    if (filters?.uploadSessionId !== undefined) {
-      const { data: sessionBatches } = await supabase
-        .from('processing_batches')
-        .select('id')
-        .eq('upload_session_id', filters.uploadSessionId)
-      if (sessionBatches && sessionBatches.length > 0) {
-        query = query.in('batch_id', sessionBatches.map(b => b.id))
-      } else {
-        return { data: [], error: null, count: 0 }
-      }
-    }
-    if (filters?.areaNames?.length) {
-      const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
-      const batchIds = areaResult.batchIds ?? []
-      if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
-        return { data: [], error: null, count: 0 }
-      }
-      if (areaResult.includeNullBatchId) {
-        if (batchIds.length > 0) {
-          query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
-        } else {
-          query = query.is('batch_id', null)
-        }
-      } else if (batchIds.length > 0) {
-        query = query.in('batch_id', batchIds)
-      }
-    }
-    if (filters?.otherAnimals?.length) {
-      const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
-      if (orFilter) {
-        query = query.or(orFilter)
-        query = query.eq('has_deer', false)
-      }
-    }
-    if (filters?.cameraId !== undefined) {
-      query = query.eq('camera_id', filters.cameraId)
-    }
-    if (filters?.isArchived !== undefined) {
-      query = query.eq('is_archived', filters.isArchived)
-    }
-    if (filters?.dateFrom !== undefined) {
-      query = query.gte('captured_at', filters.dateFrom)
-    }
-    if (filters?.dateTo !== undefined) {
-      query = query.lte('captured_at', filters.dateTo)
-    }
-    if (filters?.minScore !== undefined) {
-      query = query.gte('best_score', filters.minScore)
+
+      // Shared photo-level definition. This is what fixes Select All disagreeing
+      // with the grid: `areaName` was ignored here entirely (so a buck+area filter
+      // selected every buck in the account) and `otherAnimals` additionally applied
+      // has_deer=false (so it selected fewer photos than were displayed).
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      return applyPhotoLevelFilters(query, filters, resolved).order('id')
     }
 
-    const { data, error } = await query
-
-    if (error !== null) {
-      return { data: null, error, count: 0 }
+    // Page past the max-rows ceiling. This function's contract is the COMPLETE id
+    // set: /api/photos/ids backs "Select All", so a truncated result means a bulk
+    // archive or delete silently acts on a subset of what the user selected.
+    const ids: string[] = []
+    for (let from = 0; ; ) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      const { data, error } = await buildQuery().range(from, from + PHOTO_ID_PAGE_SIZE - 1)
+      if (error !== null) {
+        return { data: null, error: error as Error, count: 0 }
+      }
+      const rows = asIdRows(data)
+      if (rows.length === 0) break
+      for (const row of rows) ids.push(row.id)
+      // Advance by rows actually returned, so this stays correct whatever max-rows is.
+      from += rows.length
     }
 
-    const ids = (data ?? []).map((row: { id: string }) => row.id)
     return { data: ids, error: null, count: ids.length }
   }
 
-  // Standard query without detection-based filters - select only id
-  let query = supabase
-    .from('images')
-    .select('id')
-    .eq('user_id', userId)
-
-  if (filters?.status !== undefined && filters.status !== 'all') {
-    query = query.eq('detection_status', filters.status)
-  }
-  if (filters?.hasDeer !== undefined) {
-    if (filters.hasDeer) {
-      query = query.not('classification', 'is', null)
-    } else {
-      query = query.is('classification', null)
-    }
-  }
-  if (filters?.uploadSessionId !== undefined) {
-    const { data: sessionBatches } = await supabase
-      .from('processing_batches')
-      .select('id')
-      .eq('upload_session_id', filters.uploadSessionId)
-    if (sessionBatches && sessionBatches.length > 0) {
-      query = query.in('batch_id', sessionBatches.map(b => b.id))
-    } else {
-      return { data: [], error: null, count: 0 }
-    }
-  }
-  if (filters?.areaNames?.length) {
-    const areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
-    const batchIds = areaResult.batchIds ?? []
-    if (batchIds.length === 0 && !areaResult.includeNullBatchId) {
-      return { data: [], error: null, count: 0 }
-    }
-    if (areaResult.includeNullBatchId) {
-      if (batchIds.length > 0) {
-        query = query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
-      } else {
-        query = query.is('batch_id', null)
-      }
-    } else if (batchIds.length > 0) {
-      query = query.in('batch_id', batchIds)
-    }
-  }
-  if (filters?.otherAnimals?.length) {
-    const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
-    if (orFilter) {
-      query = query.or(orFilter)
-      query = query.eq('has_deer', false)
-    }
-  }
-  if (filters?.cameraId !== undefined) {
-    query = query.eq('camera_id', filters.cameraId)
-  }
-  if (filters?.isArchived !== undefined) {
-    query = query.eq('is_archived', filters.isArchived)
-  }
-  if (filters?.dateFrom !== undefined) {
-    query = query.gte('captured_at', filters.dateFrom)
-  }
-  if (filters?.dateTo !== undefined) {
-    query = query.lte('captured_at', filters.dateTo)
-  }
-  if (filters?.minScore !== undefined) {
-    query = query.gte('best_score', filters.minScore)
+  // Standard query without detection-based filters - select only id. This is the
+  // DEFAULT "Select All" path, so truncation here silently under-selects for every
+  // account over the max-rows ceiling.
+  const stdResolved = await resolveBatchIdFilters(supabase, userId, filters)
+  if (stdResolved.matchesNothing) {
+    return { data: [], error: null, count: 0 }
   }
 
-  const { data, error } = await query
-
-  if (error !== null) {
-    return { data: null, error, count: 0 }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types vary by select shape
+  const buildStdQuery = (): any => {
+    const base = supabase.from('images').select('id').eq('user_id', userId)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    return applyPhotoLevelFilters(base, filters, stdResolved).order('id')
   }
 
-  const ids = (data ?? []).map((row: { id: string }) => row.id)
+  const ids: string[] = []
+  for (let from = 0; ; ) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    const { data, error } = await buildStdQuery().range(from, from + PHOTO_ID_PAGE_SIZE - 1)
+    if (error !== null) {
+      return { data: null, error: error as Error, count: 0 }
+    }
+    const rows = asIdRows(data)
+    if (rows.length === 0) break
+    for (const row of rows) ids.push(row.id)
+    from += rows.length
+  }
+
   return { data: ids, error: null, count: ids.length }
 }
 
@@ -1042,155 +921,100 @@ export async function getAdjacentPhotos(
   const needsHasDetectionsFilter = filters?.hasDetections !== undefined
   const hasDetectionFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter
 
-  // See getPhotos for the rationale: a scalable `detections!inner(...)` embedded
-  // filter by default, JS id-list fallback only for point-range / absence cases.
-  const canUseInnerJoin = !needsPointsFilter && filters?.hasDetections !== false
+  // See getPhotos for the rationale: every detection predicate is evaluated by
+  // Postgres. Nothing resolves to an image-id list here, because PostgREST puts
+  // `.in()` in the query string and rejects it past ~250-500 uuids — which would
+  // dead-end lightbox next/prev on exactly the large accounts that need it.
+  const canUseInnerJoin = filters?.hasDetections !== false
 
-  // Build query for photo IDs. When inner-joining we also embed detections so the
-  // predicates below can constrain it (the embed is never read; we map row.id).
+  // Resolve batch-id lookups once, before the factory: it is invoked twice (one
+  // query either side of the cursor) and must stay synchronous.
+  const resolved = await resolveBatchIdFilters(supabase, userId, filters)
+  if (resolved.matchesNothing) {
+    return { prevId: null, nextId: null }
+  }
+
+  // A factory, not a builder. Neighbours are resolved with two independent bounded
+  // queries (one either side of the cursor), and a PostgrestFilterBuilder resolves
+  // once — so each side needs its own fully-filtered query.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types don't unify across the two select shapes; behaviour is verified empirically
-  let query: any = supabase
+  const buildQuery = (): any => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    let query: any = supabase
+      .from('images')
+      .select(
+        hasDetectionFilters
+          ? (canUseInnerJoin ? 'id, detections!inner(id)' : 'id, detections!left(id)')
+          : 'id'
+      )
+      .eq('user_id', userId)
+
+    if (hasDetectionFilters) {
+      query = canUseInnerJoin
+        ? applyDetectionEmbedFilters(query, filters)
+        // Detection ABSENCE: the left-joined embed must come back empty, counting
+        // only LIVE detections. A soft-deleted-only photo otherwise belongs to
+        // neither the "with" nor the "without" view.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+        : query.is('detections.deleted_at', null).is('detections', null)
+    }
+
+    // Photo-level predicates come from the one shared definition, so lightbox
+    // navigation can no longer walk outside the set the grid is showing — it
+    // previously ignored uploadSessionId, areaName, areaNames and otherAnimals.
+    return applyPhotoLevelFilters(query, filters, resolved)
+  }
+
+  // Locate the cursor row. Everything below compares against it by key rather than
+  // fetching every matching id and scanning in JS: that older approach was capped by
+  // max-rows, so any photo past position ~1000 fell outside the window, findIndex
+  // returned -1, and the viewer reported no neighbours at all.
+  const { data: current, error: currentError } = await supabase
     .from('images')
-    .select(hasDetectionFilters && canUseInnerJoin ? 'id, detections!inner(id)' : 'id')
+    .select('imported_at')
+    .eq('id', currentPhotoId)
     .eq('user_id', userId)
-    .order('imported_at', { ascending: false })
-    .order('id', { ascending: false })
+    .maybeSingle()
 
-  if (hasDetectionFilters) {
-    if (canUseInnerJoin) {
-      query = query.is('detections.deleted_at', null)
-      if (needsQualityFilter) {
-        query = query.eq('detections.quality_status', filters!.qualityStatus!)
-      }
-      if (needsConfidenceFilter) {
-        query = query.gte('detections.confidence', filters!.minConfidence! / 100)
-      }
-      if (needsSexFilter) {
-        query = query.eq('detections.sex', filters!.sex!)
-      }
-      if (needsSizeClassFilter) {
-        query = query.eq('detections.size_class', filters!.sizeClass!)
-      }
-      if (needsDeerFilter) {
-        query = query.eq('detections.deer_id', filters!.deerId!)
-      }
-    } else {
-      // ----- Fallback: resolve matching image ids in JS (point-range / absence) -----
-      let allImageIdsWithDetections: string[] = []
-      if (needsHasDetectionsFilter) {
-        const { data: allDetections } = await supabase
-          .from('detections')
-          .select('image_id')
-          .is('deleted_at', null)
-        allImageIdsWithDetections = [...new Set((allDetections ?? []).map((d: { image_id: string }) => d.image_id))]
-      }
-
-      let detectionQuery = supabase.from('detections').select('image_id, estimated_point_range')
-        .is('deleted_at', null)  // Exclude soft-deleted detections
-
-      if (needsQualityFilter) {
-        detectionQuery = detectionQuery.eq('quality_status', filters!.qualityStatus!)
-      }
-      if (needsConfidenceFilter) {
-        const threshold = filters!.minConfidence! / 100
-        detectionQuery = detectionQuery.gte('confidence', threshold)
-      }
-      if (needsSexFilter) {
-        detectionQuery = detectionQuery.eq('sex', filters!.sex!)
-      }
-      if (needsSizeClassFilter) {
-        detectionQuery = detectionQuery.eq('size_class', filters!.sizeClass!)
-      }
-      if (needsDeerFilter) {
-        detectionQuery = detectionQuery.eq('deer_id', filters!.deerId!)
-      }
-
-      const { data: detections } = await detectionQuery
-
-      let filteredDetections = detections ?? []
-      if (needsPointsFilter) {
-        filteredDetections = filteredDetections.filter((d: { estimated_point_range: string | null }) => {
-          if (!d.estimated_point_range) return false
-          const match = d.estimated_point_range.match(/(\d+)-(\d+)/)
-          if (!match) return false
-          const minRange = parseInt(match[1]!, 10)
-          const maxRange = parseInt(match[2]!, 10)
-          if (filters?.minPoints !== undefined && maxRange < filters.minPoints) return false
-          if (filters?.maxPoints !== undefined && minRange > filters.maxPoints) return false
-          return true
-        })
-      }
-
-      const filteredImageIds = [...new Set(filteredDetections.map((d: { image_id: string }) => d.image_id))]
-
-      if (filters?.hasDetections === false) {
-        // Show images WITHOUT any detections
-        if (allImageIdsWithDetections.length > 0) {
-          query = query.not('id', 'in', `(${allImageIdsWithDetections.join(',')})`)
-        }
-      } else if (filters?.hasDetections === true) {
-        // Show images WITH detections
-        const hasOtherFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter
-        const imageIdsToUse = hasOtherFilters ? filteredImageIds : allImageIdsWithDetections
-        if (imageIdsToUse.length === 0) {
-          return { prevId: null, nextId: null }
-        }
-        query = query.in('id', imageIdsToUse)
-      } else if (filteredImageIds.length > 0) {
-        // Other detection filters are active (not hasDetections)
-        query = query.in('id', filteredImageIds)
-      } else {
-        // Other detection filters active but no matches
-        return { prevId: null, nextId: null }
-      }
-    }
-  }
-
-  // Apply photo-level filters
-  if (filters?.status !== undefined) {
-    query = query.eq('detection_status', filters.status)
-  }
-  if (filters?.hasDeer !== undefined) {
-    if (filters.hasDeer) {
-      query = query.not('classification', 'is', null)
-    } else {
-      query = query.is('classification', null)
-    }
-  }
-  if (filters?.cameraId !== undefined) {
-    query = query.eq('camera_id', filters.cameraId)
-  }
-  if (filters?.isArchived !== undefined) {
-    query = query.eq('is_archived', filters.isArchived)
-  }
-  if (filters?.dateFrom !== undefined) {
-    query = query.gte('captured_at', filters.dateFrom)
-  }
-  if (filters?.dateTo !== undefined) {
-    query = query.lte('captured_at', filters.dateTo)
-  }
-  if (filters?.minScore !== undefined) {
-    query = query.gte('best_score', filters.minScore)
-  }
-
-  const { data: photos } = await query
-
-  if (!photos || photos.length === 0) {
+  if (currentError !== null) {
+    // This signature has no error channel, and returning nulls is indistinguishable
+    // from "no neighbours" — which silently dead-ends navigation. Surface it.
+    console.error('getAdjacentPhotos: cursor lookup failed:', currentError)
     return { prevId: null, nextId: null }
   }
 
-  // Find current photo index
-  const currentIndex = photos.findIndex((p: { id: string }) => p.id === currentPhotoId)
-
-  if (currentIndex === -1) {
+  if (!current) {
     return { prevId: null, nextId: null }
   }
 
-  // prev = newer photo (lower index), next = older photo (higher index)
-  const prevId = currentIndex > 0 ? photos[currentIndex - 1]?.id ?? null : null
-  const nextId = currentIndex < photos.length - 1 ? photos[currentIndex + 1]?.id ?? null : null
+  const cursor = current.imported_at
 
-  return { prevId, nextId }
+  // Grid order is (imported_at DESC, id DESC), so prev = newer = a strictly GREATER
+  // key, next = older = a strictly LESS one. Each side is one indexed row, whatever
+  // the account size. The `.or(...)` row-value comparison mirrors the cursor logic
+  // getPhotos already uses.
+  const [prevRes, nextRes] = await Promise.all([
+    buildQuery()
+      .or(`imported_at.gt.${cursor},and(imported_at.eq.${cursor},id.gt.${currentPhotoId})`)
+      .order('imported_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(1),
+    buildQuery()
+      .or(`imported_at.lt.${cursor},and(imported_at.eq.${cursor},id.lt.${currentPhotoId})`)
+      .order('imported_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1),
+  ])
+
+  // Note: neighbours are now resolved from the cursor's POSITION, so a photo that
+  // does not itself match the active filters still navigates into the filtered set.
+  // Previously findIndex missed it and returned nothing, which dead-ended deep links.
+  const result = {
+    prevId: (prevRes.data as Array<{ id: string }> | null)?.[0]?.id ?? null,
+    nextId: (nextRes.data as Array<{ id: string }> | null)?.[0]?.id ?? null,
+  }
+  /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+  return result
 }
 
 /**
@@ -1619,17 +1443,57 @@ export async function updatePhotosLocation(
 
   const supabase = await createClient()
 
-  const { count, error } = await supabase
-    .from('images')
-    .update({ location_id: locationId } as never)
-    .eq('user_id', userId)
-    .in('id', photoIds)
+  // Chunked: a user-sized id set overflows the PostgREST query string.
+  let updated = 0
+  for (const chunk of idChunks(photoIds)) {
+    const { count, error } = await supabase
+      .from('images')
+      .update({ location_id: locationId } as never)
+      .eq('user_id', userId)
+      .in('id', chunk)
 
-  if (error !== null) {
-    return { data: null, error }
+    if (error !== null) {
+      return { data: null, error }
+    }
+    updated += count ?? chunk.length
   }
 
-  return { data: { count: count ?? photoIds.length }, error: null }
+  return { data: { count: updated }, error: null }
+}
+
+/**
+ * Archive multiple photos (bulk operation).
+ *
+ * Lives in the service layer so the archive route stops issuing its own unguarded,
+ * unchunked `.in('id', body.photo_ids)` — it was the one bulk path with neither uuid
+ * validation nor a size bound.
+ */
+export async function archivePhotos(
+  userId: string,
+  photoIds: string[]
+): Promise<{ data: { count: number } | null; error: Error | null }> {
+  if (photoIds.length === 0) {
+    return { data: { count: 0 }, error: null }
+  }
+
+  const supabase = await createClient()
+  let archived = 0
+
+  for (const chunk of idChunks(photoIds)) {
+    const { data, error } = await supabase
+      .from('images')
+      .update({ is_archived: true } as never)
+      .eq('user_id', userId)
+      .in('id', chunk)
+      .select('id')
+
+    if (error !== null) {
+      return { data: null, error }
+    }
+    archived += data?.length ?? 0
+  }
+
+  return { data: { count: archived }, error: null }
 }
 
 /**
@@ -1651,45 +1515,60 @@ export async function deletePhotos(
 
   const supabase = await createClient()
 
-  // 1. Get all file paths before deletion
-  const { data: photos, error: fetchError } = await supabase
-    .from('images')
-    .select('id, file_path, thumbnail_path')
-    .eq('user_id', userId)
-    .in('id', photoIds)
-
-  if (fetchError !== null) {
-    return { data: null, error: fetchError }
-  }
-
-  // 2. Get detection crop paths
-  const { data: detections } = await supabase
-    .from('detections')
-    .select('crop_file_path')
-    .in('image_id', photoIds)
-
-  // 3. Collect all storage paths
+  // Every `.in()` below is chunked: "Select All" now yields the complete id set, and
+  // PostgREST rejects a query string past ~250-500 uuids. Previously the routes capped
+  // the request at 500 instead, which simply refused legitimate selections.
+  const chunks = idChunks(photoIds)
   const storagePaths: string[] = []
-  for (const photo of photos ?? []) {
-    if (photo.file_path) storagePaths.push(photo.file_path)
-    if (photo.thumbnail_path) storagePaths.push(photo.thumbnail_path)
-  }
-  for (const detection of detections ?? []) {
-    if (detection.crop_file_path) storagePaths.push(detection.crop_file_path)
+  let photoCount = 0
+
+  // 1. Collect storage paths BEFORE deleting — the rows are the only way to find
+  //    them (variants and crops live in flat, shared prefixes).
+  for (const chunk of chunks) {
+    const { data: photos, error: fetchError } = await supabase
+      .from('images')
+      .select('id, file_path, thumbnail_path, medium_path')
+      .eq('user_id', userId)
+      .in('id', chunk)
+
+    if (fetchError !== null) {
+      return { data: null, error: fetchError }
+    }
+
+    for (const photo of photos ?? []) {
+      photoCount += 1
+      if (photo.file_path) storagePaths.push(photo.file_path)
+      if (photo.thumbnail_path) storagePaths.push(photo.thumbnail_path)
+      // medium_path was omitted here historically, orphaning every medium variant.
+      if (photo.medium_path) storagePaths.push(photo.medium_path)
+    }
+
+    const { data: detections } = await supabase
+      .from('detections')
+      .select('crop_file_path')
+      .in('image_id', chunk)
+
+    for (const detection of detections ?? []) {
+      if (detection.crop_file_path) storagePaths.push(detection.crop_file_path)
+    }
   }
 
-  // 4. Delete database records (cascades to detections via FK)
-  const { error: deleteError, count } = await supabase
-    .from('images')
-    .delete()
-    .eq('user_id', userId)
-    .in('id', photoIds)
+  // 2. Delete database records (cascades to detections via FK)
+  let count = 0
+  for (const chunk of chunks) {
+    const { error: deleteError, count: chunkCount } = await supabase
+      .from('images')
+      .delete({ count: 'exact' })
+      .eq('user_id', userId)
+      .in('id', chunk)
 
-  if (deleteError !== null) {
-    return { data: null, error: deleteError }
+    if (deleteError !== null) {
+      return { data: null, error: deleteError }
+    }
+    count += chunkCount ?? chunk.length
   }
 
-  // 5. Delete storage files in batches (Supabase limit: 1000 per call)
+  // 3. Delete storage files in batches (Supabase limit: 1000 per call)
   const storageErrors: string[] = []
   const BATCH_SIZE = 1000
 
@@ -1706,7 +1585,7 @@ export async function deletePhotos(
 
   return {
     data: {
-      deletedCount: count ?? photos?.length ?? 0,
+      deletedCount: count || photoCount,
       storageErrors,
     },
     error: null,

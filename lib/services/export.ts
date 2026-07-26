@@ -15,6 +15,8 @@ export interface PhotoForExport {
   bestDetection: {
     sex: string | null
     estimated_point_range: string | null
+    // Generated lower bound (migrations 051/052) — authoritative point count.
+    point_min: number | null
   } | null
   has_deer: boolean | null
 }
@@ -70,7 +72,7 @@ export async function getPhotosForExport(
   // Get best detection for each photo (highest confidence, non-deleted)
   const { data: detections, error: detectionsError } = await supabase
     .from('detections')
-    .select('image_id, sex, estimated_point_range, confidence')
+    .select('image_id, sex, estimated_point_range, point_min, confidence')
     .in('image_id', photoIds)
     .is('deleted_at', null)
     .order('confidence', { ascending: false })
@@ -80,13 +82,14 @@ export async function getPhotosForExport(
   }
 
   // Map best detection per image (first one due to ordering by confidence desc)
-  const bestDetectionMap = new Map<string, { sex: string | null; estimated_point_range: string | null }>()
+  const bestDetectionMap = new Map<string, { sex: string | null; estimated_point_range: string | null; point_min: number | null }>()
 
   for (const detection of detections ?? []) {
     if (!bestDetectionMap.has(detection.image_id)) {
       bestDetectionMap.set(detection.image_id, {
         sex: detection.sex,
         estimated_point_range: detection.estimated_point_range,
+        point_min: detection.point_min,
       })
     }
   }
@@ -143,10 +146,11 @@ export function generateExportFilename(
     const sex = photo.bestDetection.sex?.toLowerCase()
 
     if (sex === 'buck') {
-      // Extract point count from estimated_point_range (e.g., "8-10" -> "8")
-      const pointMatch = photo.bestDetection.estimated_point_range?.match(/(\d+)/)
-      const points = pointMatch ? pointMatch[1] : ''
-      deerPart = `Buck${points}`
+      // Use the generated lower bound (migrations 051/052) rather than re-parsing
+      // the free-text range: a bare /(\d+)/ yields nothing for "spike", "fork" and
+      // "unknown", so those bucks all exported as plain "Buck".
+      const points = photo.bestDetection.point_min
+      deerPart = points != null ? `Buck${points}` : 'Buck'
     } else if (sex === 'doe') {
       deerPart = 'Doe'
     } else if (sex === 'fawn') {
