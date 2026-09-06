@@ -1,3 +1,4 @@
+import { PageHeading } from '@/components/layout/page-heading'
 import { Suspense } from 'react'
 import { TrophyDashboard } from '@/components/trophy/trophy-dashboard'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -7,9 +8,9 @@ export const metadata = {
   description: 'Confirm sightings, name new bucks, and sort trophy detections.',
 }
 
-function DashboardSkeleton() {
+function DashboardSkeleton(): React.JSX.Element {
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-[1180px]">
       <Skeleton className="h-4 w-72" />
       <div className="flex gap-6 border-b border-cream/10 pb-2.5">
         <Skeleton className="h-4 w-24" />
@@ -21,15 +22,10 @@ function DashboardSkeleton() {
   )
 }
 
-export default function TrophyPage() {
+export default function TrophyPage(): React.JSX.Element {
   return (
-    <div className="container mx-auto max-w-[1180px] py-6 px-4">
-      <div className="mb-6">
-        <h1 className="font-display text-3xl font-semibold leading-none text-cream">Review</h1>
-        <p className="mt-2 text-sm text-cream-dark">
-          Confirm sightings, name new bucks, sort the rest.
-        </p>
-      </div>
+    <div className="mx-auto max-w-[1180px]">
+      <PageHeading eyebrow="Connect the sightings" title="Review" description="Confirm suggested matches, name new bucks, and keep your catalog growing." />
       <Suspense fallback={<DashboardSkeleton />}>
         <TrophyDashboard />
       </Suspense>

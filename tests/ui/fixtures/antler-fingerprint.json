@@ -1,0 +1,106 @@
+{
+  "ratios": {
+    "g1_to_g2": 0.44,
+    "g2_to_g3": 1.15,
+    "brow_to_ear": 0.54,
+    "mass_to_beam": 0.18,
+    "beam_symmetry": 0.97,
+    "tine_symmetry": 0.95,
+    "spread_to_beam": 0.76,
+    "tallest_tine_to_ear": 1.26
+  },
+  "scores": {
+    "net_score": 128.1,
+    "deductions": 1.8000000000000007,
+    "gross_score": 129.9,
+    "net_typical": 128.1,
+    "score_class": "120s",
+    "gross_typical": 129.9,
+    "typical_status": "typical",
+    "net_non_typical": 128.1,
+    "abnormal_points_total": 0
+  },
+  "version": "1.0",
+  "features": {
+    "beam_angle": "upright",
+    "beam_curve": "normal",
+    "has_kickers": false,
+    "broken_tines": null,
+    "has_split_g2": false,
+    "kicker_count": 0,
+    "has_drop_tine": false,
+    "split_g2_side": null,
+    "other_features": "Clean 8-point frame with good height",
+    "drop_tine_length": null,
+    "kicker_locations": null,
+    "notable_asymmetry": "Slightly longer G-tines on right side",
+    "drop_tine_location": null,
+    "tine_configuration": "typical"
+  },
+  "confidence": {
+    "overall": 45,
+    "photo_quality": 25,
+    "beam_confidence": 40,
+    "mass_confidence": 35,
+    "tine_confidence": 50,
+    "visibility_score": 40,
+    "spread_confidence": 30,
+    "features_confidence": 60,
+    "point_count_confidence": 70
+  },
+  "model_used": "gpt-4-vision-preview",
+  "calibration": {
+    "angle_impact": 85,
+    "primary_view": "right_profile",
+    "reference_used": "eye_to_nose",
+    "ear_length_inches": 6.75,
+    "ear_spread_inches": 15,
+    "estimated_distance_feet": 25
+  },
+  "generated_at": "2024-05-22T14:30:00Z",
+  "measurements": {
+    "mass": {
+      "left": {
+        "h1": 4.2,
+        "h2": 4,
+        "h3": 3.8,
+        "h4": 3.5
+      },
+      "right": {
+        "h1": 4.3,
+        "h2": 4.1,
+        "h3": 3.9,
+        "h4": 3.6
+      }
+    },
+    "tines": {
+      "left": {
+        "g1": 3.5,
+        "g2": 8.2,
+        "g3": 7.1,
+        "g4": null,
+        "g5": null,
+        "g6": null,
+        "g7": null
+      },
+      "right": {
+        "g1": 3.8,
+        "g2": 8.5,
+        "g3": 7.4,
+        "g4": null,
+        "g5": null,
+        "g6": null,
+        "g7": null
+      }
+    },
+    "total_points": 8,
+    "inside_spread": 16.5,
+    "main_beam_left": 21.5,
+    "main_beam_right": 22,
+    "points_per_side": [
+      4,
+      4
+    ]
+  },
+  "reasoning_trace": "Used eye-to-nose distance (8 inches) as the primary calibration reference because the head is in profile, providing a more stable horizontal scale than the ears which are angled. The image quality is very low (high pixelation and noise), which significantly limits measurement precision. The buck appears to be a clean 4x4 (8-point) typical. The right profile view allows for decent estimation of tine heights on the right side, but the left side is heavily obscured by the right antler and the foreground post. Spread is estimated based on the angle of the main beams relative to the skull. Mass measurements are low-confidence estimates based on the ratio of the beam to the eye diameter. The overall score likely falls in the high 120s to low 130s range."
+}

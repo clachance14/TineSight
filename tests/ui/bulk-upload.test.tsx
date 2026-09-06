@@ -1,0 +1,135 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { BulkUploader } from '@/components/upload/BulkUploader'
+
+const mocks = vi.hoisted(() => ({ prepare: vi.fn(), clear: vi.fn(), hash: vi.fn(), duplicates: vi.fn() }))
+vi.mock('@/lib/hooks/use-locations', () => ({ useLocations: () => ({ data: { locations: [{ id: 'north', name: 'North Pasture', lat: 44, lng: -89 }] } }), useCreateLocation: () => ({ isPending: false }) }))
+vi.mock('@/lib/hooks/use-cameras', () => ({ useCameras: () => ({ data: { cameras: [{ id: 'camera-1', name: 'Creek camera' }] } }) }))
+vi.mock('@/lib/hooks/use-current-user', () => ({ useCurrentUser: () => ({ userId: '' }) }))
+vi.mock('@/lib/hooks/use-realtime-photos', () => ({ useRealtimePhotos: () => ({ isConnected: false }) }))
+vi.mock('@/lib/hooks/use-adaptive-throttle', () => ({ useAdaptiveThrottle: () => ({ stopSession: vi.fn() }) }))
+vi.mock('@/lib/hooks/use-active-batch', () => ({ setActiveUploadSessionId: vi.fn() }))
+vi.mock('@/components/photos/processing-status-bar', () => ({ ProcessingStatusBar: () => null }))
+vi.mock('@/lib/upload/dedup', () => ({ DuplicateChecker: class { checkDuplicates = mocks.duplicates } }))
+vi.mock('@/lib/upload/ExifWorkerPool', () => ({ ExifWorkerPool: class { terminate() {} } }))
+vi.mock('@/lib/upload/preparation', () => ({ readOriginalHash: mocks.hash, recordPreparationFailures: vi.fn() }))
+vi.mock('@/lib/stores/upload', () => ({ useUploadStore: () => ({ clearQueue: mocks.clear, setIsPreparing: mocks.prepare, isUploading: false, completedCount: 0, failedCount: 0, totalCount: 0 }), batchedUpdateProgress: vi.fn() }))
+function setup() {
+  const client = new QueryClient()
+  render(<QueryClientProvider client={client}><BulkUploader /></QueryClientProvider>)
+  return userEvent.setup()
+}
+function selectPhotos() {
+  fireEvent.change(screen.getByLabelText('Choose photo files'), { target: { files: [new File(['one'], 'one.jpg', { type: 'image/jpeg' }), new File(['two'], 'two.jpg', { type: 'image/jpeg' })] } })
+}
+beforeEach(() => { vi.clearAllMocks(); mocks.hash.mockImplementation(() => new Promise(() => {})) })
+describe('photo group upload flow', () => {
+  it('starts with selection and no upload action', () => {
+    setup()
+    expect(screen.getByRole('list', { name: 'Upload steps' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Continue to location/ })).not.toBeInTheDocument()
+  })
+  it('selects a group, chooses a saved location, reviews, then explicitly starts', async () => {
+    const user = setup()
+    selectPhotos()
+    expect(screen.getByText('2 photos selected')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Saved location' }), 'north')
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    expect(screen.getByText('North Pasture', { selector: 'p' })).toBeInTheDocument()
+    expect(mocks.prepare).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Upload 2 photos' }))
+    expect(mocks.prepare).toHaveBeenCalledWith(true)
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing your photos')
+  })
+  it('closing the location dialog retains photos and never starts upload', async () => {
+    const user = setup(); selectPhotos()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.getByText('2 photos selected')).toBeInTheDocument()
+    expect(mocks.prepare).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Continue to location' })).toBeInTheDocument()
+  })
+  it('explicit skip leads to review; changing location can be dismissed safely', async () => {
+    const user = setup(); selectPhotos()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Skip location' }))
+    expect(screen.getByText('No location assigned')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Change location' }))
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.getByRole('button', { name: 'Upload 2 photos' })).toBeInTheDocument()
+    expect(mocks.prepare).not.toHaveBeenCalled()
+  })
+  it('supports per-folder camera and location choices', async () => {
+    const user = setup(); selectPhotos()
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.change(screen.getByLabelText('Camera for Selected files'), { target: { value: 'camera-1' } })
+    fireEvent.change(screen.getByLabelText('Location for Selected files'), { target: { value: '__none__' } })
+    expect(screen.getByLabelText('Camera for Selected files')).toHaveValue('camera-1')
+    expect(screen.getByLabelText('Location for Selected files')).toHaveValue('__none__')
+  })
+  it('clearing resets the group and location review', async () => {
+    const user = setup(); selectPhotos()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Skip location' }))
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(screen.queryByText('2 photos selected')).not.toBeInTheDocument()
+    selectPhotos()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+  it('rejects unsupported files without enabling upload', () => {
+    setup()
+    fireEvent.change(screen.getByLabelText('Choose photo files'), { target: { files: [new File(['text'], 'notes.txt', { type: 'text/plain' })] } })
+    expect(screen.getByText(/No supported image files found/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue to location' })).not.toBeInTheDocument()
+  })
+  it('reports partially rejected groups while keeping supported photos', async () => {
+    const user = setup()
+    fireEvent.change(screen.getByLabelText('Choose photo files'), { target: { files: [new File(['text'], 'notes.txt'), new File(['image'], 'deer.jpg', { type: 'image/jpeg' })] } })
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('1 files skipped')
+    expect(screen.getByText('1 photo selected')).toBeInTheDocument()
+  })
+  it('shows an actionable error when preparation fails', async () => {
+    mocks.hash.mockRejectedValue(new Error('Could not read this photo'))
+    const user = setup(); selectPhotos()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Skip location' }))
+    await user.click(screen.getByRole('button', { name: 'Upload 2 photos' }))
+    expect(await screen.findByText('Upload failed')).toBeInTheDocument()
+    expect(screen.getByText('Could not read this photo')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Try Again' }))
+    expect(screen.getByRole('button', { name: 'Select Files' })).toBeInTheDocument()
+  })
+  it('explains an all-duplicate result and offers photos and a new group', async () => {
+    mocks.hash.mockResolvedValue({ hash: 'existing-hash' })
+    mocks.duplicates.mockResolvedValue({ duplicateCount: 2, existingHashes: ['existing-hash'] })
+    const user = setup(); selectPhotos()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Skip location' }))
+    await user.click(screen.getByRole('button', { name: 'Upload 2 photos' }))
+    expect(await screen.findByText('Already uploaded')).toBeInTheDocument()
+    expect(screen.getByText('All 2 photos already exist.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View photos' })).toHaveAttribute('href', '/photos')
+    await user.click(screen.getByRole('button', { name: 'Upload More' }))
+    expect(screen.queryByText('2 photos selected')).not.toBeInTheDocument()
+  })
+
+  it('opens location selection automatically for a folder', () => {
+    setup()
+    fireEvent.change(screen.getByLabelText('Choose photo folder'), { target: { files: [new File(['photo'], 'deer.jpg', { type: 'image/jpeg' })] } })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(mocks.prepare).not.toHaveBeenCalled()
+  })
+  it('opens location selection automatically for dropped photos', async () => {
+    setup()
+    const file = new File(['photo'], 'deer.jpg', { type: 'image/jpeg' })
+    fireEvent.drop(screen.getByText('Add a camera pull'), { dataTransfer: { items: [{ kind: 'file', getAsFile: () => file }] } })
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(mocks.prepare).not.toHaveBeenCalled()
+  })
+
+})

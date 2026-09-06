@@ -37,7 +37,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     // Get image URL for the detection thumbnail
     const { data: image } = await supabase
       .from('images')
-      .select('file_path, user_id')
+      .select('file_path, medium_path, thumbnail_path, user_id, captured_at')
       .eq('id', detection.image_id)
       .single()
 
@@ -51,11 +51,14 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     }
 
     // Get signed URLs for image and crop in parallel
-    const [imageUrlResult, cropUrlResult] = await Promise.all([
+    const previewPath = image.medium_path !== null && image.medium_path !== '' ? image.medium_path : image.thumbnail_path
+    const [imageUrlResult, cropUrlResult, profileResult, previewUrlResult] = await Promise.all([
       supabase.storage.from('photos').createSignedUrl(image.file_path, 3600),
       detection.crop_file_path
         ? supabase.storage.from('photos').createSignedUrl(detection.crop_file_path, 3600)
         : Promise.resolve({ data: null }),
+      supabase.from('profiles').select('trophy_threshold').eq('id', user.id).single(),
+      previewPath !== null && previewPath !== '' ? supabase.storage.from('photos').createSignedUrl(previewPath, 3600) : Promise.resolve({ data: null }),
     ])
 
     const signedUrl = imageUrlResult.data
@@ -66,6 +69,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       imageId: detection.image_id,
       imageUrl: signedUrl?.signedUrl || null,
       cropUrl,
+      previewUrl: previewUrlResult.data?.signedUrl ?? null,
       bboxX: detection.bbox_x,
       bboxY: detection.bbox_y,
       bboxWidth: detection.bbox_width,
@@ -81,6 +85,11 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       deerId: detection.deer_id,
       createdAt: detection.created_at,
       antlerFingerprint: detection.antler_fingerprint,
+      scoreEstimate: detection.score_estimate,
+      scoreEstimateConfidence: detection.score_estimate_confidence,
+      trophyThreshold: profileResult.error ? null : profileResult.data?.trophy_threshold ?? null,
+      capturedAt: image.captured_at,
+      deerName: detection.deer?.name ?? null,
     })
   } catch (error) {
     console.error('GET detection error:', error)

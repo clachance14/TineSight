@@ -4,78 +4,21 @@ import React, { Suspense, useCallback, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { usePhotosInfinite } from '@/lib/hooks/use-photos'
+import { useActiveProcessingBatch } from '@/lib/hooks/use-active-batch'
+import { useUploadStore } from '@/lib/stores/upload'
+import { ProcessingStatusBar } from '@/components/photos/processing-status-bar'
 import { useAreas } from '@/lib/hooks/use-areas'
 import { useDeerCatalog } from '@/lib/hooks/use-deer'
 import { PhotoGrid } from '@/components/photos/photo-grid'
+import { PhotoTriageGroups } from '@/components/photos/photo-triage-groups'
+import { PhotoTriageToolbar } from '@/components/photos/photo-triage-toolbar'
+import { PhotoSavedViews } from '@/components/photos/photo-saved-views'
 import { PhotoQuickFilters } from '@/components/photos/photo-quick-filters'
-import type { OtherAnimalType, PhotoFilters, PhotoSortField, PhotoSortDirection } from '@/lib/services/photos'
+import type { PhotoFilters } from '@/lib/services/photos'
+import { relativeDateRange } from '@/lib/photos/date-range'
+import { parsePhotoFilters, photoFilterParams } from '@/lib/photos/filters'
 
 type QuickFilters = Omit<PhotoFilters, 'offset'>
-
-// Newest-captured-first by default; the grid virtualizes rows and loads
-// thumbnails only, so a 50-per-page window is safe (ADR 0003).
-const DEFAULT_SORT_BY: PhotoSortField = 'captured_at'
-const DEFAULT_SORT_DIR: PhotoSortDirection = 'desc'
-
-// --- URL <-> filter serialization -------------------------------------------
-// Filters live in the URL query string so a filtered view is refresh-safe,
-// back-button-safe, and shareable (RLS keeps it owner-only — it restores the
-// view, it is not a public share; that is the Showcase's job).
-
-function parseFilters(sp: URLSearchParams): QuickFilters {
-  const f: QuickFilters = { limit: 50, sortBy: DEFAULT_SORT_BY, sortDirection: DEFAULT_SORT_DIR }
-
-  const sex = sp.get('sex')
-  if (sex !== null && sex !== '') f.sex = sex
-
-  const minScore = sp.get('minScore')
-  if (minScore !== null && !Number.isNaN(Number(minScore))) f.minScore = parseInt(minScore, 10)
-
-  const areaNames = sp.get('areaNames')
-  if (areaNames !== null && areaNames !== '') f.areaNames = areaNames.split(',').filter(Boolean)
-
-  const deerId = sp.get('deerId')
-  if (deerId !== null && deerId !== '') f.deerId = deerId
-
-  const dateFrom = sp.get('dateFrom')
-  if (dateFrom !== null && dateFrom !== '') f.dateFrom = dateFrom
-
-  const dateTo = sp.get('dateTo')
-  if (dateTo !== null && dateTo !== '') f.dateTo = dateTo
-
-  const otherAnimals = sp.get('otherAnimals')
-  if (otherAnimals !== null && otherAnimals !== '') {
-    f.otherAnimals = otherAnimals.split(',').filter(Boolean) as OtherAnimalType[]
-  }
-
-  const sortBy = sp.get('sortBy')
-  if (sortBy === 'best_score' || sortBy === 'captured_at' || sortBy === 'imported_at') f.sortBy = sortBy
-
-  const sortDirection = sp.get('sortDirection')
-  if (sortDirection === 'asc' || sortDirection === 'desc') f.sortDirection = sortDirection
-
-  return f
-}
-
-function toQueryString(f: QuickFilters): string {
-  const p = new URLSearchParams()
-  if (f.sex !== undefined) p.set('sex', f.sex)
-  if (f.minScore !== undefined) p.set('minScore', String(f.minScore))
-  if (f.areaNames?.length) p.set('areaNames', f.areaNames.join(','))
-  if (f.deerId !== undefined) p.set('deerId', f.deerId)
-  if (f.dateFrom !== undefined) p.set('dateFrom', f.dateFrom)
-  if (f.dateTo !== undefined) p.set('dateTo', f.dateTo)
-  if (f.otherAnimals?.length) p.set('otherAnimals', f.otherAnimals.join(','))
-
-  // Persist sort only when non-default, to keep shared URLs tidy.
-  const sortBy = f.sortBy ?? DEFAULT_SORT_BY
-  const sortDirection = f.sortDirection ?? DEFAULT_SORT_DIR
-  if (!(sortBy === DEFAULT_SORT_BY && sortDirection === DEFAULT_SORT_DIR)) {
-    p.set('sortBy', sortBy)
-    p.set('sortDirection', sortDirection)
-  }
-  return p.toString()
-}
 
 function PhotosContent(): React.JSX.Element {
   const router = useRouter()
@@ -85,12 +28,30 @@ function PhotosContent(): React.JSX.Element {
   // share all restore the same view. Re-derived per render; react-query hashes
   // the key structurally, so identity churn does not re-fetch.
   const spString = searchParams.toString()
-  const filters = useMemo(() => parseFilters(new URLSearchParams(spString)), [spString])
+  const parsed = useMemo(() => {
+    try {
+      const params = new URLSearchParams(spString)
+      const filters = parsePhotoFilters(params)
+      if (filters.datePreset !== undefined && filters.datePreset !== 'custom') Object.assign(filters, relativeDateRange(filters.datePreset))
+      // Fresh visits surface trophy bucks; an explicit filter/deep link
+      // keeps its requested scope. All photos remains one tap away.
+      if (!params.has('triageView')) filters.triageView = spString === '' ? 'trophy' : 'all'
+      if ((filters.triageView === 'trophy' || filters.triageView === 'priority') && !params.has('sortBy')) filters.sortBy = 'best_score'
+      return { filters: { ...filters, limit: 50 }, error: null }
+    }
+    catch (error) { return { filters: { limit: 50 } as QuickFilters, error: error instanceof Error ? error.message : 'Invalid filters' } }
+  }, [spString])
+  const filters = parsed.filters
+  const { batchId: activeSessionId, isProcessing, isLoading: isUploadStatusLoading } = useActiveProcessingBatch()
+  const isTransferring = useUploadStore(state => state.isPreparing || state.isUploading)
+  const uploadedCount = useUploadStore(state => state.completedCount)
+  const uploadTotal = useUploadStore(state => state.totalCount)
+  const viewingActiveUpload = activeSessionId !== null && filters.uploadSessionId === activeSessionId
 
   const setFilters = useCallback(
     (next: QuickFilters) => {
-      const qs = toQueryString(next)
-      router.replace(qs ? `/photos?${qs}` : '/photos', { scroll: false })
+      const qs = photoFilterParams(next).toString()
+      router.replace(Boolean(qs) ? `/photos?${qs}` : '/photos', { scroll: false })
     },
     [router]
   )
@@ -101,15 +62,17 @@ function PhotosContent(): React.JSX.Element {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = usePhotosInfinite(filters)
+    error,
+    refetch,
+  } = usePhotosInfinite(filters, { enabled: !Boolean(parsed.error), uploadActive: viewingActiveUpload && isTransferring })
 
   // Catalog-wide stats for the header summary (independent of the current filter).
   const { data: statsData } = useQuery({
     queryKey: ['photos', 'stats'],
-    queryFn: async () => {
+    queryFn: async (): Promise<{ total_photos: number; photos_with_deer: number; trophy_threshold: number } | null> => {
       const res = await fetch('/api/photos/stats')
       if (!res.ok) return null
-      return res.json()
+      return await res.json() as { total_photos: number; photos_with_deer: number; trophy_threshold: number }
     },
     staleTime: 5 * 60 * 1000,
   })
@@ -137,48 +100,73 @@ function PhotosContent(): React.JSX.Element {
   )
 
   return (
-    <div className="flex flex-col h-full gap-4">
-      <header>
-        <p className="label-premium text-brass">Catalog</p>
-        <h1 className="heading-display mt-1 text-3xl text-parchment md:text-4xl">Photos</h1>
-        <p className="mt-1.5 text-sm text-weathered">
-          <b className="font-semibold text-parchment-dark">{totalPhotos.toLocaleString()}</b> photos
-          {withDeer > 0 && (
-            <> · <b className="font-semibold text-parchment-dark">{withDeer.toLocaleString()}</b> with deer</>
-          )}
-          {areasCount > 0 && (
-            <> · across <b className="font-semibold text-parchment-dark">{areasCount}</b> {areasCount === 1 ? 'area' : 'areas'}</>
-          )}
-        </p>
+    <div className="flex min-h-full flex-col gap-2">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-forest-light/60 pb-4">
+        <div className="flex min-w-0 items-baseline gap-3">
+          <h1 className="heading-display text-3xl text-parchment">Photos</h1>
+          <p className="hidden text-xs text-weathered sm:block">
+            <span className="font-mono">{totalPhotos.toLocaleString()}</span> photos
+            {withDeer > 0 && <> · <span className="font-mono">{withDeer.toLocaleString()}</span> with deer</>}
+            {areasCount > 0 && <> · <span className="font-mono">{areasCount}</span> areas</>}
+          </p>
+        </div>
+        <PhotoSavedViews filters={filters} onChange={setFilters} />
       </header>
 
-      <PhotoQuickFilters
-        filters={filters}
-        onChange={setFilters}
-        counts={{ all: totalPhotos }}
-        trophyThreshold={trophyThreshold}
-        deerList={deerList}
-        areaList={areaList}
-      />
+      {viewingActiveUpload && <div className="space-y-2">
+        {isTransferring && <p role="status" className="text-sm text-cream-dark">Uploading {uploadedCount.toLocaleString()} of {uploadTotal.toLocaleString()} photos. Photos will appear here as they upload.</p>}
+        <ProcessingStatusBar />
+      </div>}
+
+      {Boolean(parsed.error) && (
+        <div role="alert" className="text-cream-dark">
+          <p>{parsed.error}</p>
+          <button type="button" className="min-h-11 underline" onClick={() => setFilters({})}>Clear invalid filters</button>
+        </div>
+      )}
+
+      <div data-photo-toolbar className="sticky top-[calc(-1*var(--workspace-gutter))] z-30 -mx-[var(--workspace-gutter)] space-y-2 border-b border-forest-light/60 bg-deep-forest px-[var(--workspace-gutter)] py-2 shadow-sm">
+      <PhotoTriageGroups filters={filters} onChange={setFilters} />
+
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+        <PhotoQuickFilters
+          grouped
+          filters={filters}
+          onChange={setFilters}
+          counts={{ all: totalPhotos }}
+          trophyThreshold={trophyThreshold}
+          deerList={deerList}
+          areaList={areaList}
+        />
+
+        <PhotoTriageToolbar filters={filters} visibleIds={photos.map(photo => photo.id)} total={total} />
+      </div>
+      </div>
 
       <PhotoGrid
+        filters={filters}
+        waitingForUpload={viewingActiveUpload && (isTransferring || isProcessing || isUploadStatusLoading)}
+        pendingPhotoCount={uploadTotal > 0 ? uploadTotal : 12}
         externalData={{
           photos,
           total,
           isLoading,
+          error,
+          retry: () => { void refetch() },
           hasNextPage: hasNextPage ?? false,
           isFetchingNextPage,
-          fetchNextPage,
+          fetchNextPage: () => { void fetchNextPage() },
         }}
         onPhotoClick={(id) => {
-          router.push(`/photos/${id}`)
+          const query = photoFilterParams(filters).toString()
+          router.push(`/photos/${id}${Boolean(query) ? `?${query}` : ''}`)
         }}
       />
     </div>
   )
 }
 
-export default function PhotosPage() {
+export default function PhotosPage(): React.JSX.Element {
   return (
     <Suspense fallback={<div className="text-cream-dark">Loading...</div>}>
       <PhotosContent />

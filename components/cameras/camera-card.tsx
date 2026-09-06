@@ -1,63 +1,47 @@
-'use client'
-
-import { cn } from '@/lib/utils'
-import { Camera, ImageIcon } from 'lucide-react'
+import Link from 'next/link'
+import { ArrowUpRight, Camera } from 'lucide-react'
 import type { CameraWithPhotoCount } from '@/lib/services/cameras'
 
-interface CameraCardProps {
+export function CameraCard({
+  camera,
+}: {
   camera: CameraWithPhotoCount
-  onClick?: () => void
-}
-
-export function CameraCard({ camera, onClick }: CameraCardProps) {
-  const { name, make, model, photo_count, created_at } = camera
-
-  // Format created date
-  const createdDate = new Date(created_at).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-
-  // Build make/model display
-  const makeModel = [make, model].filter(Boolean).join(' ')
-
+}): React.JSX.Element {
+  const makeModel = [camera.make, camera.model].filter(Boolean).join(' ')
   return (
-    <div
-      onClick={onClick}
-      className={cn(
-        'group relative overflow-hidden rounded-lg transition-all duration-200',
-        'bg-slate border border-slate-light p-4',
-        'hover:scale-[1.02] hover:shadow-lg hover:shadow-black/20',
-        onClick && 'cursor-pointer'
-      )}
+    <Link
+      href={`/photos?triageView=all&cameraId=${encodeURIComponent(camera.id)}`}
+      className="group rounded-xl border border-forest-light bg-forest/20 p-5 transition-colors hover:border-brass/50 sm:p-6"
     >
-      {/* Camera icon and name */}
-      <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-copper/20 border border-copper/30">
-          <Camera className="h-5 w-5 text-copper" />
-        </div>
+      <div className="flex items-start gap-4">
+        <Camera
+          className="mt-1 size-5 shrink-0 text-brass"
+          aria-hidden="true"
+        />
         <div className="min-w-0 flex-1">
-          <h3 className="font-medium text-cream truncate">{name}</h3>
-          {makeModel && (
-            <p className="text-sm text-cream-dark truncate">{makeModel}</p>
-          )}
+          <h2 className="break-words font-display text-2xl">{camera.name}</h2>
+          <p className="mt-2 text-sm text-weathered">
+            {makeModel.length > 0 ? makeModel : 'Trail camera'}
+          </p>
         </div>
+        <ArrowUpRight
+          className="size-5 shrink-0 text-weathered group-hover:text-brass"
+          aria-hidden="true"
+        />
       </div>
-
-      {/* Stats row */}
-      <div className="mt-4 flex items-center justify-between text-sm">
-        {/* Photo count */}
-        <div className="flex items-center gap-1.5 text-cream-dark">
-          <ImageIcon className="h-4 w-4" />
-          <span>
-            {photo_count} {photo_count === 1 ? 'photo' : 'photos'}
-          </span>
-        </div>
-
-        {/* Created date */}
-        <span className="text-cream-dark/60">{createdDate}</span>
+      <div className="mt-6 flex flex-wrap justify-between gap-3 border-t border-forest-light pt-4">
+        <span className="font-mono text-xs text-brass-light">
+          {camera.photo_count} {camera.photo_count === 1 ? 'photo' : 'photos'}
+        </span>
+        <span className="text-xs text-weathered">
+          Added{' '}
+          {new Date(camera.created_at).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })}
+        </span>
       </div>
-    </div>
+    </Link>
   )
 }

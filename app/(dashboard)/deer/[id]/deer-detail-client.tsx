@@ -131,7 +131,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
   }
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-[1180px] space-y-8">
       {/* ============================ HERO / DOSSIER ========================= */}
       <section className="brass-corners relative overflow-hidden rounded-2xl border border-cream/10 bg-slate">
         {/* Image layer (medium variant only — never full-res, ADR 0003).
@@ -144,7 +144,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center bg-slate">
-            <span className="text-7xl opacity-40">🦌</span>
+            <span className="font-display text-7xl text-weathered/30">{displayDeer.name.slice(0, 1)}</span>
           </div>
         )}
 
@@ -159,7 +159,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
               variant="outline"
               size="icon"
               asChild
-              className="border-cream/20 bg-slate-deep/60 backdrop-blur hover:bg-slate-deep"
+              className="min-h-11 border-cream/20 bg-slate-deep/60 backdrop-blur hover:bg-slate-deep"
             >
               <Link href="/deer" aria-label="Back to catalog">
                 <ArrowLeft className="h-4 w-4" />
@@ -171,7 +171,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
                 variant="outline"
                 size="icon"
                 aria-label="Edit profile"
-                className="border-cream/20 bg-slate-deep/60 backdrop-blur hover:bg-slate-deep"
+                className="min-h-11 border-cream/20 bg-slate-deep/60 backdrop-blur hover:bg-slate-deep"
               >
                 <Pencil className="h-4 w-4" />
               </Button>
@@ -197,7 +197,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
                   <Button
                     onClick={handleSave}
                     disabled={updateDeer.isPending}
-                    className="bg-copper text-white hover:bg-copper-light"
+                    className="min-h-11 border-brass bg-brass/10 text-brass-light hover:bg-brass/20"
                     size="sm"
                   >
                     <Check className="mr-1 h-4 w-4" />
@@ -207,7 +207,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
                     onClick={cancelEditing}
                     disabled={updateDeer.isPending}
                     variant="outline"
-                    className="border-cream/20 bg-slate-deep/60 text-cream backdrop-blur hover:bg-slate-deep"
+                    className="min-h-11 border-cream/20 bg-slate-deep/60 text-cream backdrop-blur hover:bg-slate-deep"
                     size="sm"
                   >
                     <X className="mr-1 h-4 w-4" />
@@ -219,11 +219,11 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
               <>
                 <p className="label-premium text-copper">Buck Profile</p>
                 <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-                  <h1 className="heading-display text-3xl text-cream sm:text-5xl">{displayDeer.name}</h1>
+                  <h1 className="heading-display break-words text-3xl text-cream sm:text-5xl">{displayDeer.name}</h1>
                   {fingerprint && scoreClass && (
                     <div className="flex items-end gap-3">
                       <div className="text-right">
-                        <p className="font-display text-4xl leading-none text-cream tabular-nums sm:text-5xl">
+                        <p className="font-mono text-4xl leading-none text-brass-light tabular-nums sm:text-5xl">
                           {fingerprint.scores.gross_score.toFixed(1)}
                           <span className="text-2xl text-cream-dark">&Prime;</span>
                         </p>
@@ -260,15 +260,15 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
       {/* ================= DATA: side-by-side on desktop, stacked on mobile ==
           Antler Print is a tall, narrow stat panel → right column.
           Sightings (a gallery) wants width → wide left column.
-          On mobile, order puts the Antler Print data ahead of the gallery. */}
+          On mobile, sightings and notes come before antler details. */}
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Antler Print — right column on desktop */}
-        <div className="space-y-6 lg:order-2 lg:col-span-1">
-          <AntlerPrintCard fingerprint={fingerprint} />
+        <div className="order-2 space-y-6 lg:col-span-1">
+          {fingerprint !== null ? <AntlerPrintCard fingerprint={fingerprint} /> : <section className="rounded-xl border border-forest-light bg-forest/20 p-6"><h2 className="font-display text-xl">Antler details</h2><p className="mt-3 text-sm leading-7 text-weathered">An antler profile will appear here when this buck has a completed trophy analysis.</p></section>}
         </div>
 
         {/* Sightings + Notes — wide left column on desktop */}
-        <div className="space-y-6 lg:order-1 lg:col-span-2">
+        <div className="order-1 space-y-6 lg:col-span-2">
           {/* PENDING RE-ID (proposed sightings awaiting confirmation) */}
           <DeerPendingSightings deerId={deerId} deerName={displayDeer.name} />
 
@@ -282,7 +282,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
           {/* SIGHTINGS */}
           <Card>
             <CardHeader>
-              <CardTitle>Sightings</CardTitle>
+              <CardTitle className="font-display text-2xl font-normal">Sightings</CardTitle>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -316,6 +316,7 @@ export function DeerDetailClient({ deerId, initialDeer }: DeerDetailClientProps)
                 <Textarea
                   value={editNotes}
                   onChange={(e) => setEditNotes(e.target.value)}
+                  aria-label="Field notes"
                   placeholder="Add notes about this deer..."
                   className="min-h-[120px] border-cream/20 bg-slate text-cream placeholder:text-cream-dark/50"
                 />

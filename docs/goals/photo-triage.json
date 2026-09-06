@@ -1,0 +1,739 @@
+{
+  "version": 1,
+  "objective": "Reliable high-volume game-camera import and elegant photo triage; complete all September audit findings and recovered intent",
+  "created": "2026-09-05",
+  "state": "complete",
+  "sources": [
+    "docs/audits/2026-09-05-code-audit/README.md",
+    "docs/audits/2026-09-05-code-audit/planning-intent.md",
+    "docs/audits/2026-09-05-code-audit/operator-workflow.md"
+  ],
+  "items": [
+    {
+      "id": "T01",
+      "group": "baseline",
+      "title": "Preserve and verify Claude MIME/init-failure/session-repair handoff",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.792Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:38:34.010058+00:00",
+          "note": "Preserved Claude MIMEextension fallback and initfailure handling verified config/run-outcome tests plus Simple browserfailedzero-image sessiontimestamp. Drew historicalrepair remains attributed to Claude, not independently rerun; upload-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T02",
+      "group": "baseline",
+      "title": "Record all audit requirements, priorities and evidence",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:42:59.380Z",
+          "note": "Audit README and upload/gallery/security reports plus recovered planning intent mapped to all46 durable ledger items."
+        }
+      ]
+    },
+    {
+      "id": "T03",
+      "group": "baseline",
+      "title": "Create isolated 1000-photo browser/API simulation and redacted logs",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:40:26.330Z",
+          "note": "1000 synthetic JPEGs selected in real browser; isolated Next API and HTTP simulator running; upload started."
+        },
+        {
+          "at": "2026-09-05T16:30:58.710Z",
+          "note": "Isolated real Next/browser/SDK simulator, synthetic1000 fixtures, redacted JSONL request logs; production-final-state.json confirms1000completed/40batches/peak5, browser screenshot. Limits explicitly documented in browser-simulation.md."
+        }
+      ]
+    },
+    {
+      "id": "T04",
+      "group": "upload",
+      "title": "Acknowledge durable processing handoff and retry failures",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:38:34.010058+00:00",
+          "note": "Completion requires acknowledgment; actual route lostTriggerresponse repeats stablekey, workerperimageidentity, persistedreadiness and boundedrecovery. transfer/API regressions; upload-completion.md. Hosted recovery scheduling requiresdeployment."
+        }
+      ]
+    },
+    {
+      "id": "T05",
+      "group": "upload",
+      "title": "Process only confirmed original transfers; retry before handoff",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:38:34.010058+00:00",
+          "note": "Transferretry beforehandoff and onlysuccessfulIDs tests; SQL readiness rejects absent/wrong-size originals, no enqueueonerror. FullPGlite currentbudget log and upload-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T06",
+      "group": "upload",
+      "title": "Resume interrupted files without false duplicate skips",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:38:34.010058+00:00",
+          "note": "Confirmedownedcontenthash only, incomplete reservations notduplicates, differentbytes/samename retained;1000reselection browsernonewrows/jobs. Inpage retryreusesreservation/acknowledgedbytes. Afterrefresh localFiles mustbere-selected, no byteoffsetresumeclaim. upload-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T07",
+      "group": "upload",
+      "title": "Bound EXIF worker errors/timeouts and remove unused original decoding",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:50:54.523279+00:00",
+          "note": "Workerpool modulefailure/deadline regressions settlepreparation; no originalthumbnaildecode; unreadableoriginal helper regression preserves readablepeers and marks failedfile explicitly. Latest uploadsuite36pass included preparation case; upload-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T08",
+      "group": "upload",
+      "title": "Use unique storage identity for repeated filenames",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:38:34.010058+00:00",
+          "note": "UUIDstorageidentity plus separatelyretainedbasename; browser1000uniqueoriginalpaths and20fileswithsamebasenames across4camera sources allretained. Hashunit differentcontentnotduplicate. upload-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T09",
+      "group": "upload",
+      "title": "Bound file concurrency across chunks and retries",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:38:34.010058+00:00",
+          "note": "Actual1000transferregression and threebrowserruns peak5filetransfers acrosschunks/retries. Fanoutconfig clamps1..100 separatejobcoordinator. upload-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T10",
+      "group": "upload",
+      "title": "Keep cancellation absorbing across browser, sessions, batches and jobs",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:48:15.419Z",
+          "note": "Browser pending-onlycancel during50\u00d73secPUT: parentcancelled andone25photobatchretained, expectedcleanupjob. Found UXrawAbortError+retryagainstcancelledrun, agentfixing distinctcancelledstate. cancel-ui-before.png/cancel-active-state.json; SQLabsorbingstatus alreadyverified."
+        },
+        {
+          "at": "2026-09-05T16:56:26.445731+00:00",
+          "note": "Final built browser cancel-acceptance.mjs keeps25completed/stops25pending, parentterminal/no lateranalysis, normalUploadcancelled UI/noinvalidretry. ActualSQL cancellation/latefinalize/budget tests and bothstats overloads exclude cancelledchildcounts while retainingcompletedchildren. database-completion.log; cancellationtest39pass."
+        }
+      ]
+    },
+    {
+      "id": "T11",
+      "group": "upload",
+      "title": "Count terminal photo outcomes exactly once across retries",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:38:34.010058+00:00",
+          "note": "ActualPGlite repeats terminalwrites/retrywithdrawal/exhaustedexpiry and counterstaysonce. database-budget-invariants.log. No hostedhigh-contentionbenchmarkclaim. upload-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T12",
+      "group": "upload",
+      "title": "Reclaim stale preview claims with bounded attempts",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:50:54.523279+00:00",
+          "note": "Persisted3claimautomaticbudget/expiryRPC; fullPGlite fourthdenied/terminalonce/clientresetdenied; authorizedmanualretry resets only failedownedwork and preservescompleted/ready peers. Recoveryjob test expiresbeforescan/no failedpreviewreenqueue. Safe failureDTO/UI reasonstested; upload-completion.md/gallery-implementation.md."
+        }
+      ]
+    },
+    {
+      "id": "T13",
+      "group": "upload",
+      "title": "Assign cameras per source and include bulk location mapping",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T15:55:27.515Z",
+          "note": "Browser folder input20photos across4cameras/2locations with repeated basenames: all20retained; per-file camera/source_folder verified;2batches separated by capture location. source-mapping.json and screenshot. Unknown make/model alone unassigned."
+        }
+      ]
+    },
+    {
+      "id": "T14",
+      "group": "upload",
+      "title": "Preserve in-app upload ownership, close-tab warning and dual progress",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:43:21.603Z",
+          "note": "Browser navigation-acceptance.mjs:50fresh originals,2sec PUTdelay; SPAsidebar navigatewhile0processed andreturnstilluploading; all50complete withoutreselect. Active-run/unload/account tests coverguardownership. Browserclosure Filepersistence notclaimed. browser-simulation.md."
+        }
+      ]
+    },
+    {
+      "id": "T15",
+      "group": "upload",
+      "title": "Expose actionable failures and safe recovery for partial runs",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:56:26.445731+00:00",
+          "note": "Bothuploaders/retrypaths retainFiles forinpage retry, reuseacknowledgedbytes; finalSimple2-file initfailure\u2192Retry\u21922complete/no staleerrors browser. Intentionalcancel distinctfromfailure andunfinishedfilesremovedfrominvalidretry; failedprocessingreasonDTO safe. browser-simulation.md/upload-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T16",
+      "group": "gallery",
+      "title": "Consume stable cursor in every query branch including NULL sort values",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:08:23.304Z",
+          "note": "Actual Supabase-builder regressions3sorts\u00d72directions/detection/plain/null/ties; browser20pages1000unique; gallery-implementation.md."
+        }
+      ]
+    },
+    {
+      "id": "T17",
+      "group": "gallery",
+      "title": "Preserve exact filter/sort through grid/detail/back/pager",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Shared normalized predicates/order and actual-service neighbor tests across start/middle/end/null positions; URL roundtrip tests. Browser Enter opens trophy detail preserving triage and sort. gallery-implementation.md; final keyboard pager traversal remains T45."
+        }
+      ]
+    },
+    {
+      "id": "T18",
+      "group": "gallery",
+      "title": "Traverse over 1000 photos with cache/window consistency and retry",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:45:57.475Z",
+          "note": "Real browser+Next:20pages1000uniqueIDs,scroll reaches1000; DOM261/images20. Actual service/TanStack regression98-suite green. Fault/retry recheck remains."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Actual QueryObserver regression retains1250photos/25pages and first-page revisit; browser1000unique/virtualDOM261. Injected real Next/Supabase read503 shows error; Tryagain restores50of400 with same Security filters. browser-simulation.md/gallery-implementation.md."
+        }
+      ]
+    },
+    {
+      "id": "T19",
+      "group": "gallery",
+      "title": "Fix local-day boundaries and custom date selection",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:08:23.304Z",
+          "note": "Local-day/custom/rolling date regressions plus browserLast7days correctAmericaChicago bounds; fixed ranges retained."
+        }
+      ]
+    },
+    {
+      "id": "T20",
+      "group": "gallery",
+      "title": "Expose API errors, loading and filtered-empty separately",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:56:26.445731+00:00",
+          "note": "Invalidfilters/APIerrors propagated; distinctloading/empty/filter-empty/errorstates in source andtests. Builtbrowser image503 showsFailedtoload/Tryagain andindependentRetrycounts; bothrecover sameSecurity scope. FinalPGlite stats removes cancelledpending rows. browser-simulation.md."
+        }
+      ]
+    },
+    {
+      "id": "T21",
+      "group": "gallery",
+      "title": "Refresh independent preview/score/background updates",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:38:34.010058+00:00",
+          "note": "ActualQueryObserver covers pendingvariants/analysis and60ssettled refresh; detailview cache refresh tests and browserpreparing\u2192Zoom withoutreload. Safe terminalreason DTO regressions preserve availablepreview. browser-simulation.md/gallery-implementation.md."
+        }
+      ]
+    },
+    {
+      "id": "T22",
+      "group": "gallery",
+      "title": "Ensure full-set bulk IDs use same filters and no row-limit truncation",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Actual-service full-set scans share list predicates and cover1001/1200/10000 exactmembership,2001sourcebatches without URI blowup. Browser allmatching600 archive/restore despite50loaded. gallery-implementation.md."
+        }
+      ]
+    },
+    {
+      "id": "T23",
+      "group": "gallery",
+      "title": "Remove duplicate unfiltered query and ordinary full-resolution fallback",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "External-data grid disables duplicate query; tests assertdisabled. Current source uses thumbnail grid/medium ordinarydetail, full original explicitonly. Browser1000render bounds documented; gallery-implementation.md."
+        }
+      ]
+    },
+    {
+      "id": "T24",
+      "group": "gallery",
+      "title": "Default archive visibility and reversible archive/restore",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:08:23.304Z",
+          "note": "Browser600empty archive/restore leaves security200/trophy100; explicitarchivefilter preserves triage; SQL/service regression."
+        }
+      ]
+    },
+    {
+      "id": "T25",
+      "group": "gallery",
+      "title": "Reconnect camera/import/status/quality/confidence filters",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:50:54.523279+00:00",
+          "note": "Mounted camera/import/area/Buck/status/quality/confidence/points controls; sharedAPI/detail/pager predicates actualservicetests incl2001sourcebatches andNoArea unions/intersections. Mobilefilterdialog/date/archival scope verified inbrowser; gallery-implementation.md."
+        }
+      ]
+    },
+    {
+      "id": "T26",
+      "group": "gallery",
+      "title": "Reconnect saved views and exact shared filter URLs",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:08:23.304Z",
+          "note": "Browser persisted/reopened Trophy query100matches; rollingweeklypreset storeslast7days without fixedinstants; sharedURL/unit roundtrip."
+        }
+      ]
+    },
+    {
+      "id": "T27",
+      "group": "gallery",
+      "title": "Trophy-first tiers with lower tiers collapsed and security visible",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:08:23.304Z",
+          "note": "059PGlite triggers score/threshold/delete/reparent/securityoverlap and rootbrowser1000counts priority300/trophy100/security200/empty600."
+        }
+      ]
+    },
+    {
+      "id": "T28",
+      "group": "gallery",
+      "title": "Implement stable scoped selection and Keep/Archive/Review later",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Scoped selection with loaded/allmatching, separate keep/review_later/unreviewed state; browser50Keep\u219250ReviewLater,600archive/restore. Full-set APIs samefilters tested. Exact mixed-stateUndo not claimed. gallery-implementation.md."
+        }
+      ]
+    },
+    {
+      "id": "T29",
+      "group": "security",
+      "title": "Enforce detection/Buck and batch/session same-owner DB/API invariants",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Migration054 same-owner invariants and API ownership guards; actualPGlite foreignreferences denied/ownaccepted, matchingAPI unauthorized and failedwrites regressions. security-completion.md. Local verification; live rollout trackedT32."
+        }
+      ]
+    },
+    {
+      "id": "T30",
+      "group": "security",
+      "title": "Validate storage paths before privileged signing",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Path validation before privileged signing, worker-managedcrop pointers, Showcase ownedpath derivation and account-partitionedcache. PGlite traversal/foreignpaths/cropimmutability and realcache regressions. LegacycropUUIDcompatibility explicit; security-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T31",
+      "group": "security",
+      "title": "Clear account-scoped client state and requests on auth changes",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:49:07.345Z",
+          "note": "Six realQueryClient/QueryObserver boundary regressions cover firstauth, accountswap abort/latecallbacks, identityremount and sametokenrefresh; active-run/store/cache accountpartition tests. BrowserSignOut removesprivateuploadscreen andnavigates/login; signed-out.txt. Twoaccount renderer swap notseparatelybrowseremulated; security-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T32",
+      "group": "security",
+      "title": "Recheck live grant assumptions safely and record migration/deploy requirements",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "External validation dependency: matched-app read-only connection failed trustedTLS SELF_SIGNED_CERT_IN_CHAIN; availableconnector targetsdifferentproject. No liveSQLexecuted. Correctproject trustedconnection needed for grants/migrationledger checks. Rollout sequence and verification in security-completion.md; localwork continues."
+        },
+        {
+          "at": "2026-09-05T16:39:25.871Z",
+          "note": "Resolved TLS safely usingofficialSupabaseCA oververifiedHTTPS, scoped NodeextraCA and hostnameverification; matchedapp BEGINREADONLY/ROLLBACK metadata inspection succeeded. live-readonly-metadata.json: deployedlatest053,6tables RLSon/authUPDATE,24source-ownerpolicies,6definerRPC ACLs authtrue/anonfalse, claimRPCabsent. No livewrites; migrations054\u2013061 and coherentapp/worker rollout remain required. security-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T33",
+      "group": "background",
+      "title": "Worker-safe export services and streaming backpressure",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Real26MiB archiver regression confirms immediate boundedtemp spool and streaming storage; unknown-byteoverflowreject and cleanup. Worker explicitadmincontext. Both small and large exports now bounded; security-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T34",
+      "group": "background",
+      "title": "Export boundaries/progress/failure/download correctness",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Actual route25ZIPentries/26and500jobs/501reject; missingoriginal route red200\u2192green500 and worker falsecomplete red\u2192failed; size preflight/runtimeguard and progressDTO tests. security-completion.md; hosteddownload notclaimed."
+        }
+      ]
+    },
+    {
+      "id": "T35",
+      "group": "background",
+      "title": "Fix candidate merge counts and partial split visibility",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Actual service exact HEADmergecount and partialsplit representative/status regressions; gallery numericmembership tests. Concurrent multioperator atomicity notverified/claimed; security-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T36",
+      "group": "background",
+      "title": "Complete numeric Score read-side semantics",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Migration061 authoritative gross/threshold flag, fingerprint/trophy/cluster/statsreaders; conflictingimpression/forgedflag/threshold/foreignstats PGlite assertions and reader eligibilityredgreen. gallery-implementation.md/security-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T37",
+      "group": "background",
+      "title": "Gemini configurable supported models, retry-after/backoff, timeouts and cost limits",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:34:25.348212+00:00",
+          "note": "Deterministic structured429/503 RetryAfter/RetryInfo, abortdeadline/totalbudget, model/fallback and1000jobs<=3000attempt regressions; boundedsharedqueue config. security-completion.md. These bound retries/concurrency, not verified live quota or dollarbudget."
+        },
+        {
+          "at": "2026-09-05T16:34:59.793Z",
+          "note": "Clarification:3000attempt fixture is1000single-modeljobs at3attempts each; optional configuredfallback doubles totaldefault exposure to6000, configurablemax10000. Bound retries/concurrency, not a cashbudget/livequota. security-completion.md latest combined35tests pass."
+        }
+      ]
+    },
+    {
+      "id": "T38",
+      "group": "background",
+      "title": "Trigger batching, payload/queue/concurrency/idempotency limits and terminal failures",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:50:54.523279+00:00",
+          "note": "Actualroute validation/lostack stableidentity,25client/100APIchunks, boundedfanout1..100, paidqueue config, perphoto idempotency, persisted3claim automaticbudget withownerexplicitmanualreset. RealSQLandroute/job regressions. HostedTrigger scheduler/quotas/deployment require rollout; upload-completion.md/security-completion.md."
+        }
+      ]
+    },
+    {
+      "id": "T39",
+      "group": "ux_capacity",
+      "title": "Test desktop and mobile triage with screenshots and interaction logs",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:53:43.793Z",
+          "note": "Implementation or verification underway in coordinated upload/gallery/security/root workstreams; completion requires item-specific final evidence."
+        },
+        {
+          "at": "2026-09-05T16:50:54.523279+00:00",
+          "note": "Desktop1280/mobile390 builtUI screenshots and interactions:1000upload, virtualgrid, triage/archive/review/savedviews/mobilefilterSheet, keyboard/detail/swipe andactive50uploadnavigation. browser-simulation.md and scripts/triage-sim/*acceptance.mjs. Synthetic browser viewport/touch, notphysicaldevice benchmark."
+        }
+      ]
+    },
+    {
+      "id": "T40",
+      "group": "ux_capacity",
+      "title": "Inject init/transfer/handoff/worker/429/503/timeout/auth/refresh/cancel failures",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:51:06.627Z",
+          "note": "Browser:3storage503 recover in1000\u00d72.44MB run; Simple init failure3files visible no navigation. Real-route harness21tests covers init/handoff/cancel; final matrix after hashing remains."
+        },
+        {
+          "at": "2026-09-05T16:56:26.445731+00:00",
+          "note": "Executed documentedmultilayerfaultmatrix:actualbrowser init400, storage503large1000, explicitretry, SPAownership,cancelmidtransfer, logout; actualroute losthandoff response; workerpoolfailure/deadline, transfer429/timeoutexhaustion; QueryObserveraccount/latecallbacks; PGlite missingbytes/cancellation/latewrites/lifetimebudget/manualretry. upload-completion.md labels syntheticadapters vsbrowser/SQL; no claimallfaultsalllayers orliveproviderstress."
+        }
+      ]
+    },
+    {
+      "id": "T41",
+      "group": "ux_capacity",
+      "title": "Measure 1000-photo latency, unique outcomes, request concurrency and memory/DOM",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T15:42:59.461Z",
+          "note": "Browser baseline:1000 small synthetic JPEGs,40batches,40handoffs,max5transfers,1000 completed and3000 stored objects; latency6.6s fixture-only. Large-byte/network/memory tests remain."
+        },
+        {
+          "at": "2026-09-05T16:30:58.739Z",
+          "note": "Measured count baseline6.6s, 2.439GB run12.918s with3recovered503s, peak5transfers; 1000unique API IDs, final DOM261/images20; post-run heap26MB is not peak. Production final1000 run5.133s. Loopback measurements, not remote capacity claims; browser-simulation.md and ignored raw artifacts."
+        }
+      ]
+    },
+    {
+      "id": "T42",
+      "group": "ux_capacity",
+      "title": "Probe 1001/1200/10000 metadata limits, URI sizes and null/tied cursor ordering",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T16:31:44.721Z",
+          "note": "Actual service metadata regressions1001/1200/10000 exact ascending/descending order with nulls and ties against independent oracle; full IDs same set, pages<=100, maxURI376bytes; source2001batches exact4requests/361bytes. Service33 and gallery48pass. gallery-implementation.md details scope and mutable-sort/production performance limits."
+        }
+      ]
+    },
+    {
+      "id": "T43",
+      "group": "ux_capacity",
+      "title": "Review event/burst grouping with all-frame preservation and explicit bulk scope",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T16:00:04.504Z",
+          "note": "events-and-investigations.md reviews event boundaries, full-frame preservation, explicit selection scopes, uncertain/security frames and human Buck identity; clearly separates unimplemented new proposals."
+        }
+      ]
+    },
+    {
+      "id": "T44",
+      "group": "ux_capacity",
+      "title": "Assess saved relative views, camera comparisons and time/location/quality data prerequisites",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T16:04:29.950Z",
+          "note": "events-and-investigations.md assesses rolling/fixed views, camera comparisons, timezone/clock/solar and location/quality prerequisites. Browser preset API confirms rollinglast7days stored without frozeninstants; comparisons/daylight remain explicitly unimplemented new proposals."
+        }
+      ]
+    },
+    {
+      "id": "T45",
+      "group": "ux_capacity",
+      "title": "Validate keyboard/touch accessibility and filter consistency end to end",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T16:43:21.629Z",
+          "note": "keyboard-acceptance.mjs passed realbuiltUI:Enteropen, namedBack/Prev/Next/Delete, Next/Back scopepreserved;390px mobile44px tapalternatives andsyntheticTouchEvent swipe retainsfilters; offscreen slidesinert. Priorbottomsheet fits390x844. Physicaldevice/assistivetech fullaudit notclaimed. keyboard-acceptance.json/screenshot."
+        }
+      ]
+    },
+    {
+      "id": "T46",
+      "group": "ux_capacity",
+      "title": "Run unit/integration/type/build and changed-code lint; reconcile all audit items",
+      "status": "done",
+      "evidence": [
+        {
+          "at": "2026-09-05T16:56:26.445731+00:00",
+          "note": "Completion audit reconciledall46items withitem-specificevidence and completion-review.md. Latestcombinedgate2026-09-05T16-51-29.968Z all4exit0:162tests/type/build/changedlint. SubsequentSQL-onlycancelcountfix fullcurrentPGlite exit0 database-completion.log. Changedwhitespace/syntaxchecks pass; known429baseline lint andexternaledits disclosed. Rollout/livequota/physicaldevice limits documented withoutproductioncompletion claim."
+        }
+      ]
+    }
+  ],
+  "completed": "2026-09-05T16:56:26.445731+00:00",
+  "completion_report": "docs/audits/2026-09-05-code-audit/completion-review.md"
+}

@@ -331,3 +331,35 @@
     inset 0 0 0 1px rgba(200, 165, 92, 0.2),
     0 0 0 1px rgba(0, 0, 0, 0.1);
 }
+
+/* Shared access and touch behavior across the public and signed-in screens. */
+@layer base {
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--color-brass-light);
+    outline-offset: 3px;
+  }
+  @media (pointer: coarse) {
+    [data-slot="button"], [data-slot="tabs-trigger"], [data-slot="select-trigger"],
+    [data-slot="dropdown-menu-item"] { min-height: 44px; }
+    [data-slot="input"], [data-slot="textarea"] { font-size: 16px; }
+    [data-slot="input"] { min-height: 48px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* The property map owns the viewport; its places panel scrolls independently. */
+main:has([data-map-workspace]) {
+  overflow: hidden;
+  padding: 0;
+  padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+}
+@media (min-width: 1024px) {
+  main:has([data-map-workspace]) { padding-bottom: 0; }
+}

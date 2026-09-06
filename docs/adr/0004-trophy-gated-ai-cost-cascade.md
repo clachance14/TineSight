@@ -97,3 +97,25 @@ Settled invariants:
 - **Reversibility:** Thresholds and band width are cheap to tune. The cascade
   *shape* (three tiers, authoritative fingerprint, auto re-ID) is harder to
   unwind once Photos are processed against it.
+
+## Amendment — 2026-09-05
+
+Automatic upload fingerprint generation now requires an estimated gross score of
+**140 inches or higher**, after the existing coarse cut. This fixed cutoff replaces
+the threshold-minus-10 confirm band for automatic uploads. The account trophy
+threshold still governs the final trophy designation. Creating a named deer or
+changing its reference detection can still trigger a fingerprint independently.
+
+## Amendment — 2026-09-05 (authority lives in the database)
+
+The trophy decision is made in exactly one place: the `detection_numeric_trophy`
+trigger (migration 061) derives `detections.is_trophy` from the stored integer
+`score_gross` and `profiles.trophy_threshold` on every write, and the photo tier
+(`derive_photo_triage`, also redefined in 061) reads that flag instead of
+re-applying the threshold. A threshold change refreshes the flags, and the
+detection trigger cascades the change into tiers; 059's separate threshold sweep is
+gone. The fingerprint worker no longer computes or writes `is_trophy`, and
+`lib/scoring/gates.ts#isTrophyScore` is a preview helper that rounds first so it
+agrees with the integer predicate. Trade-off accepted: a threshold change costs one
+tier derivation per detection rather than one per photo, in exchange for a single
+predicate that cannot drift.

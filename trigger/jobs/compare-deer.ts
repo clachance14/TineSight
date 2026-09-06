@@ -1,3 +1,5 @@
+import { withGeminiUsageContext } from "@/lib/gemini/usage";
+import { GEMINI_TASK_QUEUE } from "@/lib/gemini/capacity";
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { compareDeers as compareWithGemini } from "@/lib/gemini/client";
@@ -18,7 +20,7 @@ interface CompareDeerPayload {
 
 export const compareDeer = task({
   id: "compare-deer",
-  queue: { concurrencyLimit: 5 },
+  queue: GEMINI_TASK_QUEUE,
   retry: { maxAttempts: 2, factor: 2, minTimeoutInMs: 1000, maxTimeoutInMs: 10000 },
   run: async (payload: CompareDeerPayload) => {
     const { detectionId, catalogDeer } = payload;
@@ -152,11 +154,11 @@ export const compareDeer = task({
       });
 
       // Call Gemini for comparison with base64 images
-      const result = await compareWithGemini(
+      const result = await withGeminiUsageContext({ imageId: detection.image_id, detectionId }, () => compareWithGemini(
         detectionBase64,
         detectionMimeType,
         catalogDeerWithImages
-      );
+      ));
 
       logger.info("Gemini comparison complete", {
         detectionId,

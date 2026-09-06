@@ -52,7 +52,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         bbox_height: number | null
       }
       // Medium variant for the bbox-zoomed reference, never the full-res original.
-      referenceImageUrl = await getCachedSignedUrl(imageData.images.medium_path ?? imageData.images.file_path)
+      referenceImageUrl = await getCachedSignedUrl(imageData.images.medium_path ?? imageData.images.file_path, user.id)
       referenceBbox = {
         x: imageData.bbox_x,
         y: imageData.bbox_y,
@@ -94,8 +94,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   // Get signed URLs for sightings - CACHED batch operation. Sightings render as
   // small grid thumbnails, so prefer the thumbnail variant, then medium, never
   // the full-res original (ADR 0003 budget).
-  const sightingFilePaths = (sightings || []).map((s: any) => s.images.thumbnail_path ?? s.images.medium_path ?? s.images.file_path)
-  const cachedUrls = await getCachedSignedUrls(sightingFilePaths)
+  const sightingFilePaths = (sightings ?? []).map((s) => s.images.thumbnail_path ?? s.images.medium_path ?? s.images.file_path)
+  const cachedUrls = await getCachedSignedUrls(sightingFilePaths, user.id)
 
   const sightingsWithUrls = (sightings || []).map((sighting: any, index: number) => ({
     id: sighting.id,

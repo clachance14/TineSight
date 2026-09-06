@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactElement } from 'react'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,17 +13,37 @@ import { useDeerCatalog } from '@/lib/hooks/use-deer'
 
 interface DeerProfileDropdownProps {
   onSelect: (deerId: string) => void
+  onCreate?: () => void
+  inModal?: boolean
   disabled?: boolean
 }
 
 export function DeerProfileDropdown({
   onSelect,
+  onCreate,
+  inModal = false,
   disabled = false,
-}: DeerProfileDropdownProps) {
+}: DeerProfileDropdownProps): ReactElement {
   const { data, isLoading, error } = useDeerCatalog()
   const deer = data?.deer ?? []
 
-  const isDisabled = disabled || isLoading || error !== null
+  const isDisabled = disabled || (onCreate === undefined && (isLoading || error !== null))
+
+  // A native picker stays inside the parent dialog's focus boundary.
+  if (inModal) return (
+    <select aria-label={onCreate !== undefined ? 'Identify deer' : 'Add to existing deer'} value="" disabled={isDisabled}
+      className="min-h-11 max-w-full rounded-md border border-brass/50 bg-brass px-3 text-sm font-medium text-deep-forest"
+      onChange={event => {
+        if (event.target.value === '__create__') onCreate?.()
+        else if (event.target.value !== '') onSelect(event.target.value)
+      }}>
+      <option value="" disabled>{onCreate !== undefined ? 'Identify deer' : 'Add to existing deer'}</option>
+      {onCreate !== undefined && <option value="__create__">Create new deer profile</option>}
+      {isLoading && <option disabled>Loading existing deer…</option>}
+      {error !== null && <option disabled>Existing deer unavailable</option>}
+      {deer.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+    </select>
+  )
 
   return (
     <DropdownMenu>
@@ -32,7 +53,7 @@ export function DeerProfileDropdown({
           className="gap-2"
           disabled={isDisabled}
         >
-          {isLoading ? (
+          {onCreate !== undefined ? <>Identify deer<ChevronDown className="h-4 w-4 opacity-50" /></> : isLoading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading...
@@ -46,6 +67,7 @@ export function DeerProfileDropdown({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
+        {onCreate !== undefined && <DropdownMenuItem className="min-h-11" onSelect={onCreate}>Create new deer profile</DropdownMenuItem>}
         {deer.length === 0 ? (
           <div className="px-2 py-6 text-center text-sm text-muted-foreground">
             {error ? 'Failed to load profiles' : 'No profiles yet'}
@@ -59,7 +81,7 @@ export function DeerProfileDropdown({
             >
               {/* Thumbnail */}
               <div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded bg-slate">
-                {profile.reference_image_url ? (
+                {profile.reference_image_url !== null && profile.reference_image_url !== '' ? (
                   <img
                     src={profile.reference_image_url}
                     alt={profile.name}

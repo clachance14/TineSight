@@ -1,4 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type GenerateContentParameters, type GenerateContentResponse } from "@google/genai";
+import { createUsageRecorder, usageTokens, type TokenCounts } from "./usage";
+import { withRetry as retryGemini, isModelUnavailable } from "./retry";
+import { modelChain, GEMINI_TIMEOUT_MS, GEMINI_MAX_ATTEMPTS } from "./capacity";
 import { analysisSchema, comparisonSchema, detectionOnlySchema, deerAnalysisSchema, antlerFingerprintSchema, scoreEstimateSchema, type AnalysisResult, type ComparisonResult, type DetectionOnlyResult, type DeerAnalysisResult, type AntlerFingerprintResult, type ScoreEstimateResult } from "./types";
 import { PHOTO_ANALYSIS_PROMPT, buildComparisonPromptWithCatalog, DEER_CLASSIFICATION_PROMPT, DETECTION_ONLY_PROMPT, DEER_ANALYSIS_PROMPT, ANTLER_FINGERPRINT_PROMPT, SCORE_ESTIMATE_PROMPT } from "./prompts";
 import { DETECTION_SCHEMA, CLASSIFICATION_SCHEMA, COMPARISON_SCHEMA, ANALYSIS_SCHEMA, DEER_ANALYSIS_SCHEMA, ANTLER_FINGERPRINT_SCHEMA, SCORE_ESTIMATE_SCHEMA } from "./schemas";
@@ -7,6 +10,7 @@ import { DETECTION_SCHEMA, CLASSIFICATION_SCHEMA, COMPARISON_SCHEMA, ANALYSIS_SC
  * Metrics captured from a Gemini API call
  */
 export interface GeminiMetrics {
+  tokenBreakdown?: TokenCounts;
   promptTokens: number;
   responseTokens: number;
   totalTokens: number;
@@ -27,99 +31,38 @@ function getGeminiClient(): GoogleGenAI {
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY environment variable is not set");
     }
-    geminiClient = new GoogleGenAI({ apiKey });
+    geminiClient = new GoogleGenAI({ apiKey, httpOptions: { timeout: GEMINI_TIMEOUT_MS } });
   }
   return geminiClient;
 }
 
-/**
- * Retry configuration for Gemini API calls
- */
-const RETRY_CONFIG = {
-  maxAttempts: 3,
-  initialDelayMs: 1000,
-  backoffMultiplier: 2,
-};
-
-/**
- * Primary Gemini model - configurable via environment variable
- * Options: gemini-3-flash-preview (better accuracy, 67% more expensive)
- *          gemini-2.5-flash (default, good balance)
- */
-const PRIMARY_MODEL = process.env['GEMINI_MODEL'] || "gemini-2.5-flash";
-
-/**
- * Model fallback chain - try these in order if primary is overloaded
- */
-const MODEL_FALLBACK_CHAIN = [
-  PRIMARY_MODEL,
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-].filter((v, i, a) => a.indexOf(v) === i); // Dedupe if primary is already in list
-
-/**
- * Model for Stage 1 detection (bounding boxes)
- */
-const DETECTION_MODEL = PRIMARY_MODEL;
-
-/**
- * Result from withRetry including retry metrics
- */
-interface RetryResult<T> {
-  result: T;
-  retryCount: number;
-  wasRateLimited: boolean;
+// One recorder per logical operation; each transport attempt gets its own event.
+function getMeteredGeminiClient(operation: string): { models: { generateContent: (params: GenerateContentParameters) => Promise<GenerateContentResponse> } } {
+  const ai = getGeminiClient();
+  const record = createUsageRecorder(operation);
+  return { models: { generateContent: (params: GenerateContentParameters) =>
+    record(params.model, () => ai.models.generateContent(params)) } };
 }
 
-/**
- * Exponential backoff retry wrapper with metrics tracking
- */
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  attemptNumber: number = 1,
-  rateLimitHit: boolean = false
-): Promise<RetryResult<T>> {
-  try {
-    const result = await fn();
-    return {
-      result,
-      retryCount: attemptNumber - 1,
-      wasRateLimited: rateLimitHit
-    };
-  } catch (error) {
-    if (attemptNumber >= RETRY_CONFIG.maxAttempts) {
-      throw error;
+// Keep the existing calibrated model by default. Fallbacks are explicit, bounded,
+// and may not include retired Gemini 1.5/2.0 endpoints.
+const PRIMARY_MODEL = process.env['GEMINI_MODEL'] || "gemini-2.5-flash";
+const MODEL_FALLBACK_CHAIN = modelChain(PRIMARY_MODEL, process.env['GEMINI_FALLBACK_MODELS']);
+const DETECTION_MODEL = PRIMARY_MODEL;
+// Fingerprint model is configured independently from upload detection/classification.
+const FINGERPRINT_MODEL_CHAIN = modelChain(process.env['GEMINI_FINGERPRINT_MODEL']?.trim() || "gemini-3.8-flash");
+function withRetry<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<{ result: T; retryCount: number; wasRateLimited: boolean }> {
+  return retryGemini(fn, { timeoutMs: GEMINI_TIMEOUT_MS, maxAttempts: GEMINI_MAX_ATTEMPTS });
+}
+
+async function withModelRetry<T>(fn: (model: string, signal: AbortSignal) => Promise<T>): Promise<{ result: T; retryCount: number; wasRateLimited: boolean; model: string }> {
+  for (const model of MODEL_FALLBACK_CHAIN) {
+    try { return { ...await withRetry(signal => fn(model, signal)), model }; }
+    catch (error) {
+      if (!isModelUnavailable(error) || model === MODEL_FALLBACK_CHAIN.at(-1)) throw error;
     }
-
-    // Check if error is retryable (rate limit, network error, etc.)
-    const isRateLimit =
-      error instanceof Error &&
-      (error.message.includes("rate limit") ||
-       error.message.includes("429"));
-
-    const isRetryable =
-      isRateLimit ||
-      (error instanceof Error &&
-        (error.message.includes("timeout") ||
-         error.message.includes("network") ||
-         error.message.includes("503")));
-
-    if (!isRetryable) {
-      throw error;
-    }
-
-    // Track if we hit a rate limit
-    const hitRateLimit = rateLimitHit || isRateLimit;
-
-    // Calculate delay with exponential backoff
-    const delay = RETRY_CONFIG.initialDelayMs * Math.pow(RETRY_CONFIG.backoffMultiplier, attemptNumber - 1);
-
-    console.log(`Retry attempt ${attemptNumber}/${RETRY_CONFIG.maxAttempts} after ${delay}ms delay${isRateLimit ? ' (rate limited)' : ''}`);
-    await new Promise(resolve => setTimeout(resolve, delay));
-
-    return withRetry(fn, attemptNumber + 1, hitRateLimit);
   }
+  throw new Error("No Gemini model configured");
 }
 
 /**
@@ -144,13 +87,13 @@ export async function detectDeer(
   imageBase64: string,
   mimeType: string
 ): Promise<DetectDeerResult> {
-  const ai = getGeminiClient();
+  const ai = getMeteredGeminiClient("detection");
   const startTime = Date.now();
 
   console.log(`Using model for detection: ${DETECTION_MODEL}`);
-  const { result, retryCount, wasRateLimited } = await withRetry(async () => {
+  const { result, retryCount, wasRateLimited, model } = await withModelRetry(async (model, signal) => {
     const response = await ai.models.generateContent({
-      model: DETECTION_MODEL,
+      model,
       contents: [
         {
           parts: [
@@ -160,6 +103,7 @@ export async function detectDeer(
         }
       ],
       config: {
+        abortSignal: signal,
         responseMimeType: "application/json",
         responseSchema: DETECTION_SCHEMA,
         temperature: 0.1,
@@ -185,8 +129,8 @@ export async function detectDeer(
   const totalTokens = result.usageMetadata?.totalTokenCount ?? 0;
 
   // Debug: Log raw Gemini response and token usage
-  console.log(`Gemini (${DETECTION_MODEL}) detection response:`, JSON.stringify(parsed, null, 2));
-  console.log(`Gemini (${DETECTION_MODEL}) token usage:`, {
+  console.log(`Gemini (${model}) detection response:`, JSON.stringify(parsed, null, 2));
+  console.log(`Gemini (${model}) token usage:`, {
     promptTokens,
     responseTokens,
     totalTokens,
@@ -200,7 +144,7 @@ export async function detectDeer(
       promptTokens,
       responseTokens,
       totalTokens,
-      modelUsed: DETECTION_MODEL,
+      modelUsed: model,
       wasRateLimited,
       retryCount,
       durationMs,
@@ -219,7 +163,7 @@ export async function analyzePhoto(
   imageBase64: string,
   mimeType: string
 ): Promise<AnalysisResult> {
-  const ai = getGeminiClient();
+  const ai = getMeteredGeminiClient("photo_analysis");
 
   // Try each model in the fallback chain until one succeeds
   let lastError: Error | null = null;
@@ -227,7 +171,7 @@ export async function analyzePhoto(
   for (const model of MODEL_FALLBACK_CHAIN) {
     try {
       console.log(`Trying model: ${model}`);
-      const { result: response } = await withRetry(async () => {
+      const { result: response } = await withRetry(async (signal) => {
         const resp = await ai.models.generateContent({
           model,
           contents: [
@@ -239,6 +183,7 @@ export async function analyzePhoto(
             }
           ],
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
             responseSchema: ANALYSIS_SCHEMA,
             temperature: 0.1,
@@ -264,9 +209,7 @@ export async function analyzePhoto(
 
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      const isOverloaded = lastError.message.includes("503") ||
-                           lastError.message.includes("overloaded") ||
-                           lastError.message.includes("UNAVAILABLE");
+      const isOverloaded = isModelUnavailable(error);
 
       if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
         console.log(`Model ${model} overloaded, trying next fallback...`);
@@ -300,7 +243,7 @@ export async function compareDeers(
     referenceImageMimeType: string;
   }>
 ): Promise<ComparisonResult> {
-  const ai = getGeminiClient();
+  const ai = getMeteredGeminiClient("comparison");
 
   if (catalogDeer.length === 0) {
     throw new Error("Cannot compare deer: catalog is empty");
@@ -330,11 +273,12 @@ export async function compareDeers(
   for (const model of MODEL_FALLBACK_CHAIN) {
     try {
       console.log(`Trying model for comparison: ${model}`);
-      const { result: response } = await withRetry(async () => {
+      const { result: response } = await withRetry(async (signal) => {
         return await ai.models.generateContent({
           model,
           contents,
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
             responseSchema: COMPARISON_SCHEMA,
             temperature: 0.1,
@@ -354,9 +298,7 @@ export async function compareDeers(
       return validated;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      const isOverloaded = lastError.message.includes("503") ||
-                           lastError.message.includes("overloaded") ||
-                           lastError.message.includes("UNAVAILABLE");
+      const isOverloaded = isModelUnavailable(error);
 
       if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
         console.log(`Model ${model} overloaded for comparison, trying next fallback...`);
@@ -378,14 +320,15 @@ export async function compareDeers(
  * @returns true if API key is valid, throws error otherwise
  */
 export async function validateGeminiClient(): Promise<boolean> {
-  const ai = getGeminiClient();
+  const ai = getMeteredGeminiClient("validation");
 
   try {
     // Make a minimal API call to verify credentials
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+    const { result: response } = await withRetry(signal => ai.models.generateContent({
+      model: PRIMARY_MODEL,
       contents: [{ parts: [{ text: "Hello" }] }],
-    });
+      config: { abortSignal: signal },
+    }));
 
     return !!response.text;
   } catch (error) {
@@ -427,7 +370,7 @@ export async function classifyDeerCrop(
   cropBase64: string,
   mimeType: string
 ): Promise<ClassifyDeerResult> {
-  const ai = getGeminiClient();
+  const ai = getMeteredGeminiClient("classification");
   const startTime = Date.now();
 
   // Try each model in the fallback chain
@@ -437,7 +380,7 @@ export async function classifyDeerCrop(
 
   for (const model of MODEL_FALLBACK_CHAIN) {
     try {
-      const { result: response, retryCount, wasRateLimited: rateLimited } = await withRetry(async () => {
+      const { result: response, retryCount, wasRateLimited: rateLimited } = await withRetry(async (signal) => {
         return await ai.models.generateContent({
           model,
           contents: [
@@ -449,6 +392,7 @@ export async function classifyDeerCrop(
             }
           ],
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
             responseSchema: CLASSIFICATION_SCHEMA,
             temperature: 0.1,
@@ -496,9 +440,7 @@ export async function classifyDeerCrop(
 
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      const isOverloaded = lastError.message.includes("503") ||
-                           lastError.message.includes("overloaded") ||
-                           lastError.message.includes("UNAVAILABLE");
+      const isOverloaded = isModelUnavailable(error);
 
       if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
         console.log(`Model ${model} overloaded for classification, trying next fallback...`);
@@ -532,7 +474,7 @@ export async function estimateAntlerScore(
   cropBase64: string,
   mimeType: string
 ): Promise<EstimateScoreResult> {
-  const ai = getGeminiClient();
+  const ai = getMeteredGeminiClient("score_estimate");
   const startTime = Date.now();
 
   let lastError: Error | null = null;
@@ -541,7 +483,7 @@ export async function estimateAntlerScore(
 
   for (const model of MODEL_FALLBACK_CHAIN) {
     try {
-      const { result: response, retryCount, wasRateLimited: rateLimited } = await withRetry(async () => {
+      const { result: response, retryCount, wasRateLimited: rateLimited } = await withRetry(async (signal) => {
         return await ai.models.generateContent({
           model,
           contents: [
@@ -553,6 +495,7 @@ export async function estimateAntlerScore(
             }
           ],
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
             responseSchema: SCORE_ESTIMATE_SCHEMA,
             temperature: 0.1,
@@ -596,9 +539,7 @@ export async function estimateAntlerScore(
       };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      const isOverloaded = lastError.message.includes("503") ||
-                           lastError.message.includes("overloaded") ||
-                           lastError.message.includes("UNAVAILABLE");
+      const isOverloaded = isModelUnavailable(error);
 
       if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
         console.log(`Model ${model} overloaded for score estimate, trying next fallback...`);
@@ -625,7 +566,7 @@ export async function estimateAntlerScore(
 export async function analyzeDeer(
   imageBuffer: Buffer
 ): Promise<DeerAnalysisResult> {
-  const ai = getGeminiClient();
+  const ai = getMeteredGeminiClient("deer_analysis");
   const imageBase64 = imageBuffer.toString("base64");
 
   let lastError: Error | null = null;
@@ -634,7 +575,7 @@ export async function analyzeDeer(
     try {
       console.log(`Analyzing deer crop with model: ${model} (Thinking enabled)`);
 
-      const { result: response } = await withRetry(async () => {
+      const { result: response } = await withRetry(async (signal) => {
         return await ai.models.generateContent({
           model,
           contents: [
@@ -647,6 +588,7 @@ export async function analyzeDeer(
             }
           ],
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
             responseSchema: DEER_ANALYSIS_SCHEMA,
             temperature: 0.2,
@@ -692,9 +634,7 @@ export async function analyzeDeer(
 
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      const isOverloaded = lastError.message.includes("503") ||
-                           lastError.message.includes("overloaded") ||
-                           lastError.message.includes("UNAVAILABLE");
+      const isOverloaded = isModelUnavailable(error);
 
       if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
         console.log(`Model ${model} overloaded for deer analysis, trying next fallback...`);
@@ -729,7 +669,7 @@ export interface ExtractFingerprintResult {
 export async function extractAntlerFingerprint(
   imageBuffer: Buffer
 ): Promise<ExtractFingerprintResult> {
-  const ai = getGeminiClient();
+  const ai = getMeteredGeminiClient("fingerprint");
   const imageBase64 = imageBuffer.toString("base64");
   const startTime = Date.now();
 
@@ -737,11 +677,11 @@ export async function extractAntlerFingerprint(
   let totalRetryCount = 0;
   let wasRateLimited = false;
 
-  for (const model of MODEL_FALLBACK_CHAIN) {
+  for (const model of FINGERPRINT_MODEL_CHAIN) {
     try {
       console.log(`Extracting antler fingerprint with model: ${model} (Thinking enabled)`);
 
-      const { result: response, retryCount, wasRateLimited: rateLimited } = await withRetry(async () => {
+      const { result: response, retryCount, wasRateLimited: rateLimited } = await withRetry(async (signal) => {
         return await ai.models.generateContent({
           model,
           contents: [
@@ -754,12 +694,12 @@ export async function extractAntlerFingerprint(
             }
           ],
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
             responseSchema: ANTLER_FINGERPRINT_SCHEMA,
-            temperature: 0.1,
             thinkingConfig: {
               includeThoughts: false,
-              thinkingBudget: 2048 // Higher budget for detailed measurements
+              // Gemini 3.8 defaults to medium reasoning; thinkingBudget is unsupported.
             }
           }
         });
@@ -809,6 +749,7 @@ export async function extractAntlerFingerprint(
       return {
         result: validated,
         metrics: {
+          tokenBreakdown: usageTokens(response.usageMetadata),
           promptTokens,
           responseTokens,
           totalTokens,
@@ -822,11 +763,9 @@ export async function extractAntlerFingerprint(
 
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      const isOverloaded = lastError.message.includes("503") ||
-                           lastError.message.includes("overloaded") ||
-                           lastError.message.includes("UNAVAILABLE");
+      const isOverloaded = isModelUnavailable(error);
 
-      if (isOverloaded && model !== MODEL_FALLBACK_CHAIN[MODEL_FALLBACK_CHAIN.length - 1]) {
+      if (isOverloaded && model !== FINGERPRINT_MODEL_CHAIN[FINGERPRINT_MODEL_CHAIN.length - 1]) {
         console.log(`Model ${model} overloaded for fingerprint extraction, trying next fallback...`);
         continue;
       }

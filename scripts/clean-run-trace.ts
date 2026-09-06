@@ -22,9 +22,9 @@ import {
 import { cropToMemory, uploadCropBuffer } from '@/lib/image/crop';
 import {
   passesCoarseCut,
-  passesScoreEstimateBand,
+  shouldAutomaticallyFingerprint,
   isTrophyScore,
-  TROPHY_CONFIRM_BAND_INCHES,
+  AUTOMATIC_FINGERPRINT_MIN_SCORE,
   DEFAULT_TROPHY_THRESHOLD_INCHES,
 } from '@/lib/scoring/gates';
 
@@ -67,7 +67,7 @@ log('FETCH', 'image record', img);
 const { data: prof } = await supabase
   .from('profiles').select('trophy_threshold').eq('id', img.user_id).single();
 const trophyThreshold = prof?.trophy_threshold ?? DEFAULT_TROPHY_THRESHOLD_INCHES;
-log('FETCH', `owner trophy_threshold = ${trophyThreshold}  (confirm band = ${TROPHY_CONFIRM_BAND_INCHES})`);
+log('FETCH', `owner trophy_threshold = ${trophyThreshold}  (automatic fingerprint minimum = ${AUTOMATIC_FINGERPRINT_MIN_SCORE})`);
 
 // ---- Clean slate: delete prior detections, reset image ----------------------
 const { data: del } = await supabase.from('detections').delete().eq('image_id', imageId).select('id');
@@ -203,9 +203,9 @@ const { data: inserted } = await supabase
   .from('detections').select('id, score_estimate')
   .eq('image_id', imageId).eq('class', 'deer').not('score_estimate', 'is', null);
 
-const band = (inserted ?? []).filter((d) => passesScoreEstimateBand(d.score_estimate, trophyThreshold));
-log('GATE', `STEP3 band gate (estimate >= ${trophyThreshold} - ${TROPHY_CONFIRM_BAND_INCHES} = ${trophyThreshold - TROPHY_CONFIRM_BAND_INCHES}): ${band.length}/${inserted?.length ?? 0} advance to fingerprint`,
-  (inserted ?? []).map((d) => ({ id: d.id, estimate: d.score_estimate, advances: passesScoreEstimateBand(d.score_estimate, trophyThreshold) })));
+const band = (inserted ?? []).filter((d) => shouldAutomaticallyFingerprint(d.score_estimate));
+log('GATE', `STEP3 automatic fingerprint gate (estimate >= ${AUTOMATIC_FINGERPRINT_MIN_SCORE}): ${band.length}/${inserted?.length ?? 0} advance to fingerprint`,
+  (inserted ?? []).map((d) => ({ id: d.id, estimate: d.score_estimate, advances: shouldAutomaticallyFingerprint(d.score_estimate) })));
 
 for (const d of band) {
   log('STAGE3', `fingerprint for ${d.id} (Gemini Thinking) ...`);

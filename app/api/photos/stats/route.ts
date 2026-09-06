@@ -14,6 +14,8 @@ interface BatchStats {
   buck_count: number
   doe_count: number
   unknown_count: number
+  /** Confirmed numeric Score meets this account trophy threshold. */
+  trophy_count: number
   size_class_breakdown: {
     trophy: number
     standard: number
@@ -64,9 +66,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
     const uploadSessionId = searchParams.get('upload_session_id')
 
     // Single optimized RPC call replaces 3 sequential queries
-    // Note: get_photo_stats RPC function exists in DB but not in generated types
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase.rpc as any)('get_photo_stats', {
+    const { data, error } = await supabase.rpc('get_photo_stats', {
       p_user_id: user.id,
       p_batch_id: batchId ?? null,
       p_upload_session_id: uploadSessionId ?? null,
@@ -103,6 +103,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
         buck_count: 0,
         doe_count: 0,
         unknown_count: 0,
+        trophy_count: 0,
         size_class_breakdown: {
           trophy: 0,
           standard: 0,
@@ -125,8 +126,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<BatchStats
       buck_count: result.buck_count,
       doe_count: result.doe_count,
       unknown_count: result.unknown_count,
+      trophy_count: result.trophy_count,
       size_class_breakdown: {
-        trophy: result.trophy_count,
+        // Qualitative impression stays separate from the confirmed numeric count.
+        trophy: Math.max(0, result.buck_count - result.standard_count - result.basket_count - result.spike_count - result.unknown_size_count),
         standard: result.standard_count,
         basket: result.basket_count,
         spike: result.spike_count,

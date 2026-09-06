@@ -1,8 +1,9 @@
 // @ts-nocheck - Supabase Database generic types not properly resolved in build context
+import { withGeminiUsageContext, priceUsage, usageTokens } from "@/lib/gemini/usage";
+import { GEMINI_TASK_QUEUE } from "@/lib/gemini/capacity";
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractAntlerFingerprint } from "@/lib/gemini/client";
-import { isTrophyScore, DEFAULT_TROPHY_THRESHOLD_INCHES } from "@/lib/scoring/gates";
 import {
   computeBcScores,
   rawFromFingerprintMeasurements,
@@ -52,9 +53,7 @@ export const generateFingerprint = task({
   id: "generate-fingerprint",
   // Lower concurrency for expensive operation with Thinking enabled
   // Gemini Thinking uses ~2x token budget, so we limit parallelism
-  queue: {
-    concurrencyLimit: 10,
-  },
+  queue: GEMINI_TASK_QUEUE,
   retry: {
     maxAttempts: 3,
     factor: 2,
@@ -179,7 +178,23 @@ export const generateFingerprint = task({
         detectionId,
       });
 
-      const { result: fingerprint, metrics } = await extractAntlerFingerprint(cropBuffer);
+      const { result: fingerprint, metrics } = await withGeminiUsageContext({ imageId: detection.image_id, detectionId }, () => extractAntlerFingerprint(cropBuffer));
+
+      const generatedAt = new Date().toISOString();
+      const tokenBreakdown = metrics.tokenBreakdown ?? usageTokens();
+      const apiCost = priceUsage(metrics.modelUsed, tokenBreakdown, generatedAt);
+      logger.info("Fingerprint API usage and cost", { detectionId, model: metrics.modelUsed, ...tokenBreakdown, ...apiCost });
+      const { data: sourceImage } = await supabase.from("images").select("batch_id").eq("id", detection.image_id).single();
+      if (sourceImage?.batch_id) {
+        const { error: metricsError } = await supabase.from("batch_metrics").insert({
+          batch_id: sourceImage.batch_id, image_id: detection.image_id,
+          gemini_call_type: "fingerprint", model_used: metrics.modelUsed,
+          prompt_tokens: metrics.promptTokens, response_tokens: metrics.responseTokens,
+          total_tokens: metrics.totalTokens, duration_ms: metrics.durationMs,
+          retry_count: metrics.retryCount, is_rate_limited: metrics.wasRateLimited,
+        });
+        if (metricsError) logger.error("Failed to persist fingerprint metrics", { detectionId, error: metricsError.message });
+      }
 
       logger.info("Antler fingerprint extraction completed", {
         detectionId,
@@ -190,6 +205,8 @@ export const generateFingerprint = task({
         totalPoints: fingerprint.measurements.total_points,
         overallConfidence: fingerprint.confidence.overall,
         tokenUsage: metrics.totalTokens,
+        tokenBreakdown,
+        apiCost,
         durationMs: metrics.durationMs,
         wasRateLimited: metrics.wasRateLimited,
         retryCount: metrics.retryCount,
@@ -219,38 +236,25 @@ export const generateFingerprint = task({
         typical_status: fingerprint.scores?.typical_status ?? "typical",
       };
 
-      // Step 5a: Authoritative trophy decision on the computed gross score. The
-      // estimate only gated entry to the fingerprint; this gross score is the final
-      // word. See docs/adr/0004-trophy-gated-ai-cost-cascade.md.
-      const { data: ownerProfile } = await supabase
-        .from("profiles")
-        .select("trophy_threshold")
-        .eq("id", userId)
-        .single();
-      const trophyThreshold = ownerProfile?.trophy_threshold ?? DEFAULT_TROPHY_THRESHOLD_INCHES;
+      // Step 5a: The authoritative trophy decision lives in the database. The
+      // detection_numeric_trophy trigger (migration 061) derives is_trophy from the
+      // rounded score_gross and profiles.trophy_threshold on every write, so a
+      // worker-side verdict on the fractional score would only be overwritten, and
+      // could disagree with it near the threshold. See ADR 0004.
       const grossScore = bc.grossScore;
-      const trophy = isTrophyScore(grossScore, trophyThreshold);
 
-      logger.info("Authoritative trophy decision", {
-        detectionId,
-        grossScore,
-        trophyThreshold,
-        isTrophy: trophy,
-      });
-
-      // Step 5b: Save fingerprint + authoritative score + trophy flag
+      // Step 5b: Save fingerprint + authoritative score (trophy flag derived by trigger)
       logger.info("Saving antler fingerprint to database", { detectionId });
 
       const { error: updateError } = await supabase
         .from("detections")
         .update({
-          antler_fingerprint: fingerprint as any, // JSONB column
+          antler_fingerprint: { ...fingerprint, model_used: metrics.modelUsed, generated_at: generatedAt, token_usage: tokenBreakdown, api_cost: apiCost } as any, // JSONB column
           // score_gross is an INTEGER column; the model returns a fractional
           // gross score (e.g. 178.2). Round to match the migration-043 backfill
           // convention — writing the raw float fails with Postgres 22P02 and
           // silently drops the entire fingerprint update (incl. is_trophy).
           score_gross: Math.round(grossScore),
-          is_trophy: trophy,
         })
         .eq("id", detectionId);
 
@@ -294,6 +298,8 @@ export const generateFingerprint = task({
         totalPoints: fingerprint.measurements.total_points,
         confidence: fingerprint.confidence.overall,
         tokenUsage: metrics.totalTokens,
+        tokenBreakdown,
+        apiCost,
         durationMs: metrics.durationMs,
         modelUsed: metrics.modelUsed,
       };

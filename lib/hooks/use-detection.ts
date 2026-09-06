@@ -3,11 +3,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { AntlerFingerprint } from '@/types/fingerprint'
 
-interface DetectionResponse {
+export interface DetectionResponse {
   id: string
   imageId: string
   imageUrl: string | null
   cropUrl: string | null
+  /** Medium/thumbnail only; safe fallback for small deer previews. */
+  previewUrl?: string | null
   bboxX: number | null
   bboxY: number | null
   bboxWidth: number | null
@@ -22,6 +24,11 @@ interface DetectionResponse {
   geminiConfidence: number | null
   deerId: string | null
   createdAt: string
+  scoreEstimate?: number | null
+  scoreEstimateConfidence?: number | null
+  trophyThreshold?: number | null
+  capturedAt?: string | null
+  deerName?: string | null
   antlerFingerprint: AntlerFingerprint | null
 }
 

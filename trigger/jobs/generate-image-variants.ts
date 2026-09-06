@@ -45,16 +45,11 @@ export const generateImageVariantsJob = task({
 
     logger.info("Generating image variants", { imageId });
 
-    // Step 1: Idempotent claim. Only proceed if this image still needs variants.
-    // Re-claims 'failed' so retries (transient errors) regenerate; skips 'ready'
-    // and 'processing' (owned by another run).
-    const { data: claimed, error: claimError } = await supabase
-      .from("images")
-      .update({ variant_status: "processing" })
-      .eq("id", imageId)
-      .in("variant_status", ["pending", "failed"])
-      .select("id, file_path")
-      .maybeSingle();
+    const claimAt = new Date().toISOString();
+    const { data: claims, error: claimError } = await supabase.rpc("claim_photo_work", {
+      p_image_id: imageId, p_kind: "variants", p_claim_at: claimAt,
+    });
+    const claimed = claims?.[0];
 
     if (claimError) {
       throw new Error(`Failed to claim image for variants: ${claimError.message}`);
@@ -104,7 +99,9 @@ export const generateImageVariantsJob = task({
           variant_status: "ready",
           variant_error: null,
         })
-        .eq("id", imageId);
+        .eq("id", imageId)
+        .eq("variant_claimed_at", claimAt)
+        .eq("is_cancelled", false);
 
       if (persistError) {
         throw new Error(`Failed to persist variant paths: ${persistError.message}`);
@@ -120,7 +117,9 @@ export const generateImageVariantsJob = task({
       await supabase
         .from("images")
         .update({ variant_status: "failed", variant_error: message })
-        .eq("id", imageId);
+        .eq("id", imageId)
+        .eq("variant_claimed_at", claimAt)
+        .eq("is_cancelled", false);
 
       // Re-throw so Trigger.dev retries transient failures (bounded by maxAttempts).
       throw error;

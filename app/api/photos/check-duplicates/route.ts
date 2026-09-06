@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 // Constants
@@ -8,6 +8,7 @@ const MAX_FILES_PER_REQUEST = 1000
 interface FileCheck {
   filename: string
   size: number
+  contentSha256?: string
 }
 
 interface CheckDuplicatesRequest {
@@ -17,6 +18,8 @@ interface CheckDuplicatesRequest {
 // Response types
 interface CheckDuplicatesResponse {
   existing: string[]
+  existingHashes: string[]
+  existingKeys: string[]
   toUpload: string[]
   totalChecked: number
   duplicateCount: number
@@ -27,7 +30,7 @@ interface CheckDuplicatesResponse {
  * Checks if files already exist in the user's library by filename + size.
  * Used to skip duplicates when re-uploading after page refresh.
  */
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse<{ error: string; }> | NextResponse<CheckDuplicatesResponse>> {
   try {
     // Authenticate user
     const supabase = await createClient()
@@ -41,9 +44,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse request body
-    let body: CheckDuplicatesRequest
+    let body: CheckDuplicatesRequest | null
     try {
-      body = await request.json()
+      body = await request.json() as CheckDuplicatesRequest | null
     } catch {
       return NextResponse.json(
         { error: 'Invalid JSON body' },
@@ -52,7 +55,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate files array
-    if (!body.files || !Array.isArray(body.files) || body.files.length === 0) {
+    if (body === null || !Array.isArray(body.files) || body.files.length === 0) {
       return NextResponse.json(
         { error: 'files array is required and must not be empty' },
         { status: 400 }
@@ -76,7 +79,7 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      if (!file.filename || typeof file.filename !== 'string') {
+      if ((file.filename === "") || typeof file.filename !== 'string') {
         validationErrors.push(`File ${i}: filename is required`)
       } else if (file.filename.length > 255) {
         validationErrors.push(`File ${i}: filename exceeds 255 characters`)
@@ -94,50 +97,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Extract unique sizes for efficient querying
-    const sizes = body.files.map((f) => f.size)
-
-    // Query for existing images by filename (file_path ends with filename)
-    // We need to check both original filename match and file size
-    // Note: file_path format is "user_id/batch_id/filename"
-    // We extract the filename from file_path for comparison
-
-    // First, get all images that might match by size
-    const { data: existingImages, error: queryError } = await supabase
-      .from('images')
-      .select('file_path, file_size_bytes')
-      .eq('user_id', user.id)
-      .in('file_size_bytes', [...new Set(sizes)])
-
-    if (queryError !== null) {
-      console.error('Failed to query existing images:', queryError)
-      return NextResponse.json(
-        { error: 'Failed to check duplicates' },
-        { status: 500 }
-      )
+    const hashes = [...new Set(body.files.map(file => file.contentSha256).filter((hash): hash is string => typeof hash === 'string' && /^[0-9a-f]{64}$/.test(hash)))]
+    let existingHashes: string[] = []
+    if (hashes.length > 0) {
+      const { data, error } = await supabase.rpc('get_uploaded_content_hashes', { p_hashes: hashes })
+      if (error) return NextResponse.json({ error: 'Failed to check duplicates' }, { status: 500 })
+      existingHashes = data as unknown as string[]
     }
-
-    // Build a set of existing "filename|size" combinations for fast lookup
-    const existingSet = new Set<string>()
-    if (existingImages) {
-      for (const img of existingImages) {
-        // Extract filename from file_path (last segment after /)
-        const pathParts = img.file_path.split('/')
-        const storedFilename = pathParts[pathParts.length - 1]
-        if (storedFilename && img.file_size_bytes !== null) {
-          existingSet.add(`${storedFilename}|${img.file_size_bytes}`)
-        }
-      }
-    }
+    const existingSet = new Set(existingHashes)
 
     // Categorize files
+    const existingKeys: string[] = []
     const existing: string[] = []
     const toUpload: string[] = []
 
     for (const file of body.files) {
-      const key = `${file.filename}|${file.size}`
-      if (existingSet.has(key)) {
+      if ((file.contentSha256 != null) && existingSet.has(file.contentSha256)) {
         existing.push(file.filename)
+        existingKeys.push(JSON.stringify([file.filename, file.size]))
       } else {
         toUpload.push(file.filename)
       }
@@ -145,6 +122,8 @@ export async function POST(request: NextRequest) {
 
     const response: CheckDuplicatesResponse = {
       existing,
+      existingKeys,
+      existingHashes,
       toUpload,
       totalChecked: body.files.length,
       duplicateCount: existing.length,

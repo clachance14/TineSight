@@ -19,6 +19,8 @@ import type { ExifData, WorkerInput, WorkerOutput } from '@/components/upload/Fi
 interface PendingTask {
   resolve: (data: ExifData | null) => void
   reject: (error: Error) => void
+  worker: Worker
+  timer: ReturnType<typeof setTimeout>
 }
 
 /**
@@ -33,7 +35,7 @@ interface PoolWorker {
 /**
  * Default pool size based on hardware concurrency
  */
-const DEFAULT_POOL_SIZE = typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+const DEFAULT_POOL_SIZE = typeof navigator !== 'undefined' && (navigator.hardwareConcurrency !== 0)
   ? Math.min(navigator.hardwareConcurrency, 8)
   : 4
 
@@ -110,8 +112,14 @@ export class ExifWorkerPool {
 
     worker.onerror = (error) => {
       console.error('[ExifWorkerPool] Worker error:', error.message)
-      // Reject all pending tasks for this worker
-      // In practice, we use task IDs so errors are handled per-task
+      for (const [id, task] of this.pendingTasks) {
+        if (task.worker !== worker) continue
+        clearTimeout(task.timer)
+        this.pendingTasks.delete(id)
+        task.reject(new Error(error.message !== '' ? error.message : 'EXIF worker failed'))
+      }
+      // A broken module cannot serve subsequent files; fail fast to the caller's metadata-free fallback.
+      this.terminate()
     }
 
     return worker
@@ -127,6 +135,7 @@ export class ExifWorkerPool {
       return
     }
 
+    clearTimeout(task.timer)
     this.pendingTasks.delete(response.id)
 
     // Update worker state
@@ -185,7 +194,13 @@ export class ExifWorkerPool {
       poolWorker.taskCount++
       poolWorker.busy = true
 
-      this.pendingTasks.set(fileId, { resolve, reject })
+      const timer = setTimeout(() => {
+        this.pendingTasks.delete(fileId)
+        reject(new Error('EXIF extraction timed out'))
+        // A stalled worker must not hold every subsequent file for another deadline.
+        this.terminate()
+      }, 10000)
+      this.pendingTasks.set(fileId, { resolve, reject, worker: poolWorker.worker, timer })
 
       const message: WorkerInput = {
         id: fileId,
@@ -262,6 +277,7 @@ export class ExifWorkerPool {
 
     // Reject all pending tasks
     for (const [id, task] of this.pendingTasks) {
+      clearTimeout(task.timer)
       task.reject(new Error(`[ExifWorkerPool] Pool terminated, task ${id} cancelled`))
     }
     this.pendingTasks.clear()
@@ -283,7 +299,7 @@ export function createExifWorkerPool(poolSize?: number): ExifWorkerPool {
 
   // Clean up on page unload
   if (typeof window !== 'undefined') {
-    const cleanup = () => pool.terminate()
+    const cleanup = (): void => pool.terminate()
     window.addEventListener('beforeunload', cleanup)
     window.addEventListener('unload', cleanup)
   }

@@ -8,6 +8,7 @@
 import { getSignedViewUrl, getSignedViewUrls } from '@/lib/services/photos'
 
 interface CachedUrl {
+  filePath: string
   url: string
   expiresAt: number
 }
@@ -26,11 +27,11 @@ const CLEANUP_THRESHOLD = 8000 // Start cleanup when cache reaches this size
  * @param filePath - The storage file path
  * @returns The signed URL or null if generation failed
  */
-export async function getCachedSignedUrl(filePath: string): Promise<string | null> {
+export async function getCachedSignedUrl(filePath: string, userId: string): Promise<string | null> {
   const now = Date.now()
 
   // Check cache first
-  const cached = urlCache.get(filePath)
+  const cached = urlCache.get(JSON.stringify([userId, filePath]))
   if (cached && cached.expiresAt > now) {
     return cached.url
   }
@@ -40,12 +41,13 @@ export async function getCachedSignedUrl(filePath: string): Promise<string | nul
 
   if (error || !data) {
     // Remove stale entry if it exists
-    urlCache.delete(filePath)
+    urlCache.delete(JSON.stringify([userId, filePath]))
     return null
   }
 
   // Store in cache
-  urlCache.set(filePath, {
+  urlCache.set(JSON.stringify([userId, filePath]), {
+    filePath,
     url: data,
     expiresAt: now + CACHE_TTL_MS,
   })
@@ -66,7 +68,8 @@ export async function getCachedSignedUrl(filePath: string): Promise<string | nul
  * @returns Array of signed URLs (null for failed paths)
  */
 export async function getCachedSignedUrls(
-  filePaths: string[]
+  filePaths: string[],
+  userId: string
 ): Promise<(string | null)[]> {
   const now = Date.now()
   const results: (string | null)[] = new Array(filePaths.length).fill(null)
@@ -76,7 +79,7 @@ export async function getCachedSignedUrls(
   // Check cache for each path
   for (let i = 0; i < filePaths.length; i++) {
     const filePath = filePaths[i]!
-    const cached = urlCache.get(filePath)
+    const cached = urlCache.get(JSON.stringify([userId, filePath]))
 
     if (cached && cached.expiresAt > now) {
       results[i] = cached.url
@@ -100,7 +103,8 @@ export async function getCachedSignedUrls(
       const signedUrl = urlMap.get(filePath)
       if (signedUrl !== undefined && signedUrl !== '') {
         results[originalIndex] = signedUrl
-        urlCache.set(filePath, {
+        urlCache.set(JSON.stringify([userId, filePath]), {
+          filePath,
           url: signedUrl,
           expiresAt: fetchTime + CACHE_TTL_MS,
         })
@@ -148,7 +152,9 @@ function cleanupExpiredEntries(): void {
  * Use when a file is updated or deleted
  */
 export function invalidateSignedUrl(filePath: string): void {
-  urlCache.delete(filePath)
+  for (const [key, entry] of urlCache) {
+    if (entry.filePath === filePath) urlCache.delete(key)
+  }
 }
 
 /**

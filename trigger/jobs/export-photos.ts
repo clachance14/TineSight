@@ -10,18 +10,19 @@ import {
 } from "@/lib/services/export";
 import type { PhotoForExport } from "@/lib/services/export";
 import archiver from "archiver";
-import { Readable, PassThrough } from "stream";
+import { createArchiveFile } from "@/lib/export/archive-file";
+import { ExportSizeError } from "@/lib/export/limits";
 
 /**
  * Export Photos Job
  *
  * Handles large photo exports (26-500 photos) asynchronously.
- * Creates a ZIP archive of selected photos with smart filenames.
+ * Spools a bounded ZIP to temporary disk and streams its upload to Storage.
  *
  * Workflow:
  * 1. Fetch photos metadata using getPhotosForExport()
  * 2. Initialize archiver for ZIP creation
- * 3. Create writable buffer stream
+ * 3. Start a bounded ZIP file pipeline
  * 4. Process photos in chunks of 5 (backpressure management):
  *    - Download photos using downloadPhotoBuffer()
  *    - Generate unique filename using generateExportFilename()
@@ -35,8 +36,8 @@ import { Readable, PassThrough } from "stream";
  *
  * Error Handling:
  * - Log failed photo fetches but continue with others
- * - Track failedCount for partial success reporting
- * - If all photos fail, return error
+ * - Track failedCount and reject incomplete archives
+ * - If any photo fails, return an actionable error
  *
  * Progress Tracking:
  * - Uses metadata.set('progress', { current, total }) for real-time updates
@@ -58,18 +59,6 @@ interface ExportPhotosOutput {
 }
 
 /**
- * Helper to convert stream to buffer
- */
-async function streamToBuffer(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  return new Promise((resolve, reject) => {
-    stream.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on("error", (err) => reject(err));
-    stream.on("end", () => resolve(Buffer.concat(chunks)));
-  });
-}
-
-/**
  * Helper to delay for backpressure management
  */
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -88,6 +77,7 @@ export const exportPhotosTask = task({
   },
   run: async (payload: ExportPhotosInput): Promise<ExportPhotosOutput> => {
     const { userId, photoIds } = payload;
+    const supabase = createAdminClient();
 
     logger.info("Starting photo export", {
       userId,
@@ -98,12 +88,13 @@ export const exportPhotosTask = task({
     metadata.set("progress", { current: 0, total: photoIds.length });
     metadata.set("status", "initializing");
 
+    let archiveFile: Awaited<ReturnType<typeof createArchiveFile>> | undefined;
     try {
       // Step 1: Fetch photos metadata
       logger.info("Fetching photos metadata", { userId, photoCount: photoIds.length });
       metadata.set("status", "fetching_metadata");
 
-      const { data: photos, error: fetchError } = await getPhotosForExport(userId, photoIds);
+      const { data: photos, error: fetchError } = await getPhotosForExport(userId, photoIds, supabase);
 
       if (fetchError || !photos) {
         logger.error("Failed to fetch photos metadata", {
@@ -137,20 +128,14 @@ export const exportPhotosTask = task({
         zlib: { level: 5 }, // Compression level (0-9, 5 is balanced)
       });
 
-      // Create writable stream to buffer
-      const bufferStream = new PassThrough();
-      archive.pipe(bufferStream);
+      // Drain continuously to temporary disk; never retain the entire ZIP in RAM.
+      archiveFile = await createArchiveFile(archive);
 
       // Track used filenames for collision handling
       const usedFilenames = new Map<string, number>();
       let exportedCount = 0;
       let failedCount = 0;
-
-      // Error handler for archive
-      archive.on("error", (err) => {
-        logger.error("Archive error", { error: err.message });
-        throw err;
-      });
+      let sizeError: ExportSizeError | undefined;
 
       // Step 3: Process photos in chunks of 5 for backpressure
       const CHUNK_SIZE = 5;
@@ -171,7 +156,7 @@ export const exportPhotosTask = task({
             try {
               // Download photo buffer
               const { data: photoBuffer, error: downloadError } = await downloadPhotoBuffer(
-                photo.file_path
+                photo.file_path, supabase
               );
 
               if (downloadError || !photoBuffer) {
@@ -187,7 +172,8 @@ export const exportPhotosTask = task({
               const filename = generateExportFilename(photo, usedFilenames);
 
               // Append to archive
-              archive.append(Buffer.from(photoBuffer), { name: filename });
+              if (!archiveFile) throw new Error("Export archive unavailable");
+              await archiveFile.append(Buffer.from(photoBuffer), filename);
 
               logger.info("Photo added to archive", {
                 photoId: photo.id,
@@ -196,6 +182,7 @@ export const exportPhotosTask = task({
 
               return { success: true, filename };
             } catch (error) {
+              if (error instanceof ExportSizeError) sizeError = error;
               logger.error("Failed to process photo", {
                 photoId: photo.id,
                 error: error instanceof Error ? error.message : String(error),
@@ -204,6 +191,8 @@ export const exportPhotosTask = task({
             }
           })
         );
+
+        if (sizeError) throw sizeError;
 
         // Count successes and failures
         for (const result of chunkResults) {
@@ -232,9 +221,9 @@ export const exportPhotosTask = task({
         }
       }
 
-      // Check if all photos failed
-      if (exportedCount === 0) {
-        logger.error("All photos failed to process", {
+      // Never present an incomplete set as a successful export.
+      if (failedCount > 0 || exportedCount === 0) {
+        logger.error("Selected photos failed to process", {
           userId,
           failedCount,
         });
@@ -242,7 +231,7 @@ export const exportPhotosTask = task({
           success: false,
           exportedCount: 0,
           failedCount,
-          error: "All photos failed to process",
+          error: "Some selected photos could not be downloaded. Please retry the export.",
         };
       }
 
@@ -253,13 +242,10 @@ export const exportPhotosTask = task({
       });
       metadata.set("status", "finalizing_archive");
 
-      await archive.finalize();
-
-      // Convert stream to buffer
-      const zipBuffer = await streamToBuffer(bufferStream);
+      const zipped = await archiveFile.finish();
 
       logger.info("ZIP archive created", {
-        sizeBytes: zipBuffer.length,
+        sizeBytes: zipped.bytes,
         exportedCount,
         failedCount,
       });
@@ -271,14 +257,15 @@ export const exportPhotosTask = task({
       logger.info("Uploading ZIP to storage", {
         userId,
         filename: zipFilename,
-        sizeBytes: zipBuffer.length,
+        sizeBytes: zipped.bytes,
       });
       metadata.set("status", "uploading_zip");
 
       const { path: zipPath, error: uploadError } = await uploadZipToStorage(
         userId,
-        zipBuffer,
-        zipFilename
+        zipped.stream,
+        zipFilename,
+        supabase
       );
 
       if (uploadError || !zipPath) {
@@ -298,7 +285,7 @@ export const exportPhotosTask = task({
       logger.info("Generating download URL", { zipPath });
       metadata.set("status", "generating_download_url");
 
-      const { data: downloadUrl, error: urlError } = await getExportDownloadUrl(zipPath);
+      const { data: downloadUrl, error: urlError } = await getExportDownloadUrl(zipPath, supabase);
 
       if (urlError || !downloadUrl) {
         logger.error("Failed to generate download URL", {
@@ -333,6 +320,8 @@ export const exportPhotosTask = task({
       metadata.set("status", "failed");
 
       throw error;
+    } finally {
+      await archiveFile?.cleanup();
     }
   },
 });

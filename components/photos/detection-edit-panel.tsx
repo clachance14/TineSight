@@ -3,14 +3,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import Link from 'next/link'
+import { DetectionROIEditor } from './detection-roi-editor'
 import { useRouter } from 'next/navigation'
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@/components/ui/sheet'
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { useDetection, useUpdateDetection, useDeleteDetection } from '@/lib/hooks/use-detection'
@@ -19,6 +21,7 @@ import { useToast } from '@/lib/hooks/use-toast'
 import { DeleteConfirmationDialog } from './delete-confirmation-dialog'
 import { CreateDeerModal } from '@/components/deer/create-deer-modal'
 import { DeerProfileDropdown } from '@/components/deer/deer-profile-dropdown'
+import { DeerDetailsContent } from './deer-details-content'
 import { AntlerPrintCard } from '@/components/deer/antler-print-card'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -40,8 +43,8 @@ export function DetectionEditPanel() {
   const router = useRouter()
   const { toast } = useToast()
   const queryClient = useQueryClient()
-  const { selectedDetectionId, isOpen, closePanel } = useDetectionEdit()
-  const { data: detection, isLoading } = useDetection(selectedDetectionId || '')
+  const { selectedDetectionId, isOpen, closePanel, mode, setMode } = useDetectionEdit()
+  const { data: detection, isLoading, isError, refetch } = useDetection(selectedDetectionId || '')
   const updateDetection = useUpdateDetection()
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [createModalOpen, setCreateModalOpen] = useState(false)
@@ -49,11 +52,7 @@ export function DetectionEditPanel() {
   const [isLinking, setIsLinking] = useState(false)
   const deleteDetection = useDeleteDetection()
 
-  // The edit-panel Sheet is modal={false}; opening a nested Dialog/Dropdown
-  // shifts focus out and closes it, which nulls selectedDetectionId and drops
-  // the live `detection` query. So we snapshot the detection the moment a deer
-  // action starts — otherwise the create POST loses detection_id (400) and the
-  // link PATCH silently no-ops.
+  // Preserve the selected detection while nested create/link actions run.
   const [createSnapshot, setCreateSnapshot] = useState<{
     id: string
     cropUrl: string | null
@@ -149,7 +148,7 @@ export function DetectionEditPanel() {
   }
 
   const handleLinkToExisting = async (deerId: string) => {
-    // Opening the deer dropdown can close the non-modal Sheet (nulling
+    // Keep a fallback detection ID if another action closes the dialog (nulling
     // selectedDetectionId), so fall back to the snapshotted id.
     const detectionId = selectedDetectionId ?? lastDetectionIdRef.current
     if (!detectionId) return
@@ -183,38 +182,33 @@ export function DetectionEditPanel() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return
 
-      if (e.key === 'Escape') {
-        closePanel()
-      }
-
       // Cmd/Ctrl+S to save
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      if (mode === 'classification' && (e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
         form.handleSubmit(onSubmit)()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, closePanel, form, onSubmit])
+  }, [isOpen, closePanel, form, onSubmit, mode])
 
   return (
     <>
-    <Sheet open={isOpen} onOpenChange={(open) => !open && closePanel()} modal={false}>
-      <SheetContent
-        side="right"
-        className="w-full sm:w-[400px] sm:max-w-md bg-slate-deep border-l border-cream/20 flex flex-col"
+    <Dialog open={isOpen} onOpenChange={(open) => !open && closePanel()}>
+      <DialogContent
+        className={mode === 'details' ? 'flex max-h-[90dvh] flex-col gap-3 overflow-hidden bg-slate-deep sm:max-w-4xl sm:p-5' : 'flex max-h-[85dvh] flex-col overflow-hidden bg-slate-deep sm:max-w-2xl'}
       >
-        <SheetHeader className="flex-none space-y-1">
+        <DialogHeader className="flex-none space-y-1">
           <div className="flex items-center gap-2">
-            <SheetTitle className="text-cream">Edit Detection</SheetTitle>
+            <DialogTitle className="text-cream">{mode === 'details' ? 'Deer details' : mode === 'roi' ? 'Edit ROI' : 'Edit classification'}</DialogTitle>
             {form.formState.isDirty && (
               <span className="text-amber-400 text-xs font-medium">• Unsaved</span>
             )}
           </div>
-          <SheetDescription className="text-cream-dark">
-            Correct AI classification for this detection
-          </SheetDescription>
-        </SheetHeader>
+          <DialogDescription className="text-cream-dark">
+            {mode === 'details' ? 'Review this sighting before making changes.' : mode === 'roi' ? 'Select the head and antlers on the photo.' : 'Correct AI classification for this detection'}
+          </DialogDescription>
+        </DialogHeader>
 
         {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto min-h-0">
@@ -222,6 +216,17 @@ export function DetectionEditPanel() {
             <div className="flex items-center justify-center h-40">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-copper" />
             </div>
+          ) : isError || !detection ? (
+            <div role="alert" className="px-4 space-y-3 text-cream">
+              <p>Unable to load deer details.</p>
+              <Button onClick={() => void refetch()}>Retry</Button>
+            </div>
+          ) : mode === 'roi' ? (
+            <div className="px-4">
+              <DetectionROIEditor key={detection.id} detection={detection} onBack={() => setMode('details')} />
+            </div>
+          ) : mode === 'details' ? (
+            <DeerDetailsContent key={detection.id} detection={detection} />
           ) : (
             <div className="px-4 space-y-4">
             {/* Edit Form */}
@@ -399,7 +404,7 @@ export function DetectionEditPanel() {
             {/* Antler Print for Trophy Detections */}
             {detection?.sizeClass === 'trophy' && (
               <div className="pt-4 border-t border-cream/10">
-                <AntlerPrintCard fingerprint={detection.antlerFingerprint} />
+                <AntlerPrintCard fingerprint={detection.antlerFingerprint} compact />
               </div>
             )}
           </div>
@@ -407,16 +412,29 @@ export function DetectionEditPanel() {
         </div>
 
         {/* Sticky Footer */}
-        {!isLoading && (
+        {!isLoading && detection && mode === 'details' && (
+          <div className="flex flex-none flex-wrap items-center justify-between gap-3 border-t border-forest-light pt-3">
+            <p className="text-xs text-weathered">{detection.deerName ?? (detection.deerId ? 'Identified sighting' : 'Not yet identified')}{detection.capturedAt ? ` · ${new Date(detection.capturedAt).toLocaleString()}` : ''}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" className="min-h-11" onClick={() => setMode('classification')}>Edit details</Button>
+              {detection.deerId ? <Button asChild className="min-h-11"><Link href={`/deer/${detection.deerId}`}>View deer profile</Link></Button> : detection.sex === 'buck' && <DeerProfileDropdown inModal disabled={isLinking} onSelect={handleLinkToExisting} onCreate={() => {
+                setCreateSnapshot({ id: detection.id, cropUrl: detection.cropUrl, imageUrl: detection.imageUrl, bboxX: detection.bboxX, bboxY: detection.bboxY, bboxWidth: detection.bboxWidth, bboxHeight: detection.bboxHeight })
+                setCreateModalOpen(true)
+              }} />}
+            </div>
+          </div>
+        )}
+        {!isLoading && detection && mode === 'classification' && (
           <div className="flex-none border-t border-cream/10 p-4 bg-slate-deep space-y-3">
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
+              <Button type="button" variant="outline" onClick={() => setMode('roi')}>Edit ROI</Button>
               <Button
                 type="button"
                 variant="outline"
-                onClick={closePanel}
+                onClick={() => setMode('details')}
                 className="flex-1 h-9 border-cream/20 text-cream hover:bg-slate hover:text-cream text-sm"
               >
-                Cancel
+                Back to details
               </Button>
               <Button
                 type="submit"
@@ -442,13 +460,13 @@ export function DetectionEditPanel() {
                 )}
               </Button>
             </div>
-            {detection && detection.sex === 'buck' && !detection.deerId && (
+            {detection.sex === 'buck' && (detection.deerId === null || detection.deerId === '') && (
               <div className="flex gap-2">
                 <Button
                   type="button"
                   className="flex-1 h-9 bg-copper hover:bg-copper-light text-white text-sm"
                   onClick={() => {
-                    // Snapshot before the Sheet can close and drop the query.
+                    // Snapshot before the Dialog can close and drop the query.
                     setCreateSnapshot({
                       id: detection.id,
                       cropUrl: detection.cropUrl,
@@ -464,6 +482,7 @@ export function DetectionEditPanel() {
                   Create Deer Profile
                 </Button>
                 <DeerProfileDropdown
+                  inModal
                   onSelect={handleLinkToExisting}
                   disabled={isLinking}
                 />
@@ -479,8 +498,8 @@ export function DetectionEditPanel() {
             </Button>
           </div>
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
 
     <DeleteConfirmationDialog
       open={isDeleteDialogOpen}

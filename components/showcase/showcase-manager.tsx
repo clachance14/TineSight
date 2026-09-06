@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+import { PageState } from '@/components/layout/page-state'
 import { type JSX, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -106,8 +108,8 @@ export function ShowcaseManager(): JSX.Element {
   })
 
   const copyLink = (token: string): void => {
-    void navigator.clipboard.writeText(publicUrl(token))
-    toast.success('Public link copied')
+    if (navigator.clipboard === undefined) { toast.error('Copy is unavailable. Open the showcase and copy its address.'); return }
+    void navigator.clipboard.writeText(publicUrl(token)).then(() => toast.success('Public link copied')).catch(() => toast.error('Could not copy. Open the showcase and copy its address.'))
   }
 
   const toggleDeer = (id: string): void => {
@@ -126,17 +128,19 @@ export function ShowcaseManager(): JSX.Element {
     <div className="space-y-6">
       {/* Create */}
       <Card>
-        <CardContent className="space-y-3 p-4">
-          <h2 className="font-medium text-cream">New showcase</h2>
-          <Input
+        <CardContent className="space-y-5 p-5 sm:p-7">
+          <h2 className="font-display text-2xl text-parchment">Create a showcase</h2>
+          <p className="text-sm leading-7 text-weathered">Choose the bucks you want to share. Anyone with the link can view their showcase without an account.</p>
+          <label htmlFor="showcase-title" className="block text-sm">Showcase title <span className="text-weathered">(optional)</span></label>
+          <Input id="showcase-title" className="h-12" maxLength={100}
             placeholder="Showcase title (e.g. North Lease Trophies)"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
           <div>
             <p className="mb-2 text-sm text-cream-dark">Select bucks to feature</p>
-            {deer.length === 0 ? (
-              <p className="text-sm text-cream-dark">No bucks in your catalog yet.</p>
+            {deerQuery.isLoading ? <p role="status" className="text-sm text-weathered">Loading your bucks…</p> : deerQuery.isError ? <div role="alert" className="text-sm text-weathered">Your bucks couldn’t load. <Button variant="ghost" onClick={() => { void deerQuery.refetch() }}>Try again</Button></div> : deer.length === 0 ? (
+              <p className="text-sm text-cream-dark">Name your first buck in <Link href="/trophy" className="inline-flex min-h-11 items-center text-brass-light underline underline-offset-4">Review</Link> to start a showcase.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {deer.map((d) => {
@@ -145,10 +149,11 @@ export function ShowcaseManager(): JSX.Element {
                     <button
                       key={d.id}
                       type="button"
+                      aria-pressed={isOn}
                       onClick={() => toggleDeer(d.id)}
                       className={`min-h-[44px] rounded-full border px-4 py-2 text-sm transition-colors ${
                         isOn
-                          ? 'border-copper bg-copper text-white'
+                          ? 'border-brass bg-brass/10 text-brass-light'
                           : 'border-cream/20 bg-slate text-cream'
                       }`}
                     >
@@ -165,23 +170,23 @@ export function ShowcaseManager(): JSX.Element {
             className="min-h-[44px] gap-2"
           >
             <Plus className="h-4 w-4" />
-            Create showcase
+            {createMutation.isPending ? 'Creating…' : `Create showcase${selected.size > 0 ? ` · ${selected.size} selected` : ''}`}
           </Button>
         </CardContent>
       </Card>
 
       {/* Existing */}
       <div className="space-y-3">
-        <h2 className="font-medium text-cream">Your showcases</h2>
-        {showcases.length === 0 ? (
-          <p className="text-sm text-cream-dark">No showcases yet.</p>
+        <h2 className="font-display text-2xl text-parchment">Your showcases</h2>
+        {showcasesQuery.isLoading ? <p role="status" className="text-sm text-weathered">Loading your showcases…</p> : showcasesQuery.isError ? <PageState error title="Your showcases couldn’t load." description="Try again to see and manage your shared links."><Button onClick={() => { void showcasesQuery.refetch() }}>Try again</Button></PageState> : showcases.length === 0 ? (
+          <p className="text-sm text-cream-dark">Your shared collections will appear here. Create one above to get your first link.</p>
         ) : (
           showcases.map((s) => (
             <Card key={s.id}>
-              <CardContent className="space-y-3 p-4">
+              <CardContent className="space-y-5 p-5 sm:p-7">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="font-medium text-cream">{s.title}</h3>
-                  <Badge variant={s.is_active ? 'secondary' : 'outline'} className="text-xs">
+                  <h3 className="min-w-0 break-words font-display text-xl text-parchment">{s.title}</h3>
+                  <Badge variant={s.is_active ? 'secondary' : 'outline'} className="shrink-0 text-xs">
                     {s.is_active ? 'Active' : 'Revoked'}
                   </Badge>
                 </div>
@@ -189,12 +194,12 @@ export function ShowcaseManager(): JSX.Element {
                 {s.is_active && (
                   <div className="flex items-center gap-2 rounded-md bg-slate p-2">
                     <Link2 className="h-4 w-4 shrink-0 text-cream-dark" />
-                    <span className="truncate text-xs text-cream-dark">{publicUrl(s.token)}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-cream-dark">{publicUrl(s.token)}</span>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => copyLink(s.token)}
-                      className="ml-auto min-h-[40px] gap-1"
+                      className="ml-auto min-h-[44px] shrink-0 gap-1"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       Copy
@@ -203,11 +208,13 @@ export function ShowcaseManager(): JSX.Element {
                 )}
 
                 <div className="flex flex-wrap gap-2">
+                  {s.is_active && <Button asChild variant="outline" className="min-h-11"><Link href={`/showcase/${s.token}`} target="_blank" rel="noopener noreferrer">Open showcase</Link></Button>}
                   <Button
                     size="sm"
                     variant="outline"
+                    disabled={activeMutation.isPending}
                     onClick={() => activeMutation.mutate({ id: s.id, isActive: !s.is_active })}
-                    className="min-h-[40px] gap-1"
+                    className="min-h-[44px] gap-1"
                   >
                     {s.is_active ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     {s.is_active ? 'Revoke' : 'Re-activate'}
@@ -215,8 +222,9 @@ export function ShowcaseManager(): JSX.Element {
                   <Button
                     size="sm"
                     variant="outline"
+                    disabled={regenerateMutation.isPending}
                     onClick={() => regenerateMutation.mutate(s.id)}
-                    className="min-h-[40px] gap-1"
+                    className="min-h-[44px] gap-1"
                   >
                     <RotateCw className="h-3.5 w-3.5" />
                     New link

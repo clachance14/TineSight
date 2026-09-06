@@ -139,7 +139,7 @@ export async function GET(
       pathIndexMap.push({ thumbnailIdx, imageIdx })
     }
 
-    const cachedUrls = await getCachedSignedUrls(allPaths)
+    const cachedUrls = await getCachedSignedUrls(allPaths, user.id)
 
     // Build photos array with URLs mapped back
     const photos: PendingMatchPhoto[] = imageEntries.map(([, entry], index) => {

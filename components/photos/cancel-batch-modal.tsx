@@ -1,5 +1,6 @@
 'use client'
 
+import { cancelUploadRun } from '@/lib/upload/active-run'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -56,6 +57,7 @@ export function CancelBatchModal({
   // Cancel mutation
   const cancelMutation = useMutation({
     mutationFn: async () => {
+      cancelUploadRun(sessionId)
       const res = await fetch(`/api/upload-sessions/${sessionId}/cancel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

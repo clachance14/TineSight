@@ -19,7 +19,7 @@ export function ColorPicker({ value, onChange, disabled }: ColorPickerProps): Re
           disabled={disabled}
           onClick={() => onChange(colorValue)}
           className={cn(
-            'w-8 h-8 rounded-full border-2 transition-all',
+            'w-11 h-11 rounded-full border-2 transition-all',
             'focus:outline-none focus:ring-2 focus:ring-copper focus:ring-offset-2 focus:ring-offset-slate-deep',
             value === colorValue
               ? 'border-cream ring-2 ring-copper scale-110'
@@ -27,6 +27,7 @@ export function ColorPicker({ value, onChange, disabled }: ColorPickerProps): Re
             disabled === true && 'opacity-50 cursor-not-allowed'
           )}
           style={{ backgroundColor: colorValue }}
+          aria-pressed={value === colorValue}
           title={label}
           aria-label={`Select ${label} color`}
         />

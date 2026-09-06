@@ -9,7 +9,8 @@ import {
 import { tasks } from '@trigger.dev/sdk/v3'
 import archiver from 'archiver'
 import { format } from 'date-fns'
-import { Readable } from 'stream'
+import { createArchiveFile } from '@/lib/export/archive-file'
+import { ExportSizeError } from '@/lib/export/limits'
 
 /**
  * Simple in-memory rate limiter
@@ -27,7 +28,7 @@ function isRateLimited(userId: string): boolean {
   const now = Date.now()
   const lastExport = exportRateLimits.get(userId)
 
-  if (lastExport && now - lastExport < RATE_LIMIT_WINDOW_MS) {
+  if (lastExport !== undefined && now - lastExport < RATE_LIMIT_WINDOW_MS) {
     return true
   }
 
@@ -51,7 +52,7 @@ function isValidUUID(str: string): boolean {
  * - 2-25 photos: Stream ZIP directly
  * - 26-500 photos: Background job
  */
-export async function POST(request: Request) {
+export async function POST(request: Request): Promise<Response> {
   try {
     // 1. Authenticate user
     const supabase = await createClient()
@@ -73,8 +74,8 @@ export async function POST(request: Request) {
     }
 
     // 3. Validate request body
-    const body = await request.json()
-    const { photoIds } = body
+    const body: unknown = await request.json()
+    const photoIds: unknown = typeof body === 'object' && body !== null && 'photoIds' in body ? body.photoIds : undefined
 
     if (!Array.isArray(photoIds)) {
       return NextResponse.json(
@@ -109,10 +110,11 @@ export async function POST(request: Request) {
     // 4. Fetch photos with metadata
     const { data: photos, error: fetchError } = await getPhotosForExport(
       user.id,
-      photoIds
+      photoIds as string[]
     )
 
     if (fetchError) {
+      if (fetchError instanceof ExportSizeError) return NextResponse.json({ error: fetchError.message }, { status: 413 })
       console.error('Export fetch error:', fetchError)
       return NextResponse.json(
         { error: 'Failed to fetch photos' },
@@ -132,7 +134,8 @@ export async function POST(request: Request) {
 
     // MODE 1: Single photo - Direct download URL
     if (photoCount === 1) {
-      const photo = photos[0]!
+      const photo = photos[0]
+      if (!photo) throw new Error('No photo found')
       const filename = generateExportFilename(photo, new Map())
 
       const { data: signedUrlData, error: urlError } = await supabase.storage
@@ -141,7 +144,7 @@ export async function POST(request: Request) {
           download: filename, // Set Content-Disposition header with branded filename
         })
 
-      if (urlError || !signedUrlData) {
+      if (urlError) {
         console.error('Failed to create signed URL:', urlError)
         return NextResponse.json(
           { error: 'Failed to generate download URL' },
@@ -157,7 +160,7 @@ export async function POST(request: Request) {
 
     // MODE 2: 2-25 photos - Stream ZIP directly
     if (photoCount >= 2 && photoCount <= 25) {
-      return streamZipResponse(photos, supabase)
+      return await streamZipResponse(photos, supabase)
     }
 
     // MODE 3: 26-500 photos - Background job
@@ -194,80 +197,39 @@ export async function POST(request: Request) {
   }
 }
 
-/**
- * Stream a ZIP file directly to the client
- * Fetches photos in chunks of 5 for backpressure
- */
+/** Build a bounded ZIP before returning headers so missing files cannot become a successful partial export. */
 async function streamZipResponse(
   photos: PhotoForExport[],
-  _supabase: Awaited<ReturnType<typeof createClient>>
-) {
-  const timestamp = format(new Date(), 'yyyy-MM-dd-HHmmss')
-  const zipFilename = `TineSight_Export_${timestamp}.zip`
-
-  // Create ZIP archive
-  const archive = archiver('zip', {
-    zlib: { level: 6 }, // Compression level (0-9)
-  })
-
-  // Track used filenames for collision handling
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<Response> {
+  const zipFilename = `TineSight_Export_${format(new Date(), 'yyyy-MM-dd-HHmmss')}.zip`
+  const file = await createArchiveFile(archiver('zip', { zlib: { level: 6 } }))
   const usedFilenames = new Map<string, number>()
-
-  // Convert archive to Node.js readable stream
-  const stream = Readable.from(archive)
-
-  // Set up response headers
-  const headers = new Headers({
-    'Content-Type': 'application/zip',
-    'Content-Disposition': `attachment; filename="${zipFilename}"`,
-  })
-
-  // Handle archive errors
-  archive.on('error', (err) => {
-    console.error('Archive error:', err)
-  })
-
-  // Process photos in chunks of 5 for backpressure
-  const CHUNK_SIZE = 5
-  const chunks: PhotoForExport[][] = []
-  for (let i = 0; i < photos.length; i += CHUNK_SIZE) {
-    chunks.push(photos.slice(i, i + CHUNK_SIZE))
-  }
-
-  // Process chunks sequentially to avoid overwhelming storage API
-  for (const chunk of chunks) {
-    const downloadPromises = chunk.map(async (photo) => {
-      try {
-        const { data: buffer, error: downloadError } = await downloadPhotoBuffer(
-          photo.file_path
-        )
-
-        if (downloadError || !buffer) {
-          console.error(`Failed to download photo ${photo.id}:`, downloadError)
-          return null // Skip failed downloads
-        }
-
-        const filename = generateExportFilename(photo, usedFilenames)
-        return { filename, buffer }
-      } catch (err) {
-        console.error(`Exception downloading photo ${photo.id}:`, err)
-        return null // Skip failed downloads
-      }
-    })
-
-    const results = await Promise.all(downloadPromises)
-
-    // Add successfully downloaded photos to archive
-    for (const result of results) {
-      if (result) {
-        archive.append(Buffer.from(result.buffer), { name: result.filename })
-      }
+  try {
+    for (const photo of photos) {
+      const { data: buffer, error } = await downloadPhotoBuffer(photo.file_path, supabase)
+      if (error || !buffer) throw new Error('Failed to download a selected photo. Please retry the export.')
+      await file.append(Buffer.from(buffer), generateExportFilename(photo, usedFilenames))
     }
+    const { stream } = await file.finish()
+    const iterator = stream[Symbol.asyncIterator]()
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller): Promise<void> {
+        try {
+          const chunk = await iterator.next()
+          if (chunk.done === true) { await file.cleanup(); controller.close() }
+          else controller.enqueue(chunk.value as Uint8Array)
+        } catch (error) { await file.cleanup(); controller.error(error) }
+      },
+      async cancel(): Promise<void> { await file.cleanup() },
+    })
+    return new NextResponse(body, { headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${zipFilename}"`,
+    } })
+  } catch (error) {
+    await file.cleanup()
+    if (error instanceof ExportSizeError) return NextResponse.json({ error: error.message }, { status: 413 })
+    throw error
   }
-
-  // Finalize the archive (no more files will be added)
-  archive.finalize()
-
-  // Return streaming response
-  return new NextResponse(stream as any, { headers })
 }

@@ -1,8 +1,9 @@
 'use client'
 
 import { useRef } from 'react'
-import { useQuery, useInfiniteQuery, keepPreviousData } from '@tanstack/react-query'
+import { useQuery, useInfiniteQuery, keepPreviousData, type UseQueryResult, type UseInfiniteQueryResult, type InfiniteData } from '@tanstack/react-query'
 import type { PhotoFilters, VariantStatus } from '@/lib/services/photos'
+import { photoFilterParams } from '@/lib/photos/filters'
 
 /**
  * Exponential backoff configuration for polling
@@ -111,7 +112,7 @@ interface BatchStatusResponse {
  * Hook to fetch photos with optional filters
  * Auto-refetches with exponential backoff when photos are processing
  */
-export function usePhotos(filters?: PhotoFilters) {
+export function usePhotos(filters?: PhotoFilters): UseQueryResult<PhotosResponse, Error> {
   // Track poll count and previous processing IDs for backoff
   const pollCountRef = useRef(0)
   const prevProcessingIdsRef = useRef<string>('')
@@ -123,90 +124,19 @@ export function usePhotos(filters?: PhotoFilters) {
     gcTime: 30 * 60 * 1000,   // 30 minutes - keep unused cache for filter switching
     placeholderData: keepPreviousData, // Show previous photos instantly while loading new filter results
     queryFn: async (): Promise<PhotosResponse> => {
-      const params = new URLSearchParams()
-
-      // Build query params from filters
-      if (filters?.status !== undefined) {
-        params.append('status', filters.status)
-      }
-      if (filters?.hasDeer !== undefined) {
-        params.append('hasDeer', String(filters.hasDeer))
-      }
-      if (filters?.hasDetections !== undefined) {
-        params.append('hasDetections', String(filters.hasDetections))
-      }
-      if (filters?.batchId !== undefined) {
-        params.append('batchId', filters.batchId)
-      }
-      if (filters?.uploadSessionId !== undefined) {
-        params.append('uploadSessionId', filters.uploadSessionId)
-      }
-      if (filters?.cameraId !== undefined) {
-        params.append('cameraId', filters.cameraId)
-      }
-      if (filters?.isArchived !== undefined) {
-        params.append('isArchived', String(filters.isArchived))
-      }
-      if (filters?.qualityStatus !== undefined) {
-        params.append('qualityStatus', filters.qualityStatus)
-      }
-      if (filters?.minConfidence !== undefined) {
-        params.append('minConfidence', String(filters.minConfidence))
-      }
-      if (filters?.sex !== undefined) {
-        params.append('sex', filters.sex)
-      }
-      if (filters?.minPoints !== undefined) {
-        params.append('min_points', String(filters.minPoints))
-      }
-      if (filters?.maxPoints !== undefined) {
-        params.append('max_points', String(filters.maxPoints))
-      }
-      if (filters?.sizeClass !== undefined) {
-        params.append('sizeClass', filters.sizeClass)
-      }
-      if (filters?.minScore !== undefined) {
-        params.append('minScore', String(filters.minScore))
-      }
-      if (filters?.dateFrom !== undefined) {
-        params.append('dateFrom', filters.dateFrom)
-      }
-      if (filters?.dateTo !== undefined) {
-        params.append('dateTo', filters.dateTo)
-      }
-      if (filters?.deerId !== undefined) {
-        params.append('deerId', filters.deerId)
-      }
-      if (filters?.areaName !== undefined) {
-        params.append('areaName', filters.areaName)
-      }
-      if (filters?.areaNames?.length) {
-        params.append('areaNames', filters.areaNames.join(','))
-      }
-      if (filters?.sortBy !== undefined) {
-        params.append('sortBy', filters.sortBy)
-      }
-      if (filters?.limit !== undefined) {
-        params.append('limit', String(filters.limit))
-      }
-      if (filters?.offset !== undefined) {
-        params.append('offset', String(filters.offset))
-      }
-      if (filters?.otherAnimals?.length) {
-        params.append('otherAnimals', filters.otherAnimals.join(','))
-      }
+      const params = photoFilterParams(filters, true)
 
       const queryString = params.toString()
-      const url = `/api/photos${queryString ? `?${queryString}` : ''}`
+      const url = `/api/photos${(queryString !== null && queryString !== undefined && queryString !== '') ? `?${queryString}` : ''}`
 
       const res = await fetch(url, { cache: 'no-store' })
 
       if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: 'Failed to fetch photos' }))
-        throw new Error(error.error || 'Failed to fetch photos')
+        const payload: unknown = await res.json().catch(() => null)
+        throw new Error(typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string' ? payload.error : 'Failed to fetch photos')
       }
 
-      return res.json()
+      return await res.json() as PhotosResponse
     },
     refetchInterval: (query) => {
       const photos = query.state.data?.photos
@@ -246,149 +176,58 @@ export function usePhotos(filters?: PhotoFilters) {
  */
 export function usePhotosInfinite(
   filters?: Omit<PhotoFilters, 'offset'>,
-  options?: { realtimeActive?: boolean }
-) {
-  // Track poll count and previous processing IDs for backoff
-  const pollCountRef = useRef(0)
-  const prevProcessingIdsRef = useRef<string>('')
-
+  options?: { realtimeActive?: boolean; enabled?: boolean; uploadActive?: boolean }
+): UseInfiniteQueryResult<InfiniteData<PhotosResponse>, Error> {
   return useInfiniteQuery({
     queryKey: ['photos', 'infinite', filters],
-    queryFn: async ({ pageParam }): Promise<PhotosResponse> => {
-      const params = new URLSearchParams()
-
-      // Build query params from filters
-      if (filters?.status !== undefined) {
-        params.append('status', filters.status)
-      }
-      if (filters?.hasDeer !== undefined) {
-        params.append('hasDeer', String(filters.hasDeer))
-      }
-      if (filters?.hasDetections !== undefined) {
-        params.append('hasDetections', String(filters.hasDetections))
-      }
-      if (filters?.batchId !== undefined) {
-        params.append('batchId', filters.batchId)
-      }
-      if (filters?.uploadSessionId !== undefined) {
-        params.append('uploadSessionId', filters.uploadSessionId)
-      }
-      if (filters?.cameraId !== undefined) {
-        params.append('cameraId', filters.cameraId)
-      }
-      if (filters?.isArchived !== undefined) {
-        params.append('isArchived', String(filters.isArchived))
-      }
-      if (filters?.qualityStatus !== undefined) {
-        params.append('qualityStatus', filters.qualityStatus)
-      }
-      if (filters?.minConfidence !== undefined) {
-        params.append('minConfidence', String(filters.minConfidence))
-      }
-      if (filters?.sex !== undefined) {
-        params.append('sex', filters.sex)
-      }
-      if (filters?.minPoints !== undefined) {
-        params.append('min_points', String(filters.minPoints))
-      }
-      if (filters?.maxPoints !== undefined) {
-        params.append('max_points', String(filters.maxPoints))
-      }
-      if (filters?.sizeClass !== undefined) {
-        params.append('sizeClass', filters.sizeClass)
-      }
-      if (filters?.minScore !== undefined) {
-        params.append('minScore', String(filters.minScore))
-      }
-      if (filters?.dateFrom !== undefined) {
-        params.append('dateFrom', filters.dateFrom)
-      }
-      if (filters?.dateTo !== undefined) {
-        params.append('dateTo', filters.dateTo)
-      }
-      if (filters?.deerId !== undefined) {
-        params.append('deerId', filters.deerId)
-      }
-      if (filters?.areaName !== undefined) {
-        params.append('areaName', filters.areaName)
-      }
-      if (filters?.areaNames?.length) {
-        params.append('areaNames', filters.areaNames.join(','))
-      }
-      if (filters?.sortBy !== undefined) {
-        params.append('sortBy', filters.sortBy)
-      }
-      if (filters?.sortDirection !== undefined) {
-        params.append('sortDirection', filters.sortDirection)
-      }
-      if (filters?.limit !== undefined) {
-        params.append('limit', String(filters.limit))
-      } else {
-        params.append('limit', '50')
-      }
-      if (filters?.otherAnimals?.length) {
-        params.append('otherAnimals', filters.otherAnimals.join(','))
-      }
+    enabled: options?.enabled ?? true,
+    queryFn: async ({ pageParam, signal }): Promise<PhotosResponse> => {
+      const params = photoFilterParams(filters, true)
+      if (!params.has('limit')) params.set('limit', '50')
 
       // Add cursor for pagination
-      if (pageParam) {
+      if ((pageParam !== null && pageParam !== undefined && pageParam !== '')) {
         params.append('cursor', pageParam)
       }
 
       const queryString = params.toString()
-      const url = `/api/photos${queryString ? `?${queryString}` : ''}`
+      const url = `/api/photos${(queryString !== null && queryString !== undefined && queryString !== '') ? `?${queryString}` : ''}`
 
-      const res = await fetch(url, { cache: 'no-store' })
+      const res = await fetch(url, { cache: 'no-store', signal })
 
       if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: 'Failed to fetch photos' }))
-        throw new Error(error.error || 'Failed to fetch photos')
+        const payload: unknown = await res.json().catch(() => null)
+        throw new Error(typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string' ? payload.error : 'Failed to fetch photos')
       }
 
-      return res.json()
+      return await res.json() as PhotosResponse
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     // Cache optimization for filter switching
     staleTime: 5 * 60 * 1000, // 5 minutes - data stays fresh during browsing session
-    gcTime: 30 * 60 * 1000,   // 30 minutes - keep unused cache for filter switching
-    placeholderData: keepPreviousData, // Show previous photos instantly while loading new filter results
-    maxPages: 10, // Limit memory usage - older pages can be re-fetched
+    gcTime: 5 * 60 * 1000, // Bound inactive filter caches
+    // Retain lightweight page metadata so scrolling backwards remains possible.
+    // The grid virtualizes image elements, bounding decoded-image memory independently.
     refetchInterval: (query) => {
+      // The gallery can open before its first uploaded photo is acknowledged.
+      if (options?.uploadActive === true) return BACKOFF_CONFIG.baseInterval
       const pages = query.state.data?.pages
       if (!pages) return false
 
       // Get all processing photos across all pages
       const processingPhotos = pages.flatMap(page =>
         page.photos.filter(
-          (p) => p.detection_status === 'pending' || p.detection_status === 'processing'
+          (p) => p.detection_status === 'pending' || p.detection_status === 'processing' || p.variant_status === 'pending' || p.variant_status === 'processing'
         )
       )
 
       // No active photos, stop polling and reset counter
-      if (processingPhotos.length === 0) {
-        pollCountRef.current = 0
-        prevProcessingIdsRef.current = ''
-        return false
-      }
-
-      // Check if processing set changed (photos completed)
-      const currentIds = processingPhotos.map(p => p.id).sort().join(',')
-      if (currentIds !== prevProcessingIdsRef.current) {
-        // Data changed, reset backoff
-        pollCountRef.current = 0
-        prevProcessingIdsRef.current = currentIds
-      } else {
-        // No change, increment backoff
-        pollCountRef.current += 1
-      }
-
-      // If realtime is active, use slow fallback polling instead of backoff
-      if (options?.realtimeActive === true) {
-        return REALTIME_ACTIVE_POLL_INTERVAL
-      }
-
-      return calculateBackoff(pollCountRef.current)
+      // Pending tiles must not linger while an independent session counter
+      // has already finished. Keep a steady foreground refresh until settled.
+      return processingPhotos.length > 0
+        ? BACKOFF_CONFIG.baseInterval
+        : REALTIME_ACTIVE_POLL_INTERVAL
     },
   })
 }
@@ -396,20 +235,20 @@ export function usePhotosInfinite(
 /**
  * Hook to fetch a single photo by ID with its detections
  */
-export function usePhotoDetail(id: string) {
+export function usePhotoDetail(id: string): UseQueryResult<PhotoDetailResponse, Error> {
   return useQuery({
     queryKey: ['photo', id],
     queryFn: async (): Promise<PhotoDetailResponse> => {
       const res = await fetch(`/api/photos/${id}`, { cache: 'no-store' })
 
       if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: 'Failed to fetch photo' }))
-        throw new Error(error.error || 'Failed to fetch photo')
+        const payload: unknown = await res.json().catch(() => null)
+        throw new Error(typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string' ? payload.error : 'Failed to fetch photo')
       }
 
-      return res.json()
+      return await res.json() as PhotoDetailResponse
     },
-    enabled: !!id, // Only run query if id is provided
+    enabled: !!(id !== null && id !== undefined && id !== ''), // Only run query if id is provided
   })
 }
 
@@ -417,7 +256,7 @@ export function usePhotoDetail(id: string) {
  * Hook to fetch batch status by ID
  * Auto-refetches with exponential backoff while batch is processing
  */
-export function useBatchStatus(batchId: string) {
+export function useBatchStatus(batchId: string): UseQueryResult<BatchStatusResponse, Error> {
   // Track poll count and previous processed count for backoff
   const pollCountRef = useRef(0)
   const prevProcessedCountRef = useRef<number>(-1)
@@ -428,13 +267,13 @@ export function useBatchStatus(batchId: string) {
       const res = await fetch(`/api/batches/${batchId}`, { cache: 'no-store' })
 
       if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: 'Failed to fetch batch status' }))
-        throw new Error(error.error || 'Failed to fetch batch status')
+        const payload: unknown = await res.json().catch(() => null)
+        throw new Error(typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string' ? payload.error : 'Failed to fetch batch status')
       }
 
-      return res.json()
+      return await res.json() as BatchStatusResponse
     },
-    enabled: !!batchId,
+    enabled: !!(batchId !== null && batchId !== undefined && batchId !== ''),
     refetchInterval: (query) => {
       const batch = query.state.data?.batch
       if (!batch) return false

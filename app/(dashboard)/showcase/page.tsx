@@ -1,3 +1,4 @@
+import { PageHeading } from '@/components/layout/page-heading'
 import type { Metadata } from 'next'
 import { ShowcaseManager } from '@/components/showcase/showcase-manager'
 
@@ -7,13 +8,8 @@ export const metadata: Metadata = {
 
 export default function ShowcasePage(): React.JSX.Element {
   return (
-    <div className="flex h-full flex-col space-y-4 overflow-y-auto">
-      <div>
-        <h1 className="text-xl font-bold text-cream">Showcase</h1>
-        <p className="text-sm text-cream-dark">
-          Curate trophy bucks into a public link you can share with prospective lessees.
-        </p>
-      </div>
+    <div className="mx-auto max-w-[1180px]">
+      <PageHeading eyebrow="Share the season" title="Showcase" description="Choose the bucks you want to feature and share a closer look at your property." />
       <ShowcaseManager />
     </div>
   )

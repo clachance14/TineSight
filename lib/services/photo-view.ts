@@ -1,4 +1,5 @@
 import 'server-only'
+import { photoFailureReason } from '@/lib/photos/failure-reason'
 import { getPhoto, getSignedViewUrl, getAdjacentPhotos, type PhotoFilters } from '@/lib/services/photos'
 import type { Detection } from '@/types/database'
 
@@ -27,6 +28,9 @@ export interface PhotoViewDTO {
   fullResUrl: string | null
   detections: PhotoViewDetection[]
   detectionStatus: string
+  variantStatus: string
+  analysisFailureReason: string | null
+  previewFailureReason: string | null
   classification: string | null
   confidence: number | null
   capturedAt: string | null
@@ -66,7 +70,7 @@ export async function loadPhotoView(
       : Promise.resolve({ data: null, error: null }),
   ])
   const fullResUrl = fullResResult.data
-  const imageUrl = mediumResult.data ?? fullResUrl
+  const imageUrl = mediumResult.data
 
   const detections = (photo.detections as Array<Detection & {
     quality_status?: string | null
@@ -104,6 +108,9 @@ export async function loadPhotoView(
     fullResUrl: fullResUrl ?? null,
     detections,
     detectionStatus: photo.detection_status,
+    variantStatus: photo.variant_status,
+    analysisFailureReason: photoFailureReason('analysis', photo.detection_status, photo.error_message),
+    previewFailureReason: photoFailureReason('preview', photo.variant_status, photo.variant_error),
     classification: photo.classification,
     confidence: photo.confidence,
     capturedAt: photo.captured_at,

@@ -235,7 +235,7 @@ export async function updateUploadSessionStatus(
  */
 export async function getUploadSessionsWithCounts(
   userId: string,
-  limit: number = 50
+  limit = 50
 ): Promise<{
   data: Array<{
     id: string
@@ -246,10 +246,15 @@ export async function getUploadSessionsWithCounts(
 }> {
   const supabase = await createClient()
 
+  // A session that never received a batch (every batch-init call failed, or the
+  // client died right after creating it) has total_images = 0 and nothing to
+  // filter by. The batch trigger never fires for it, so it would otherwise sit at
+  // 'uploading' in this list forever.
   const { data, error } = await supabase
     .from('upload_sessions')
     .select('id, created_at, total_images')
     .eq('user_id', userId)
+    .gt('total_images', 0)
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -309,50 +314,52 @@ export async function cancelSession(
       .eq('user_id', userId)
       .single()
 
-    if (sessionError || !session) {
+    if (sessionError !== null) {
       return {
         data: null,
         error: new Error('Session not found or access denied'),
       }
     }
 
-    // 2. Get batch IDs for this session
-    const { data: batches, error: batchesError } = await supabase
-      .from('processing_batches')
-      .select('id')
-      .eq('upload_session_id', sessionId)
+    // Cancel the parent first: concurrent finalization/new batches must stop.
+    const { error: cancelError } = await supabase.from('upload_sessions').update({ status: 'cancelled', cancelled_at: new Date().toISOString(), completed_at: new Date().toISOString() } as never).eq('id', sessionId)
+    if (cancelError) return { data: null, error: cancelError }
 
-    if (batchesError) {
-      return { data: null, error: batchesError }
+    // Page IDs and chunk subsequent mutations: large imports exceed PostgREST URL/row limits.
+    const batchIds: string[] = []
+    for (let offset = 0; ; offset += 500) {
+      const { data: batches, error: batchesError } = await supabase
+        .from('processing_batches').select('id')
+        .eq('upload_session_id', sessionId).order('id').range(offset, offset + 499)
+      if (batchesError) return { data: null, error: batchesError }
+      batchIds.push(...(batches ?? []).map(batch => batch.id))
+      if (batches.length < 500) break
     }
 
-    const batchIds = batches?.map((b) => b.id) || []
-
     // 3. Atomically update batches to cancelled status (only those still processing)
-    const { data: cancelledBatches, error: batchUpdateError } = await supabase
+    const { count: cancelledBatchCount, error: batchUpdateError } = await supabase
       .from('processing_batches')
       .update({
         status: 'cancelled',
         cancelled_at: new Date().toISOString(),
-      } as never)
+      } as never, { count: 'exact' })
       .eq('upload_session_id', sessionId)
-      .eq('status', 'processing')
-      .select('id')
+      .in('status', ['pending', 'uploading', 'processing'])
 
     if (batchUpdateError) {
       return { data: null, error: batchUpdateError }
     }
 
-    const batchesCancelled = cancelledBatches?.length || 0
+    const batchesCancelled = cancelledBatchCount ?? 0
 
     // 4. Mark images for deletion based on scope
     let photosMarkedForDeletion = 0
 
-    if (batchIds.length > 0) {
+    for (let offset = 0; offset < batchIds.length; offset += 100) {
       let imageQuery = supabase
         .from('images')
-        .update({ is_cancelled: true } as never)
-        .in('batch_id', batchIds)
+        .update({ is_cancelled: true } as never, { count: 'exact' })
+        .in('batch_id', batchIds.slice(offset, offset + 100))
 
       // Apply scope filter
       if (deleteScope === 'pending') {
@@ -360,13 +367,13 @@ export async function cancelSession(
       }
       // For 'all' scope, no additional filter needed
 
-      const { data: markedImages, error: imageUpdateError } = await imageQuery.select('id')
+      const { count: markedImageCount, error: imageUpdateError } = await imageQuery
 
       if (imageUpdateError) {
         return { data: null, error: imageUpdateError }
       }
 
-      photosMarkedForDeletion = markedImages?.length || 0
+      photosMarkedForDeletion += markedImageCount ?? 0
     }
 
     // 5. Update session status to cancelled
@@ -383,7 +390,7 @@ export async function cancelSession(
     }
 
     // 6. Return stats
-    const totalImages = session.total_images || 0
+    const totalImages = session.total_images ?? 0
     const photosRetained = totalImages - photosMarkedForDeletion
 
     return {

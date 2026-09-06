@@ -1,12 +1,14 @@
 import { createClient } from '@/lib/supabase/server'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Separator } from '@/components/ui/separator'
+import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import { PageHeading } from '@/components/layout/page-heading'
 import type { Profile } from '@/types/database'
 
-export default async function SettingsPage() {
+export default async function SettingsPage(): Promise<React.JSX.Element> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
   let profile: Profile | null = null
   if (user) {
@@ -18,108 +20,77 @@ export default async function SettingsPage() {
     profile = data
   }
 
-  const getInitials = () => {
-    if (profile?.full_name) {
-      const names = profile.full_name.split(' ')
-      if (names.length >= 2 && names[0] && names[1]) {
-        const firstInitial = names[0][0]
-        const lastInitial = names[1][0]
-        if (firstInitial && lastInitial) {
-          return `${firstInitial}${lastInitial}`.toUpperCase()
-        }
-      }
-      const firstChar = names[0]?.[0]
-      if (firstChar) {
-        return firstChar.toUpperCase()
-      }
-    }
-    const emailChar = user?.email?.[0]
-    if (emailChar) {
-      return emailChar.toUpperCase()
-    }
-    return 'U'
-  }
-
-  const formatTier = (tier: string) => {
-    return tier.charAt(0).toUpperCase() + tier.slice(1)
-  }
-
+  const fullName = profile?.full_name?.trim() ?? ''
+  const name = fullName.length > 0 ? fullName : 'Your account'
+  const initial = (
+    profile?.full_name?.[0] ??
+    user?.email?.[0] ??
+    'U'
+  ).toUpperCase()
+  const tier = profile?.subscription_tier ?? 'Unavailable'
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="text-muted-foreground mt-2">
-          Manage your account settings and preferences.
-        </p>
-      </div>
-
-      <Separator />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Profile</CardTitle>
-          <CardDescription>
-            Your personal information and account details.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Avatar and Name */}
-          <div className="flex items-center gap-4">
-            <Avatar className="h-16 w-16">
-              <AvatarFallback className="bg-primary text-primary-foreground text-xl">
-                {getInitials()}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <p className="text-lg font-medium text-foreground">
-                {profile?.full_name || 'No name set'}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {user?.email}
-              </p>
-            </div>
+    <div className="mx-auto max-w-[1180px]">
+      <PageHeading
+        eyebrow="Make yourself at home"
+        title="Settings"
+        description="Your account details and sign-in settings."
+      />
+      <section className="max-w-3xl rounded-xl border border-forest-light bg-forest/20 p-5 sm:p-8">
+        <div className="flex items-center gap-4 border-b border-forest-light pb-6">
+          <div className="flex size-14 shrink-0 items-center justify-center rounded-full border border-brass/30 font-display text-2xl text-brass">
+            {initial}
           </div>
-
-          <Separator />
-
-          {/* Profile Details */}
-          <div className="grid gap-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Email</p>
-                <p className="text-foreground">{user?.email || '-'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Full Name</p>
-                <p className="text-foreground">{profile?.full_name || 'Not set'}</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Subscription Tier</p>
-                <p className="text-foreground">
-                  <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-sm font-medium text-primary">
-                    {formatTier(profile?.subscription_tier || 'free')}
-                  </span>
-                </p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Member Since</p>
-                <p className="text-foreground">
-                  {profile?.created_at
-                    ? new Date(profile.created_at).toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })
-                    : '-'
-                  }
-                </p>
-              </div>
-            </div>
+          <div className="min-w-0">
+            <h2 className="break-words font-display text-2xl">{name}</h2>
+            <p className="mt-1 break-all text-sm text-weathered">
+              {user?.email}
+            </p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+        <dl className="grid gap-6 py-7 sm:grid-cols-2">
+          <div>
+            <dt className="text-xs text-weathered">Full name</dt>
+            <dd className="mt-2 break-words text-sm">
+              {fullName.length > 0 ? fullName : 'Not provided'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-weathered">Email address</dt>
+            <dd className="mt-2 break-all text-sm">
+              {user?.email ?? 'Unavailable'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-weathered">Current plan</dt>
+            <dd className="mt-2 font-mono text-sm capitalize text-brass-light">
+              {tier}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-weathered">Member since</dt>
+            <dd className="mt-2 font-mono text-sm">
+              {profile?.created_at != null
+                ? new Date(profile.created_at).toLocaleDateString('en-US', {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })
+                : 'Unavailable'}
+            </dd>
+          </div>
+        </dl>
+        <div className="flex flex-col items-start justify-between gap-4 border-t border-forest-light pt-6 sm:flex-row sm:items-center">
+          <div>
+            <h3 className="text-sm">Password & sign-in</h3>
+            <p className="mt-2 text-sm leading-6 text-weathered">
+              Request an email link to choose a new password.
+            </p>
+          </div>
+          <Button asChild className="min-h-12 shrink-0">
+            <Link href="/forgot-password">Reset password</Link>
+          </Button>
+        </div>
+      </section>
     </div>
   )
 }

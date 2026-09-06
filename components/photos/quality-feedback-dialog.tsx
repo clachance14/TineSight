@@ -219,7 +219,7 @@ export function QualityFeedbackDialog({
             type="button"
             onClick={handleSubmit}
             disabled={!isValid || isSubmitting}
-            className="bg-copper hover:bg-copper-light"
+            className="border-brass/60 bg-transparent text-brass-light hover:bg-brass/10"
           >
             {isSubmitting ? (
               <>

@@ -243,6 +243,7 @@ export async function mergeCluster(
   targetClusterId: string
 ): Promise<{ data: boolean; error: Error | null }> {
   const supabase = await createClient()
+  if (clusterId === targetClusterId) return { data: false, error: new Error('Choose a different candidate group') }
 
   // Verify both clusters exist and belong to same user
   const { data: sourceCluster } = await supabase
@@ -290,18 +291,20 @@ export async function mergeCluster(
   }
 
   // Update target cluster member count
-  const { data: newMemberCount } = await supabase
+  const { count: newMemberCount, error: countError } = await supabase
     .from('trophy_cluster_members')
     .select('id', { count: 'exact', head: true })
     .eq('cluster_id', targetClusterId)
 
-  await supabase
+  if (countError) return { data: false, error: new Error(countError.message) }
+  const { error: targetError } = await supabase
     .from('trophy_clusters')
     .update({
-      member_count: newMemberCount || 0,
+      member_count: newMemberCount ?? 0,
       updated_at: new Date().toISOString(),
     } as never)
     .eq('id', targetClusterId)
+  if (targetError) return { data: false, error: new Error(targetError.message) }
 
   // Mark source cluster as merged
   const { error: mergeError } = await supabase
@@ -383,19 +386,30 @@ export async function splitCluster(
   }
 
   // Update original cluster member count
-  const { data: remainingCount } = await supabase
+  const { count: remainingCount, error: countError } = await supabase
     .from('trophy_cluster_members')
     .select('id', { count: 'exact', head: true })
     .eq('cluster_id', clusterId)
 
-  await supabase
+  if (countError) return { data: null, error: new Error(countError.message) }
+  const { data: remaining, error: representativeError } = await supabase
+    .from('trophy_cluster_members')
+    .select('detection_id')
+    .eq('cluster_id', clusterId)
+    .order('id')
+    .limit(1)
+  if (representativeError) return { data: null, error: new Error(representativeError.message) }
+
+  const { error: sourceError } = await supabase
     .from('trophy_clusters')
     .update({
-      member_count: remainingCount || 0,
-      status: 'split',
+      member_count: remainingCount ?? 0,
+      status: (remainingCount ?? 0) > 0 ? 'pending' : 'split',
+      representative_detection_id: remaining?.[0]?.detection_id ?? null,
       updated_at: new Date().toISOString(),
     } as never)
     .eq('id', clusterId)
+  if (sourceError) return { data: null, error: new Error(sourceError.message) }
 
   return { data: newCluster as TrophyCluster, error: null }
 }

@@ -1,0 +1,47 @@
+# Planning intent recovered from the project history
+
+The operator workflow is already the stated purpose of TineSight. The main gap is delivery across successive features and redesigns. Old documents establish intent; newer accepted decisions and the user's September clarification govern conflicts. Historical implementation commands were read as documentation, not executed.
+
+## Timeline and what it establishes
+
+| Source | Established intent | Implication for this audit |
+| --- | --- | --- |
+| [Foundation design session, Dec 1](../../plans/2025-12-01-foundation-design-session.md) and [product vision](../../../.specify/memory/product-vision.md) | Operators manage 10–20+ cameras, face thousands of photos and volume overwhelm, then need individual Buck identification. Returning-user journey is Upload → AI Triage → Confirm matches → growing Catalog. | Efficient recurring triage is a prerequisite to the re-ID value proposition. Upload and filtering failures are central product failures. |
+| [Original PRD](../../../MVP%20Documents/TineSight_PRD.md), §§4.1–4.5 | SD-card/folder imports, duplicate handling, camera/location assignment, Animal/Human/Vehicle/Empty classes, confidence thresholds, archive rules, and filtering by date/camera/deer/species/confidence. | Most proposed source/content filters are established requirements. Numerical time-saving claims are targets, not measured outcomes. |
+| [Photo pipeline spec 002](../../../specs/002-photo-pipeline/spec.md), stories 1–3 and 7 | Bulk upload with per-file/batch progress, retry only failed work, browse useful detections, correct mistakes, keyboard review, clear failed-photo recovery. | The audit's false-success, retry, invisible-error, and browsing defects violate the original workflow. |
+| [Confidence-filter spec 004](../../../specs/004-photo-confidence-filter/spec.md), stories 1–5 | Start with a clean view; adjust confidence; retain thresholds when toggled; visibly explain active filters; restore exact shared filter context. | Confidence filtering is not a new invention. The old specific 50%/Has Deer default must be reconciled with later trophy-tier decisions. |
+| [Gemini pipeline spec 005](../../../specs/005-gemini-deer-pipeline/spec.md), story 2, FR006–008 | Triage by bucks/does/points, useful summaries, bulk archiving of empty material, reach high-point Bucks in two clicks. | Review should reduce work in a few actions. “No deer” cannot safely stand in for “empty” under later people/vehicle protections. |
+| [Photo-location spec 010](../../../specs/010-photo-location/spec.md) and [saved location plan](../../../.cursor/plans/2025-12-19-photo-location-feature.md) | Optional location assignment at upload, area filtering, No Area Assigned, and batch-level location because cameras move between uploads. | Preserve historical capture location; don't derive it only from the camera's current position. The one-source batch assumption needs explicit source grouping for mixed-card bulk imports. |
+| [10K bulk-upload spec 012](../../../specs/012-bulk-upload/spec.md) and [plan](../../../specs/012-bulk-upload/plan.md), Dec 26 | Memory-bounded folder upload, early processing results, separate transfer/analysis progress, gallery browsing during uploads, refresh recovery by reselecting the folder and skipping completed files. | These are existing acceptance criteria, not optional future polish. A pre-created row cannot count as a completed transfer for recovery. |
+| [June mobile-hardening charter](../../plans/2026-06-20-mobile-core-hardening.md) | Desktop imports; mobile browsing/filtering/re-ID; thumbnail-only lists and bounded rendering. Upload/camera/location redesign explicitly left out of that increment. | The later mobile work did not claim to redesign the desktop card-pull workflow. Focus import optimization on desktop and fast review on both desktop and phone. |
+| [ADR 0004](../../adr/0004-trophy-gated-ai-cost-cascade.md), invariant 7; [score-gate roadmap](../../superpowers/plans/2026-06-20-trophy-score-gate.md), Plan 3 | Trophies first, lower animal tiers collapsed but preserved; people/vehicles have a separate security surface and are never auto-hidden. Trophy means numeric Score, not qualitative size impression. | This is the most specific later gallery intent. The surfacing work was explicitly deferred, explaining why scoring infrastructure and today's gallery disagree. |
+| [ADR 0005](../../adr/0005-automatic-fingerprint-first-reid.md) | Automatic match proposals after fingerprinting, operator confirmation of identities, trophy-band cost constraint. | Do not turn fast trash triage or event grouping into automatic merging of Buck identities. |
+| September user clarification | Dozens of cameras, multiple locations, bulk imports several times per week, elegant slicing of unwanted material. | Prioritize source accuracy, repeatable views, quick triage, and recovery. Reconnect existing capabilities before adding a large new filter system. |
+
+## What is established, unfinished, or newly proposed
+
+**Established product intent:** bulk folder/SD-card ingestion; accurate source attribution; resilient retry/reselect recovery; early results; separate upload and processing progress; location/camera/date/content filters; clean initial presentation; preserved filter context; reversible handling of unwanted frames; human-confirmed Buck identification.
+
+**Existing code that needs integration or repair:** source/camera/session controls, confidence and quality controls, saved filter presets, triage and bulk-selection components exist outside the simplified active gallery. Presence of a component or a checked task box does not establish that users can reach it. The active page exposes a narrower set through `PhotoQuickFilters` and `PhotoMoreFiltersSheet`. Pagination, dates, detail context, and upload lifecycle have the concrete defects listed in the audit.
+
+**Explicitly deferred later intent:** the canonical photo-tier/security presentation from Plan 3, including trophy-first browsing and lower-tier collapse. Treat this as unfinished planned work. Do not present a fresh blanket “hide non-deer” default as compatible with ADR 0004.
+
+**New proposal details requiring design validation:** naming an import “Friday card pull”; remembering folder-to-source mappings; physical-camera deployment records if batch snapshots prove insufficient; event/burst grouping; relative saved periods; sunrise-relative exploration; camera efficiency comparisons; shortcut and review-state details. These develop the existing goal, but were not all promised in the recovered documents.
+
+## Conflicts resolved in the recommendation
+
+- **Clean view:** retain the intent to remove noise. Prefer the later Score-based trophy-first tiers and separate security view over blindly reinstating the December 50% Has Deer default. An Import scope can show the latest pull while the selected presentation remains trophy-first.
+- **Trash:** distinguish empty from non-deer. Humans, vehicles, other wildlife, and uncertain photos must not disappear merely because no deer was detected. Initial cleanup is reversible; permanent deletion is distinct.
+- **Time:** import scope/recently uploaded answers “what did I just bring in?” Capture date answers “when did it happen?” A camera clock error must not make the current Import inaccessible.
+- **Location:** old batch-level snapshots deliberately preserve camera moves. Mixed-location imports need multiple confirmed source groups under one operator-visible Import; transport chunks are not reliable location boundaries.
+- **Recovery:** December explicitly deferred automatic persistence after browser crash and upload continuation after tab closure. Do not call those deferred features regressions. The promised folder-reselection recovery is still broken by dedup against incomplete reservations.
+- **Scale targets:** 30 GB at 100 Mbps requires at least 40 minutes of transfer in ideal decimal units, before overhead. The old under-15-minute criterion is impossible as written and should be replaced with bandwidth-aware goals. Memory, time-to-first-result, and recovery targets still deserve measurement.
+- **Stack and tests:** old references to Next 14/React 18, Replicate, Mapbox, Vitest, and Playwright do not override current code and accepted architecture/testing ADRs. Likewise, old speculative model-learning and accuracy claims are not proof of implemented learning.
+
+## Product recommendation grounded in that intent
+
+Make each card pull an accountable Import with source groups. Let the operator enter a clean, trophy-first review of that Import, with lower-value tiers collapsed and security detections visible. Provide a small, composable filter bar and reusable views; make grid, detail, counts, and bulk actions agree exactly. Preserve a way to inspect all frames, correct AI mistakes, and retry failed work.
+
+The detailed [operator workflow proposal](operator-workflow.md) describes the interaction. The [code audit](README.md) identifies the fixes needed to make it trustworthy. Full absent session transcripts remain unavailable; this reconstruction uses the retained plans/specs, local conversation text, and session-index summaries rather than claiming access to missing history.
+
+Requirement-by-requirement evidence: [upload and location traceability](upload-intent-detail.md), [filtering and triage traceability](filter-intent-detail.md). Upload implementation references are snapshot-based because a separate session began applying fixes during the review.

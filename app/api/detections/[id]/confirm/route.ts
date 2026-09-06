@@ -75,11 +75,18 @@ export async function POST(
       )
     }
 
+    const { data: ownedBuck } = await supabase.from('deer').select('id')
+      .eq('id', body.deerId).eq('user_id', user.id).maybeSingle()
+    if (!ownedBuck) return NextResponse.json({ error: 'Buck not found' }, { status: 404 })
+
     // Link detection directly to deer (bypass match_candidates for direct confirmation)
     const { error: updateError } = await supabase
       .from('detections')
       .update({ deer_id: body.deerId } as never)
       .eq('id', id)
+      .is('deleted_at', null)
+      .select('id')
+      .single()
 
     if (updateError !== null) {
       console.error('Failed to confirm match:', updateError)

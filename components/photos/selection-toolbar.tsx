@@ -213,6 +213,7 @@ export function SelectionToolbar({
       <LocationPickerModal
         isOpen={showLocationPicker}
         onConfirm={handleLocationConfirm}
+        onClose={() => setShowLocationPicker(false)}
         onSkip={() => setShowLocationPicker(false)}
         existingLocations={locations}
       />

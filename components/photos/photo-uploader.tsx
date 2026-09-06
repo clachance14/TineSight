@@ -1,13 +1,16 @@
 'use client'
 
 import { useCallback, useState, useMemo, useRef, useEffect } from 'react'
-import { useDropzone } from 'react-dropzone'
+import { useDropzone, type FileRejection } from 'react-dropzone'
 import { Upload, Image as ImageIcon, X, FileImage, Trash2, HardDrive, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { useUploadStore } from '@/lib/stores/upload'
 import { useAdaptiveThrottle } from '@/lib/hooks/use-adaptive-throttle'
+import { registerUploadRun, releaseUploadRun } from '@/lib/upload/active-run'
+import { DuplicateChecker } from '@/lib/upload/dedup'
+import { hashPhotoContent } from '@/lib/upload/content-hash'
 import { extractMetadata } from '@/lib/image/exif'
 import { cn } from '@/lib/utils'
 
@@ -18,15 +21,13 @@ const ACCEPTED_IMAGE_TYPES = {
   'image/webp': ['.webp'],
 }
 
-const MAX_THUMBNAIL_SIZE = 300
-
 interface PhotoUploaderProps {
   onStartUpload?: () => void
   onFilesReady?: () => void
   className?: string
 }
 
-export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoUploaderProps) {
+export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoUploaderProps): React.JSX.Element {
   const { uploadQueue, addFiles, clearQueue, isUploading } = useUploadStore()
   const [rejectionWarning, setRejectionWarning] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -107,64 +108,8 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
   }
 
-  const generateThumbnail = useCallback(async (file: File): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-
-      reader.onload = (e) => {
-        const img = new Image()
-
-        img.onload = () => {
-          const canvas = document.createElement('canvas')
-          const ctx = canvas.getContext('2d')
-
-          if (!ctx) {
-            reject(new Error('Failed to get canvas context'))
-            return
-          }
-
-          // Calculate dimensions maintaining aspect ratio
-          let width = img.width
-          let height = img.height
-
-          if (width > height) {
-            if (width > MAX_THUMBNAIL_SIZE) {
-              height = (height * MAX_THUMBNAIL_SIZE) / width
-              width = MAX_THUMBNAIL_SIZE
-            }
-          } else {
-            if (height > MAX_THUMBNAIL_SIZE) {
-              width = (width * MAX_THUMBNAIL_SIZE) / height
-              height = MAX_THUMBNAIL_SIZE
-            }
-          }
-
-          canvas.width = width
-          canvas.height = height
-
-          ctx.drawImage(img, 0, 0, width, height)
-          resolve()
-        }
-
-        img.onerror = () => {
-          reject(new Error('Failed to load image'))
-        }
-
-        if (e.target?.result) {
-          img.src = e.target.result as string
-        }
-      }
-
-      reader.onerror = () => {
-        reject(new Error('Failed to read file'))
-      }
-
-      reader.readAsDataURL(file)
-    })
-  }, [])
-
   const onDrop = useCallback(
-    async (acceptedFiles: File[], rejectedFiles: any[]) => {
+    async (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
       // Clear any previous warnings
       setRejectionWarning(null)
 
@@ -172,7 +117,7 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
       if (rejectedFiles.length > 0) {
         const rejectedCount = rejectedFiles.length
         setRejectionWarning(
-          `${rejectedCount} file${rejectedCount > 1 ? 's' : ''} rejected. Only JPEG, PNG, HEIC, and WebP images are accepted.`
+          `${rejectedCount} file${rejectedCount > 1 ? 's' : ''} rejected. Only JPEG, PNG, HEIC, and WebP images up to 50 MB are accepted.`
         )
 
         // Auto-clear warning after 5 seconds
@@ -181,6 +126,8 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
 
       // Process accepted files
       if (acceptedFiles.length > 0) {
+        const runId = crypto.randomUUID()
+        const controller = registerUploadRun(runId)
         setIsProcessing(true)
         isProcessingRef.current = true
         progressCounterRef.current = 0
@@ -188,11 +135,13 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
         lastProgressTimeRef.current = 0
         setProcessingProgress({ current: 0, total: acceptedFiles.length })
 
+        try {
         // Start the session timer
         throttle.startSession()
 
         const processedFiles: Array<{
           file: File
+          contentSha256: string
           capturedAt: Date | null
           make: string | null
           model: string | null
@@ -205,15 +154,16 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
         let processedCount = 0
 
         // Per-file progress update (throttled via RAF)
-        const incrementProgress = () => {
+        const incrementProgress = (): void => {
           if (!isProcessingRef.current) return
           progressCounterRef.current += 1
           scheduleProgressUpdate()
         }
 
         while (processedCount < acceptedFiles.length) {
+          controller.signal.throwIfAborted()
           // Re-fetch batch size each iteration (adapts based on previous success/failure)
-          const batchSize = throttle.getChunkSize()
+          const batchSize = 2
           const batch = acceptedFiles.slice(processedCount, processedCount + batchSize)
 
           console.log(`[Throttle] Processing batch of ${batch.length} (chunk size: ${batchSize}, processed: ${processedCount}/${acceptedFiles.length})`)
@@ -221,8 +171,9 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
           const batchStartTime = Date.now()
 
           try {
-            const batchResults = await Promise.all(
+            const batchResults = await Promise.allSettled(
               batch.map(async (file) => {
+                const contentSha256 = await hashPhotoContent(file)
                 // Extract EXIF metadata
                 const metadata = await extractMetadata(file).catch((error) => {
                   console.error(`Failed to extract EXIF from ${file.name}:`, error)
@@ -236,16 +187,12 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
                   }
                 })
 
-                // Generate thumbnail (don't block on failure)
-                await generateThumbnail(file).catch((error) => {
-                  console.error(`Failed to generate thumbnail for ${file.name}:`, error)
-                })
-
                 // Update progress after each file completes
                 incrementProgress()
 
                 return {
                   file,
+                  contentSha256,
                   capturedAt: metadata.capturedAt,
                   make: metadata.make,
                   model: metadata.model,
@@ -256,7 +203,10 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
               })
             )
 
-            processedFiles.push(...batchResults)
+            const successful = batchResults.filter((result): result is PromiseFulfilledResult<(typeof processedFiles)[number]> => result.status === 'fulfilled')
+            processedFiles.push(...successful.map(result => result.value))
+            const unreadable = batchResults.length - successful.length
+            if (unreadable !== 0) setRejectionWarning(`${unreadable} photo${unreadable === 1 ? '' : 's'} could not be read. Please select those files again.`)
             processedCount += batch.length
 
             // Record successful batch processing - this triggers AIMD to increase batch size
@@ -274,8 +224,16 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
         // Stop the session timer
         throttle.stopSession()
 
-        // Add files with metadata to upload queue
-        addFiles(processedFiles)
+        controller.signal.throwIfAborted()
+        // A repeat import compares original bytes, never camera filenames.
+        const duplicates = await new DuplicateChecker().checkDuplicates(processedFiles.map(item => ({ filename: item.file.name, size: item.file.size, contentSha256: item.contentSha256 })))
+        controller.signal.throwIfAborted()
+        const seenHashes = new Set(duplicates.existingHashes ?? [])
+        const uniqueFiles = processedFiles.filter(item => { if (seenHashes.has(item.contentSha256)) return false; seenHashes.add(item.contentSha256); return true })
+        const existingQueue = useUploadStore.getState().uploadQueue
+        if (existingQueue.length > 0 && existingQueue.every(file => file.status === 'completed' || file.status === 'failed')) clearQueue()
+        addFiles(uniqueFiles)
+        if (uniqueFiles.length < processedFiles.length) setRejectionWarning(`${processedFiles.length - uniqueFiles.length} duplicate photo${processedFiles.length - uniqueFiles.length === 1 ? '' : 's'} skipped.`)
 
         // Cleanup and ensure final state shows 100%
         isProcessingRef.current = false
@@ -289,22 +247,31 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
         setIsProcessing(false)
 
         // Notify parent that files are ready (for location picker flow)
-        if (onFilesReady) {
+        if (onFilesReady && uniqueFiles.length > 0) {
           onFilesReady()
+        }
+        } catch (error) {
+          setRejectionWarning(error instanceof Error ? error.message : 'Photo preparation failed. Please try again.')
+        } finally {
+          releaseUploadRun(runId)
+          throttle.stopSession()
+          isProcessingRef.current = false
+          setIsProcessing(false)
         }
       }
     },
-    [addFiles, generateThumbnail, onFilesReady, throttle, scheduleProgressUpdate]
+    [addFiles, clearQueue, onFilesReady, throttle, scheduleProgressUpdate]
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
+    onDrop: (accepted, rejected) => { void onDrop(accepted, rejected) },
     accept: ACCEPTED_IMAGE_TYPES,
     disabled: isUploading || isProcessing,
     multiple: true,
+    maxSize: 50 * 1024 * 1024,
   })
 
-  const handleStartUpload = () => {
+  const handleStartUpload = (): void => {
     if (onStartUpload) {
       onStartUpload()
     }
@@ -352,7 +319,7 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
             or click to browse your files
           </p>
           <p className="text-xs text-cream-dark/70">
-            Supports JPEG, PNG, HEIC, and WebP
+            JPEG, PNG, HEIC, and WebP · Up to 50 MB per photo
           </p>
         </div>
 
@@ -372,7 +339,7 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
             <div className="text-center w-64">
               <Loader2 className="mb-3 h-8 w-8 animate-spin text-copper mx-auto" />
               <p className="text-sm font-medium text-cream mb-2">
-                Processing photos...
+                Preparing your photo group…
               </p>
               <p className="text-xs text-cream-dark mb-3">
                 {processingProgress.current} of {processingProgress.total} files
@@ -397,7 +364,7 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
       </div>
 
       {/* Rejection warning */}
-      {rejectionWarning && (
+      {(rejectionWarning != null) && (
         <div className="mt-4 flex items-start gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
           <X className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
           <p className="text-sm text-destructive">{rejectionWarning}</p>
@@ -408,7 +375,7 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
       {queueCount > 0 && !isUploading && (
         <Card className="mt-4 border-copper/30 bg-slate/50">
           <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               {/* Summary Info */}
               <div className="flex items-center gap-6">
                 <div className="flex items-center gap-2">
@@ -456,7 +423,7 @@ export function PhotoUploader({ onStartUpload, onFilesReady, className }: PhotoU
                   className="bg-copper hover:bg-copper-light text-slate-deep font-medium"
                 >
                   <Upload className="h-4 w-4 mr-1" />
-                  Start Upload
+                  Review & upload
                 </Button>
               </div>
             </div>

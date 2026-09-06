@@ -64,7 +64,7 @@ export const UPLOAD_CONFIG = {
    * Minimum upload timeout (ms).
    * Ensures slow connections have adequate time.
    */
-  MIN_UPLOAD_TIMEOUT_MS: 30000,
+  MIN_UPLOAD_TIMEOUT_MS: 120_000,
 
   /**
    * Default upload timeout (ms).
@@ -76,7 +76,7 @@ export const UPLOAD_CONFIG = {
    * Timeout scaling factor (ms per MB).
    * Adds extra time based on file size.
    */
-  TIMEOUT_PER_MB_MS: 5000,
+  TIMEOUT_PER_MB_MS: 60_000,
 } as const
 
 // Supported image MIME types for bulk upload
@@ -106,7 +106,28 @@ export function isSupportedMimeType(mimeType: string): mimeType is SupportedMime
 }
 
 /**
- * Calculate adaptive timeout based on file size
+ * Content type to declare for a file when initiating an upload.
+ *
+ * Browsers report an empty `File.type` for some pickers (SD-card and USB folder
+ * pickers on Android, some Files-app paths on iOS). The uploaders accept those
+ * files by extension, so the server must be told the type by extension too —
+ * POST /api/photos/upload rejects the WHOLE chunk on an unsupported content type,
+ * and an empty string is unsupported. Unknown extensions resolve to '' so the
+ * server still rejects them with a clear message rather than being lied to.
+ */
+export function resolveUploadContentType(
+  filename: string,
+  mimeType: string | null | undefined
+): string {
+  if (mimeType !== null && mimeType !== undefined && mimeType !== '') return mimeType
+  const dot = filename.lastIndexOf('.')
+  const ext = dot === -1 ? '' : filename.slice(dot).toLowerCase()
+  return MIME_TYPE_MAP[ext] ?? ''
+}
+
+/**
+ * Size-scaled transfer deadline: generous, because SD-card-to-cellular transfers of
+ * large originals must not time out. Used by the shared XHR transfer.
  */
 export function calculateUploadTimeout(fileSizeBytes: number): number {
   const fileSizeMB = fileSizeBytes / (1024 * 1024)

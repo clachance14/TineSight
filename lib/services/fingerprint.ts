@@ -65,11 +65,11 @@ export async function getTrophyDetections(
   const { data, error } = await supabase
     .from('detections')
     .select('id, crop_file_path, antler_fingerprint, images!inner(user_id, captured_at)')
-    .eq('size_class', 'trophy')
+    .eq('is_trophy', true)
     .eq('images.user_id', userId)
     .not('antler_fingerprint', 'is', null)
     .is('deleted_at', null)
-    .order('images.captured_at', { ascending: false })
+    .order('created_at', { ascending: false })
 
   if (error) {
     return { data: null, error }
@@ -77,7 +77,7 @@ export async function getTrophyDetections(
 
   // Map to flatten the joined structure
   // Type assertion needed until database types are regenerated
-  const mapped = (data || []).map((d) => {
+  const mapped = (data ?? []).map((d) => {
     const detection = d as unknown as {
       id: string
       crop_file_path: string | null

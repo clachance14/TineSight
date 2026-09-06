@@ -16,6 +16,7 @@ import exifr from 'exifr'
  */
 export interface ExifData {
   /** Camera manufacturer */
+  serialNumber?: string
   make?: string
   /** Camera model */
   model?: string
@@ -54,6 +55,9 @@ export interface WorkerOutput {
  * Using exifr's pick option for efficient selective parsing
  */
 const EXIF_PICK_FIELDS = [
+  'SerialNumber',
+  'BodySerialNumber',
+  'CameraSerialNumber',
   'Make',
   'Model',
   'DateTimeOriginal',
@@ -79,9 +83,9 @@ async function parseExif(buffer: ArrayBuffer): Promise<ExifData | null> {
       gps: true,
       // Parse dates as Date objects
       reviveValues: true,
-    })
+    }) as Record<string, unknown> | null
 
-    if (!result) {
+    if (result === null) {
       return null
     }
 
@@ -89,29 +93,32 @@ async function parseExif(buffer: ArrayBuffer): Promise<ExifData | null> {
     const exifData: ExifData = {}
 
     // Camera info
-    if (result.Make) {
-      exifData.make = String(result.Make).trim()
+    if (typeof result['Make'] === 'string') {
+      exifData.make = String(result['Make']).trim()
     }
-    if (result.Model) {
-      exifData.model = String(result.Model).trim()
+    if (typeof result['Model'] === 'string') {
+      exifData.model = String(result['Model']).trim()
     }
 
+    const serial = result['BodySerialNumber'] ?? result['CameraSerialNumber'] ?? result['SerialNumber']
+    if (typeof serial === 'string' || typeof serial === 'number') exifData.serialNumber = String(serial).trim()
+
     // Capture date
-    if (result.DateTimeOriginal) {
-      exifData.dateTimeOriginal = result.DateTimeOriginal
+    if (result['DateTimeOriginal'] instanceof Date || typeof result['DateTimeOriginal'] === 'string') {
+      exifData.dateTimeOriginal = result['DateTimeOriginal']
     }
 
     // GPS coordinates (exifr already calculates decimal degrees with gps: true)
-    if (typeof result.latitude === 'number' && !isNaN(result.latitude)) {
-      exifData.latitude = result.latitude
+    if (typeof result['latitude'] === 'number' && !isNaN(result['latitude'])) {
+      exifData.latitude = result['latitude']
     }
-    if (typeof result.longitude === 'number' && !isNaN(result.longitude)) {
-      exifData.longitude = result.longitude
+    if (typeof result['longitude'] === 'number' && !isNaN(result['longitude'])) {
+      exifData.longitude = result['longitude']
     }
 
     // Image dimensions - try multiple possible field names
-    const width = result.ImageWidth ?? result.ExifImageWidth ?? result.PixelXDimension
-    const height = result.ImageHeight ?? result.ExifImageHeight ?? result.PixelYDimension
+    const width = result['ImageWidth'] ?? result['ExifImageWidth'] ?? result['PixelXDimension']
+    const height = result['ImageHeight'] ?? result['ExifImageHeight'] ?? result['PixelYDimension']
 
     if (typeof width === 'number' && width > 0) {
       exifData.imageWidth = width

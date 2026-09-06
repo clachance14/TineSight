@@ -4,6 +4,7 @@ import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { dateInputValue, localDateBoundary } from "@/lib/photos/date-range"
 
 export type DatePreset = 'today' | 'last7days' | 'last30days' | 'custom'
 
@@ -21,19 +22,22 @@ interface PhotoDateRangePickerProps {
 export function PhotoDateRangePicker({
   dateFrom,
   dateTo,
-  datePreset = 'last30days',
+  datePreset,
   onDateChange,
-}: PhotoDateRangePickerProps) {
-  const [localDateFrom, setLocalDateFrom] = React.useState(dateFrom || '')
-  const [localDateTo, setLocalDateTo] = React.useState(dateTo || '')
+}: PhotoDateRangePickerProps): React.JSX.Element {
+  const [localPreset, setLocalPreset] = React.useState<DatePreset>('custom')
+  const selectedPreset = datePreset ?? localPreset
+  const [localDateFrom, setLocalDateFrom] = React.useState(dateInputValue(dateFrom))
+  const [localDateTo, setLocalDateTo] = React.useState(dateInputValue(dateTo))
 
   // Update local state when props change
   React.useEffect(() => {
-    setLocalDateFrom(dateFrom || '')
-    setLocalDateTo(dateTo || '')
+    setLocalDateFrom(dateInputValue(dateFrom))
+    setLocalDateTo(dateInputValue(dateTo))
   }, [dateFrom, dateTo])
 
   const handlePresetClick = React.useCallback((preset: DatePreset) => {
+    setLocalPreset(preset)
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
@@ -60,32 +64,32 @@ export function PhotoDateRangePicker({
       }
       case 'last7days': {
         const sevenDaysAgo = new Date(today)
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6)
         newDateFrom = toLocalDateString(sevenDaysAgo)
         newDateTo = toLocalDateString(today)
         break
       }
       case 'last30days': {
         const thirtyDaysAgo = new Date(today)
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29)
         newDateFrom = toLocalDateString(thirtyDaysAgo)
         newDateTo = toLocalDateString(today)
         break
       }
       case 'custom': {
         // For custom, keep the current dates or clear them
-        newDateFrom = localDateFrom || undefined
-        newDateTo = localDateTo || undefined
+        newDateFrom = (localDateFrom !== '' ? localDateFrom : undefined)
+        newDateTo = (localDateTo !== '' ? localDateTo : undefined)
         break
       }
     }
 
-    setLocalDateFrom(newDateFrom || '')
-    setLocalDateTo(newDateTo || '')
+    setLocalDateFrom(newDateFrom ?? '')
+    setLocalDateTo(newDateTo ?? '')
 
     onDateChange({
-      ...(newDateFrom ? { dateFrom: newDateFrom } : {}),
-      ...(newDateTo ? { dateTo: newDateTo } : {}),
+      ...((newDateFrom !== null && newDateFrom !== undefined && newDateFrom !== '') ? { dateFrom: localDateBoundary(newDateFrom) } : {}),
+      ...((newDateTo !== null && newDateTo !== undefined && newDateTo !== '') ? { dateTo: localDateBoundary(newDateTo, true) } : {}),
       datePreset: preset,
     })
   }, [localDateFrom, localDateTo, onDateChange])
@@ -94,18 +98,19 @@ export function PhotoDateRangePicker({
     field: 'from' | 'to',
     value: string
   ) => {
+    setLocalPreset('custom')
     if (field === 'from') {
       setLocalDateFrom(value)
       onDateChange({
-        ...(value ? { dateFrom: value } : {}),
-        ...(localDateTo ? { dateTo: localDateTo } : {}),
+        ...((value !== null && value !== undefined && value !== '') ? { dateFrom: localDateBoundary(value) } : {}),
+        ...((localDateTo !== null && localDateTo !== undefined && localDateTo !== '') ? { dateTo: localDateBoundary(localDateTo, true) } : {}),
         datePreset: 'custom',
       })
     } else {
       setLocalDateTo(value)
       onDateChange({
-        ...(localDateFrom ? { dateFrom: localDateFrom } : {}),
-        ...(value ? { dateTo: value } : {}),
+        ...((localDateFrom !== null && localDateFrom !== undefined && localDateFrom !== '') ? { dateFrom: localDateBoundary(localDateFrom) } : {}),
+        ...((value !== null && value !== undefined && value !== '') ? { dateTo: localDateBoundary(value, true) } : {}),
         datePreset: 'custom',
       })
     }
@@ -138,7 +143,7 @@ export function PhotoDateRangePicker({
               // MATERIAL — brass hairline + faint tint + brass text — never a
               // flat copper fill (DESIGN.md anti-slop guardrail).
               "h-11 transition-colors duration-200",
-              datePreset === preset.value &&
+              selectedPreset === preset.value &&
                 "border-brass bg-brass/10 text-brass hover:bg-brass/15"
             )}
           >
@@ -148,7 +153,7 @@ export function PhotoDateRangePicker({
       </div>
 
       {/* Custom Date Inputs */}
-      {datePreset === 'custom' && (
+      {selectedPreset === 'custom' && (
         <div className="space-y-3 pt-2 border-t border-border">
           <div className="space-y-2">
             <label
@@ -162,7 +167,7 @@ export function PhotoDateRangePicker({
               type="date"
               value={localDateFrom}
               onChange={(e) => handleCustomDateChange('from', e.target.value)}
-              max={localDateTo || undefined}
+              max={(localDateTo !== '' ? localDateTo : undefined)}
               className="w-full dark:bg-card/50"
             />
           </div>
@@ -179,7 +184,7 @@ export function PhotoDateRangePicker({
               type="date"
               value={localDateTo}
               onChange={(e) => handleCustomDateChange('to', e.target.value)}
-              min={localDateFrom || undefined}
+              min={(localDateFrom !== '' ? localDateFrom : undefined)}
               className="w-full dark:bg-card/50"
             />
           </div>
@@ -187,7 +192,7 @@ export function PhotoDateRangePicker({
       )}
 
       {/* Date Range Summary */}
-      {datePreset !== 'custom' && (dateFrom || dateTo) && (
+      {selectedPreset !== 'custom' && ((dateFrom !== null && dateFrom !== undefined && dateFrom !== '') || (dateTo !== null && dateTo !== undefined && dateTo !== '')) && (
         <div className="text-xs text-muted-foreground pt-2 border-t border-border">
           {dateFrom === dateTo ? (
             <span>{formatDate(dateFrom)}</span>
@@ -203,10 +208,10 @@ export function PhotoDateRangePicker({
 }
 
 function formatDate(dateStr: string | undefined): string {
-  if (!dateStr) return 'N/A'
+  if ((dateStr === undefined || dateStr === '')) return 'N/A'
 
   try {
-    const date = new Date(dateStr + 'T00:00:00')
+    const date = new Date(dateInputValue(dateStr) + 'T00:00:00')
     return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',

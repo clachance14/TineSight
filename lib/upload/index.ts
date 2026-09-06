@@ -13,9 +13,6 @@ export * from './types'
 // Chunker - file chunking utilities
 export * from './chunker'
 
-// Uploader - upload orchestration
-export * from './uploader'
-
 // Dedup - duplicate detection
 export * from './dedup'
 

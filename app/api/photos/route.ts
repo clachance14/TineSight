@@ -1,7 +1,9 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getPhotos, type PhotoSortField, type OtherAnimalType } from '@/lib/services/photos'
+import { getPhotos, type PhotoFilters } from '@/lib/services/photos'
+import { parsePhotoFilters } from '@/lib/photos/filters'
+import { photoOrder, encodePhotoCursor } from '@/lib/photos/order'
 import { getCachedSignedUrls } from '@/lib/cache/signed-url-cache'
 import type { Image } from '@/types/database'
 
@@ -36,347 +38,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Parse query parameters
-    const { searchParams } = new URL(request.url)
-    const status = searchParams.get('status')
-    const hasDeerParam = searchParams.get('hasDeer')
-    const batchId = searchParams.get('batchId')
-    const cursor = searchParams.get('cursor')
-    const limitParam = searchParams.get('limit')
-    const minConfidenceParam = searchParams.get('minConfidence')
-    const sexParam = searchParams.get('sex')
-    const minPointsParam = searchParams.get('min_points')
-    const maxPointsParam = searchParams.get('max_points')
-    const dateFromParam = searchParams.get('dateFrom')
-    const dateToParam = searchParams.get('dateTo')
-    const sizeClassParam = searchParams.get('sizeClass')
-    const qualityStatusParam = searchParams.get('qualityStatus')
-    const cameraIdParam = searchParams.get('cameraId')
-    const deerIdParam = searchParams.get('deerId')
-    const uploadSessionId = searchParams.get('uploadSessionId') ?? undefined
-    const areaNameParam = searchParams.get('areaName')
-    const areaNamesParam = searchParams.get('areaNames')
-    const otherAnimalsParam = searchParams.get('otherAnimals')
-    const minScoreParam = searchParams.get('minScore')
-
-    // Validate and parse limit (default 50, max 100)
-    let limit = 50
-    if (limitParam !== null) {
-      const parsedLimit = parseInt(limitParam, 10)
-      if (isNaN(parsedLimit) || parsedLimit <= 0) {
-        return NextResponse.json(
-          { error: 'Invalid limit: must be a positive number' },
-          { status: 400 }
-        )
-      }
-      limit = Math.min(parsedLimit, 100)
+    let filters: PhotoFilters
+    try {
+      filters = parsePhotoFilters(new URL(request.url).searchParams)
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid photo filters' }, { status: 400 })
     }
-
-    // Parse hasDeer filter
-    let hasDeer: boolean | undefined
-    if (hasDeerParam !== null) {
-      if (hasDeerParam === 'true') {
-        hasDeer = true
-      } else if (hasDeerParam === 'false') {
-        hasDeer = false
-      } else {
-        return NextResponse.json(
-          { error: 'Invalid hasDeer: must be "true" or "false"' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Parse hasDetections filter
-    const hasDetectionsParam = searchParams.get('hasDetections')
-    let hasDetections: boolean | undefined
-    if (hasDetectionsParam !== null) {
-      if (hasDetectionsParam === 'true') {
-        hasDetections = true
-      } else if (hasDetectionsParam === 'false') {
-        hasDetections = false
-      } else {
-        return NextResponse.json(
-          { error: 'Invalid hasDetections: must be "true" or "false"' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Parse minConfidence filter
-    let minConfidence: number | undefined
-    if (minConfidenceParam !== null) {
-      const parsed = parseInt(minConfidenceParam, 10)
-      if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) {
-        minConfidence = parsed
-      } else {
-        return NextResponse.json(
-          { error: 'Invalid minConfidence: must be an integer between 0 and 100' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Parse sex filter
-    let sex: string | undefined
-    if (sexParam !== null && ['buck', 'doe', 'fawn', 'unknown'].includes(sexParam)) {
-      sex = sexParam
-    }
-
-    // Parse min_points filter
-    let minPoints: number | undefined
-    if (minPointsParam !== null) {
-      const parsed = parseInt(minPointsParam, 10)
-      if (!isNaN(parsed) && parsed >= 0) {
-        minPoints = parsed
-      }
-    }
-
-    // Parse max_points filter
-    let maxPoints: number | undefined
-    if (maxPointsParam !== null) {
-      const parsed = parseInt(maxPointsParam, 10)
-      if (!isNaN(parsed) && parsed >= 0) {
-        maxPoints = parsed
-      }
-    }
-
-    // Parse minScore filter (photo-level authoritative-score floor, gross inches)
-    let minScore: number | undefined
-    if (minScoreParam !== null) {
-      const parsed = parseInt(minScoreParam, 10)
-      if (!isNaN(parsed) && parsed >= 0) {
-        minScore = parsed
-      } else {
-        return NextResponse.json(
-          { error: 'Invalid minScore: must be a non-negative integer' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Parse dateFrom filter
-    let dateFrom: string | undefined
-    if (dateFromParam !== null) {
-      const date = new Date(dateFromParam)
-      if (!isNaN(date.getTime())) {
-        dateFrom = dateFromParam
-      } else {
-        return NextResponse.json(
-          { error: 'Invalid dateFrom: must be a valid ISO date string' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Parse dateTo filter
-    let dateTo: string | undefined
-    if (dateToParam !== null) {
-      const date = new Date(dateToParam)
-      if (!isNaN(date.getTime())) {
-        dateTo = dateToParam
-      } else {
-        return NextResponse.json(
-          { error: 'Invalid dateTo: must be a valid ISO date string' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Parse sizeClass filter
-    let sizeClass: string | undefined
-    if (sizeClassParam !== null) {
-      const validSizeClasses = ['trophy', 'standard', 'basket', 'spike', 'unknown', 'all']
-      if (validSizeClasses.includes(sizeClassParam)) {
-        sizeClass = sizeClassParam === 'all' ? undefined : sizeClassParam
-      } else {
-        return NextResponse.json(
-          { error: `Invalid sizeClass: must be one of ${validSizeClasses.join(', ')}` },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Parse qualityStatus filter
-    let qualityStatus: string | undefined
-    if (qualityStatusParam !== null) {
-      const validQualityStatuses = ['high_quality', 'manual_review', 'low_quality', 'all']
-      if (validQualityStatuses.includes(qualityStatusParam)) {
-        qualityStatus = qualityStatusParam === 'all' ? undefined : qualityStatusParam
-      } else {
-        return NextResponse.json(
-          { error: `Invalid qualityStatus: must be one of ${validQualityStatuses.join(', ')}` },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Parse cameraId filter
-    let cameraId: string | undefined
-    if (cameraIdParam !== null && cameraIdParam.trim() !== '') {
-      cameraId = cameraIdParam
-    }
-
-    // Parse sortBy filter
-    const sortByParam = searchParams.get('sortBy')
-    let sortBy: PhotoSortField | undefined
-    if (sortByParam !== null) {
-      if (sortByParam === 'captured_at' || sortByParam === 'imported_at' || sortByParam === 'best_score') {
-        sortBy = sortByParam
-      } else {
-        return NextResponse.json(
-          { error: 'Invalid sortBy: must be "captured_at", "imported_at", or "best_score"' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Parse sortDirection filter
-    const sortDirectionParam = searchParams.get('sortDirection')
-    let sortDirection: 'asc' | 'desc' | undefined
-    if (sortDirectionParam !== null) {
-      if (sortDirectionParam === 'asc' || sortDirectionParam === 'desc') {
-        sortDirection = sortDirectionParam
-      } else {
-        return NextResponse.json(
-          { error: 'Invalid sortDirection: must be "asc" or "desc"' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Build query to get photos
-    // First, get one extra photo to determine if there's a next page
-    const fetchLimit = limit + 1
-
-    // Build filters object
-    const filters: {
-      status?: string
-      hasDeer?: boolean
-      hasDetections?: boolean
-      batchId?: string
-      qualityStatus?: string
-      minConfidence?: number
-      sex?: string
-      minPoints?: number
-      maxPoints?: number
-      dateFrom?: string
-      dateTo?: string
-      sizeClass?: string
-      minScore?: number
-      cameraId?: string
-      deerId?: string
-      uploadSessionId?: string
-      areaName?: string
-      areaNames?: string[]
-      otherAnimals?: OtherAnimalType[]
-      sortBy?: PhotoSortField
-      sortDirection?: 'asc' | 'desc'
-      cursor?: string
-      limit: number
-      offset: number
-    } = {
-      limit: fetchLimit,
-      offset: 0,
-    }
-
-    if (status !== null) {
-      filters.status = status
-    }
-
-    if (hasDeer !== undefined) {
-      filters.hasDeer = hasDeer
-    }
-
-    if (hasDetections !== undefined) {
-      filters.hasDetections = hasDetections
-    }
-
-    if (qualityStatus !== undefined) {
-      filters.qualityStatus = qualityStatus
-    }
-
-    if (minConfidence !== undefined) {
-      filters.minConfidence = minConfidence
-    }
-
-    if (sex !== undefined) {
-      filters.sex = sex
-    }
-
-    if (minPoints !== undefined) {
-      filters.minPoints = minPoints
-    }
-
-    if (maxPoints !== undefined) {
-      filters.maxPoints = maxPoints
-    }
-
-    if (dateFrom !== undefined) {
-      filters.dateFrom = dateFrom
-    }
-
-    if (dateTo !== undefined) {
-      filters.dateTo = dateTo
-    }
-
-    if (sizeClass !== undefined) {
-      filters.sizeClass = sizeClass
-    }
-
-    if (cameraId !== undefined) {
-      filters.cameraId = cameraId
-    }
-
-    if (deerIdParam !== null && deerIdParam.trim() !== '') {
-      filters.deerId = deerIdParam
-    }
-
-    if (batchId !== null) {
-      filters.batchId = batchId
-    }
-
-    if (uploadSessionId !== undefined) {
-      filters.uploadSessionId = uploadSessionId
-    }
-
-    if (areaNameParam !== null && areaNameParam.trim() !== '') {
-      filters.areaName = areaNameParam
-    }
-
-    if (areaNamesParam !== null && areaNamesParam.trim() !== '') {
-      const names = areaNamesParam.split(',').map((a) => a.trim()).filter((a) => a !== '')
-      if (names.length > 0) {
-        filters.areaNames = names
-      }
-    }
-
-    if (minScore !== undefined) {
-      filters.minScore = minScore
-    }
-
-    if (otherAnimalsParam !== null && otherAnimalsParam.trim() !== '') {
-      const validAnimals: OtherAnimalType[] = ['hogs', 'cows', 'goats', 'people', 'vehicles']
-      const animals = otherAnimalsParam.split(',').filter((a): a is OtherAnimalType =>
-        validAnimals.includes(a as OtherAnimalType)
-      )
-      if (animals.length > 0) {
-        filters.otherAnimals = animals
-      }
-    }
-
-    if (sortBy !== undefined) {
-      filters.sortBy = sortBy
-    }
-
-    if (sortDirection !== undefined) {
-      filters.sortDirection = sortDirection
-    }
-
-    // Apply cursor for pagination
-    if (cursor !== null) {
-      filters.cursor = cursor
-    }
+    const limit = filters.limit ?? 50
+    filters.limit = limit + 1
 
     // Get photos
     const { data: photos, error: photosError, count } = await getPhotos(user.id, filters)
@@ -400,22 +69,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     const hasNextPage = photos.length > limit
     const photosToReturn = hasNextPage ? photos.slice(0, limit) : photos
     const lastPhoto = photosToReturn[photosToReturn.length - 1]
-    // Cursor format: timestamp::id using the active sort field (avoids extra DB lookup on pagination)
-    const activeSortField = sortBy ?? 'imported_at'
-    let nextCursor: string | null = null
-    if (hasNextPage && lastPhoto !== undefined) {
-      let cursorValue: string
-      if (activeSortField === 'captured_at') {
-        cursorValue = lastPhoto.captured_at ?? lastPhoto.imported_at
-      } else if (activeSortField === 'best_score') {
-        // Encode the score, or the literal 'null' once paging crosses into the
-        // un-scored tail (best_score sorts NULLS LAST). The service decodes both.
-        cursorValue = lastPhoto.best_score === null ? 'null' : String(lastPhoto.best_score)
-      } else {
-        cursorValue = lastPhoto.imported_at
-      }
-      nextCursor = `${cursorValue}::${lastPhoto.id}`
-    }
+    const { field } = photoOrder(filters)
+    const nextCursor = hasNextPage && lastPhoto ? encodePhotoCursor(lastPhoto, field) : null
 
     // Fetch quality status and generate signed URLs in parallel for performance
     const photoIds = photosToReturn.map((p) => p.id)
@@ -447,7 +102,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetPhotosR
     // Execute cached URL generation and quality query in parallel
     // Cache provides near-instant hits for previously fetched URLs (50-min TTL)
     const [cachedUrls, qualityResult] = await Promise.all([
-      getCachedSignedUrls(allPaths),
+      getCachedSignedUrls(allPaths, user.id),
       qualityPromise,
     ])
 

@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Upload, Image, Crosshair, Camera, MapPin, Settings, Share2, Sparkles } from 'lucide-react'
+import { Upload, Image, Crosshair, Camera, MapPin, Settings, Share2, Sparkles, House } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { useUIStore } from '@/lib/stores/ui'
@@ -11,6 +11,7 @@ import { usePendingMatchCount } from '@/lib/hooks/use-matches'
 import { cn } from '@/lib/utils'
 
 const navigationItems = [
+  { name: 'Overview', href: '/dashboard', icon: House },
   {
     name: 'Upload',
     href: '/upload',
@@ -27,7 +28,7 @@ const navigationItems = [
     icon: Crosshair,
   },
   {
-    name: 'Re-ID',
+    name: 'Review',
     href: '/trophy',
     icon: Sparkles,
   },
@@ -54,27 +55,24 @@ const settingsItem = {
   icon: Settings,
 }
 
-function SidebarContent() {
+function SidebarContent(): React.JSX.Element {
   const pathname = usePathname()
   const { data: matchData } = usePendingMatchCount()
   const pendingCount = matchData?.total_pending ?? 0
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Logo/Branding */}
       <div className="p-6">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <Crosshair className="h-8 w-8 text-primary" />
-          <span className="text-xl font-bold text-sidebar-foreground">
-            TineSight
-          </span>
+        <Link href="/dashboard" aria-label="TineSight overview" className="inline-flex min-h-11 items-center text-lg font-semibold tracking-[0.25em] text-parchment">
+          TINE<span className="text-brass">SIGHT</span>
         </Link>
       </div>
 
       <Separator className="bg-sidebar-border" />
 
       {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-1">
+      <nav aria-label="Main navigation" className="flex-1 overflow-y-auto p-4 space-y-1">
         {navigationItems.map((item) => {
           const Icon = item.icon
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
@@ -83,11 +81,12 @@ function SidebarContent() {
             <Link
               key={item.href}
               href={item.href}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
-                'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                'flex min-h-11 items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors',
                 isActive
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-primary'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                  ? 'bg-brass/10 text-brass-light border-l-2 border-brass'
+                  : 'text-weathered hover:bg-forest hover:text-parchment'
               )}
             >
               <Icon className="h-5 w-5" />
@@ -109,10 +108,10 @@ function SidebarContent() {
         <Link
           href={settingsItem.href}
           className={cn(
-            'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+            'flex min-h-11 items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors',
             pathname === settingsItem.href || pathname.startsWith(`${settingsItem.href}/`)
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-primary'
-              : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+              ? 'bg-brass/10 text-brass-light border-l-2 border-brass'
+              : 'text-weathered hover:bg-forest hover:text-parchment'
           )}
         >
           <settingsItem.icon className="h-5 w-5" />
@@ -123,7 +122,7 @@ function SidebarContent() {
   )
 }
 
-export function Sidebar() {
+export function Sidebar(): React.JSX.Element {
   const pathname = usePathname()
   const sidebarOpen = useUIStore((state) => state.sidebarOpen)
   const setSidebarOpen = useUIStore((state) => state.setSidebarOpen)
@@ -137,7 +136,7 @@ export function Sidebar() {
   return (
     <>
       {/* Desktop sidebar - always visible */}
-      <div className="hidden md:flex w-64 bg-sidebar border-r border-sidebar-border flex-col">
+      <div className="hidden lg:flex w-60 shrink-0 bg-sidebar border-r border-sidebar-border flex-col">
         <SidebarContent />
       </div>
 
@@ -145,7 +144,7 @@ export function Sidebar() {
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
         <SheetContent
           side="left"
-          className="w-64 p-0 bg-sidebar border-sidebar-border md:hidden"
+          className="w-64 p-0 bg-sidebar border-sidebar-border lg:hidden"
         >
           {/* Visually-hidden labels satisfy Radix Dialog a11y (screen readers). */}
           <SheetTitle className="sr-only">Navigation menu</SheetTitle>

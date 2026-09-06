@@ -292,6 +292,7 @@ export interface SignedUrlResponse {
  * Single file info for duplicate check.
  */
 export interface DuplicateCheckFile {
+  contentSha256?: string
   /** Original filename */
   filename: string
   /** File size in bytes */
@@ -312,6 +313,8 @@ export interface DuplicateCheckRequest {
  */
 export interface DuplicateCheckResponse {
   /** Filenames that already exist (skip these) */
+  existingHashes?: string[]
+  existingKeys?: string[]
   existing: string[]
   /** Filenames to upload (not duplicates) */
   toUpload: string[]

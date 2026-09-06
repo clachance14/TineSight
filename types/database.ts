@@ -520,10 +520,19 @@ export type Database = {
           original_filename: string | null
           people_count: number | null
           medium_path: string | null
+          triage_tier: 'trophy' | 'buck' | 'doe' | 'other' | 'empty' | 'unprocessed'
+          review_status: 'unreviewed' | 'keep' | 'review_later'
           retry_count: number
           thumbnail_path: string | null
           user_id: string
           variant_error: string | null
+          content_sha256: string | null
+          upload_completed_at: string | null
+          variant_claimed_at: string | null
+          analysis_result: Json | null
+          analysis_claimed_at: string | null
+          analysis_attempts: number
+          variant_attempts: number
           variant_status: string
           vehicle_count: number | null
         }
@@ -562,10 +571,19 @@ export type Database = {
           original_filename?: string | null
           people_count?: number | null
           medium_path?: string | null
+          triage_tier?: 'trophy' | 'buck' | 'doe' | 'other' | 'empty' | 'unprocessed'
+          review_status?: 'unreviewed' | 'keep' | 'review_later'
           retry_count?: number
           thumbnail_path?: string | null
           user_id: string
           variant_error?: string | null
+          content_sha256?: string | null
+          upload_completed_at?: string | null
+          variant_claimed_at?: string | null
+          analysis_result?: Json | null
+          analysis_claimed_at?: string | null
+          analysis_attempts?: number
+          variant_attempts?: number
           variant_status?: string
           vehicle_count?: number | null
         }
@@ -604,10 +622,19 @@ export type Database = {
           original_filename?: string | null
           people_count?: number | null
           medium_path?: string | null
+          triage_tier?: 'trophy' | 'buck' | 'doe' | 'other' | 'empty' | 'unprocessed'
+          review_status?: 'unreviewed' | 'keep' | 'review_later'
           retry_count?: number
           thumbnail_path?: string | null
           user_id?: string
           variant_error?: string | null
+          content_sha256?: string | null
+          upload_completed_at?: string | null
+          variant_claimed_at?: string | null
+          analysis_result?: Json | null
+          analysis_claimed_at?: string | null
+          analysis_attempts?: number
+          variant_attempts?: number
           variant_status?: string
           vehicle_count?: number | null
         }
@@ -1117,6 +1144,7 @@ export type Database = {
           status: string
           total_batches: number
           total_images: number
+          upload_finished_at: string | null
           uploaded_count: number
           user_id: string
         }
@@ -1131,6 +1159,7 @@ export type Database = {
           status?: string
           total_batches?: number
           total_images?: number
+          upload_finished_at?: string | null
           uploaded_count?: number
           user_id: string
         }
@@ -1145,6 +1174,7 @@ export type Database = {
           status?: string
           total_batches?: number
           total_images?: number
+          upload_finished_at?: string | null
           uploaded_count?: number
           user_id?: string
         }
@@ -1163,6 +1193,34 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_photo_work: {
+        Args: { p_image_id: string; p_kind: string; p_claim_at: string }
+        Returns: Array<Database["public"]["Tables"]["images"]["Row"]>
+      }
+      expire_photo_work_budgets: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      request_photo_retry: {
+        Args: { p_photo_id: string }
+        Returns: Array<Database["public"]["Tables"]["images"]["Row"]>
+      }
+      finalize_upload_batch: {
+        Args: { p_batch_id: string; p_uploaded_ids: string[]; p_failed_ids?: string[] }
+        Returns: Json
+      }
+      finish_upload_session: {
+        Args: { p_session_id: string }
+        Returns: undefined
+      }
+      get_uploaded_content_hashes: {
+        Args: { p_hashes: string[] }
+        Returns: string[]
+      }
+      get_photo_triage_counts: {
+        Args: { p_photo_ids: string[] }
+        Returns: Array<{ tier: string; photo_count: number }>
+      }
       compute_quality_score: {
         Args: { query_user_id: string; target_detection_id: string }
         Returns: number
@@ -1283,7 +1341,7 @@ export type Database = {
       }
       get_photo_stats:
         | {
-            Args: { p_batch_id?: string; p_user_id: string }
+            Args: { p_batch_id?: string | null; p_user_id: string }
             Returns: {
               analyzed_photos: number
               basket_count: number
@@ -1304,8 +1362,8 @@ export type Database = {
           }
         | {
             Args: {
-              p_batch_id?: string
-              p_upload_session_id?: string
+              p_batch_id?: string | null
+              p_upload_session_id?: string | null
               p_user_id: string
             }
             Returns: {

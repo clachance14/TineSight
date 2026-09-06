@@ -1,14 +1,10 @@
+import { PageHeading } from '@/components/layout/page-heading'
 import { CameraList } from '@/components/cameras/camera-list'
 
-export default function CamerasPage() {
+export default function CamerasPage(): React.JSX.Element {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-cream">Cameras</h1>
-        <p className="text-cream-dark mt-1">
-          Trail cameras detected from your uploaded photos.
-        </p>
-      </div>
+    <div className="mx-auto max-w-[1180px]">
+      <PageHeading eyebrow="Eyes on your property" title="Cameras" description="Cameras discovered in your uploaded photos. Open a camera to see its photos." />
       <CameraList />
     </div>
   )

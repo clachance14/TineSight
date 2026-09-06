@@ -17,14 +17,14 @@ export default async function DashboardLayout({
   const { data: profile, error } = await client.from('profiles').select('id').eq('id', user.id).maybeSingle()
   if (error !== null || (profile === null && !await ensureUserProfile(user))) redirect('/login?error=account-setup')
 
-
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="workspace flex h-dvh overflow-hidden bg-deep-forest text-parchment">
       <ZustandHydration />
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-parchment focus:p-3 focus:text-deep-forest">Skip to content</a>
       <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <Header />
-        <main className="flex-1 p-4 md:p-6 pb-20 md:pb-6 overflow-auto overflow-x-hidden">
+        <main id="main-content" className="has-[[data-map-workspace]]:overflow-hidden has-[[data-map-workspace]]:p-0 has-[[data-map-workspace]]:pb-[calc(4rem+env(safe-area-inset-bottom))] lg:has-[[data-map-workspace]]:pb-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden [--workspace-gutter:1rem] sm:[--workspace-gutter:1.5rem] lg:[--workspace-gutter:2rem] p-[var(--workspace-gutter)] pb-[calc(6rem+env(safe-area-inset-bottom))] lg:pb-[var(--workspace-gutter)]">
           {children}
         </main>
       </div>

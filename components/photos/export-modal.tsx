@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type JSX } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   Dialog,
@@ -37,10 +37,11 @@ export function ExportModal({
   photoCount,
   photoIds,
   onClose,
-}: ExportModalProps) {
+}: ExportModalProps): JSX.Element {
   const [jobId, setJobId] = useState<string | null>(null)
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null)
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+  const [downloadFilename, setDownloadFilename] = useState('tinesight-photos.zip')
   const [isPolling, setIsPolling] = useState(false)
 
   const isLargeExport = photoCount > LARGE_EXPORT_THRESHOLD
@@ -57,21 +58,21 @@ export function ExportModal({
 
   // Poll job status for large exports
   useEffect(() => {
-    if (!isPolling || !jobId) return
+    if (!isPolling || jobId === null) return
 
-    const pollStatus = async () => {
+    const pollStatus = async (): Promise<void> => {
       try {
         const res = await fetch(`/api/photos/export/${jobId}/status`)
         if (!res.ok) {
           throw new Error('Failed to fetch export status')
         }
 
-        const status: ExportStatus = await res.json()
+        const status = await res.json() as ExportStatus
         setExportStatus(status)
 
         if (status.status === 'completed') {
           setIsPolling(false)
-          if (status.downloadUrl) {
+          if (status.downloadUrl !== undefined) {
             setDownloadUrl(status.downloadUrl)
           }
         } else if (status.status === 'failed') {
@@ -89,8 +90,8 @@ export function ExportModal({
       }
     }
 
-    const intervalId = setInterval(pollStatus, POLL_INTERVAL_MS)
-    pollStatus() // Initial poll
+    const intervalId = setInterval(() => { void pollStatus() }, POLL_INTERVAL_MS)
+    void pollStatus() // Initial poll
 
     return () => clearInterval(intervalId)
   }, [isPolling, jobId, photoCount])
@@ -105,33 +106,35 @@ export function ExportModal({
       })
 
       if (!res.ok) {
-        const error = await res.json()
-        throw new Error(error.error || 'Failed to export photos')
+        const error = await res.json() as { error?: string }
+        throw new Error(error.error ?? 'Failed to export photos')
       }
 
       // Check if response contains a job ID (large export) or download URL/blob (small export)
       const contentType = res.headers.get('content-type')
 
-      if (contentType?.includes('application/json')) {
-        const data = await res.json()
+      if (contentType?.includes('application/json') === true) {
+        const data = await res.json() as { jobId?: string; downloadUrl?: string; filename?: string }
 
         // Large export: background job
-        if (data.jobId) {
+        if (data.jobId !== undefined) {
           setJobId(data.jobId)
           setIsPolling(true)
           return { type: 'job' as const, jobId: data.jobId }
         }
 
         // Small export: direct download URL
-        if (data.downloadUrl) {
+        if (data.downloadUrl !== undefined) {
           setDownloadUrl(data.downloadUrl)
-          triggerDownload(data.downloadUrl, `tinesight-export-${Date.now()}.zip`)
+          const filename = data.filename ?? 'tinesight-photos.zip'
+          setDownloadFilename(filename)
+          triggerDownload(data.downloadUrl, filename)
           return { type: 'direct' as const, downloadUrl: data.downloadUrl }
         }
       }
 
       // Small export: blob response
-      if (contentType?.includes('application/zip')) {
+      if (contentType?.includes('application/zip') === true) {
         const blob = await res.blob()
         const url = window.URL.createObjectURL(blob)
         setDownloadUrl(url)
@@ -143,7 +146,7 @@ export function ExportModal({
     },
   })
 
-  const triggerDownload = (url: string, filename: string) => {
+  const triggerDownload = (url: string, filename: string): void => {
     const link = document.createElement('a')
     link.href = url
     link.download = filename
@@ -152,18 +155,18 @@ export function ExportModal({
     document.body.removeChild(link)
   }
 
-  const handleExport = () => {
+  const handleExport = (): void => {
     exportMutation.mutate()
   }
 
-  const handleDownload = () => {
-    if (downloadUrl) {
-      triggerDownload(downloadUrl, `tinesight-export-${Date.now()}.zip`)
+  const handleDownload = (): void => {
+    if (downloadUrl !== null) {
+      triggerDownload(downloadUrl, downloadFilename)
     }
   }
 
-  const handleClose = () => {
-    if (isPolling) {
+  const handleClose = (): void => {
+    if (isPolling || exportMutation.isPending) {
       // Don't close while polling
       return
     }
@@ -172,8 +175,8 @@ export function ExportModal({
 
   // Determine current state
   const isProcessing = exportMutation.isPending || isPolling
-  const isComplete = exportStatus?.status === 'completed' || (downloadUrl && !isLargeExport)
-  const hasFailed = exportMutation.error || exportStatus?.status === 'failed'
+  const isComplete = exportStatus?.status === 'completed' || (downloadUrl !== null && !isLargeExport)
+  const hasFailed = exportMutation.error !== null || exportStatus?.status === 'failed'
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
@@ -181,10 +184,10 @@ export function ExportModal({
         <DialogHeader>
           <DialogTitle className="text-cream flex items-center gap-2">
             <Download className="h-5 w-5 text-copper" />
-            Export {photoCount} Photo{photoCount !== 1 ? 's' : ''}
+            Download {photoCount} Photo{photoCount !== 1 ? 's' : ''}
           </DialogTitle>
           <DialogDescription className="text-cream-dark">
-            {isLargeExport
+            {photoCount === 1 ? 'Download the original photo to your computer.' : isLargeExport
               ? 'Large export will be processed in the background. You can download when ready.'
               : 'Photos will be downloaded as a ZIP file.'}
           </DialogDescription>
@@ -200,7 +203,7 @@ export function ExportModal({
           )}
 
           {/* Large Export Progress */}
-          {isLargeExport && exportStatus && exportStatus.status === 'processing' && (
+          {isLargeExport && exportStatus?.status === 'processing' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-cream-dark">Processing photos</span>
@@ -232,7 +235,7 @@ export function ExportModal({
                 <p className="text-sm text-red-400/80 mt-1">
                   {exportMutation.error instanceof Error
                     ? exportMutation.error.message
-                    : exportStatus?.error || 'An error occurred during export'}
+                    : exportStatus?.error ?? 'An error occurred during export'}
                 </p>
               </div>
             </div>
@@ -256,13 +259,13 @@ export function ExportModal({
 
         <DialogFooter className="gap-2 sm:gap-0">
           {/* Download Button (shown when complete) */}
-          {isComplete && downloadUrl && (
+          {isComplete && downloadUrl !== null && (
             <Button
               onClick={handleDownload}
               className="bg-copper hover:bg-copper-light text-slate-deep"
             >
               <Download className="mr-2 h-4 w-4" />
-              Download ZIP
+              {photoCount === 1 ? 'Download photo' : 'Download ZIP'}
             </Button>
           )}
 
@@ -281,7 +284,7 @@ export function ExportModal({
                 className="bg-copper hover:bg-copper-light text-slate-deep"
               >
                 <Download className="mr-2 h-4 w-4" />
-                Start Export
+                {photoCount === 1 ? 'Download photo' : 'Download ZIP'}
               </Button>
             </>
           )}

@@ -9,7 +9,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { DashboardData, TrophyDetection } from '@/lib/services/trophy'
-import { AlertCircle, Sparkles } from 'lucide-react'
+import { PageState } from '@/components/layout/page-state'
+import { Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useTriggerMatching } from '@/lib/hooks/use-matches'
 import { useToast } from '@/lib/hooks/use-toast'
@@ -168,7 +169,7 @@ export function TrophyDashboard() {
     })
   }
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['trophy-dashboard'],
     queryFn: fetchDashboard,
     refetchInterval: 30000, // Refresh every 30 seconds
@@ -222,15 +223,9 @@ export function TrophyDashboard() {
 
   if (error) {
     return (
-      <Card variant="elevated">
-        <CardContent className="py-8 text-center">
-          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <p className="text-cream-dark">Failed to load trophy dashboard</p>
-          <p className="text-sm text-muted-foreground mt-2">
-            {error instanceof Error ? error.message : 'Unknown error'}
-          </p>
-        </CardContent>
-      </Card>
+      <PageState error title="Your review queue couldn’t load." description="Try again to reconnect to your sightings and suggested matches.">
+        <Button className="min-h-11" onClick={() => { void refetch() }}>Try again</Button>
+      </PageState>
     )
   }
 
@@ -246,7 +241,7 @@ export function TrophyDashboard() {
       <SummaryStats stats={data.stats} />
 
       {/* Section Tabs */}
-      <div className="flex gap-6 border-b border-cream/10">
+      <div className="flex flex-wrap gap-x-5 gap-y-2 border-b border-cream/10">
         {([
           ['pending', 'Matches', data.stats.pendingMatchCount, hasPendingMatches],
           ['clusters', 'New Bucks', data.stats.clusterCount, hasClusters],
@@ -255,7 +250,8 @@ export function TrophyDashboard() {
           <button
             key={key}
             onClick={() => setActiveSection(key)}
-            className={`-mb-px flex items-center gap-2 border-b-2 pb-2.5 font-sans text-[11px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+            aria-pressed={activeSection === key}
+            className={`-mb-px flex min-h-11 items-center gap-2 border-b-2 pb-2.5 font-sans text-[11px] font-semibold uppercase tracking-[0.14em] transition-colors ${
               activeSection === key
                 ? 'border-copper text-copper'
                 : 'border-transparent text-cream-dark hover:text-cream'
@@ -271,7 +267,7 @@ export function TrophyDashboard() {
       <div>
         {activeSection === 'pending' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
               <div>
                 <h2 className="font-display text-xl font-semibold text-cream">
                   Matches
@@ -282,6 +278,7 @@ export function TrophyDashboard() {
               </div>
               <Button
                 size="sm"
+                className="min-h-11 shrink-0"
                 onClick={handleFindMatches}
                 disabled={triggerMatching.isPending}
               >
@@ -301,7 +298,7 @@ export function TrophyDashboard() {
 
         {activeSection === 'clusters' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
               <div>
                 <h2 className="font-display text-xl font-semibold text-cream">
                   New Bucks
@@ -312,6 +309,7 @@ export function TrophyDashboard() {
               </div>
               <Button
                 size="sm"
+                className="min-h-11 shrink-0"
                 onClick={() => clusterMutation.mutate()}
                 disabled={clusterMutation.isPending}
               >

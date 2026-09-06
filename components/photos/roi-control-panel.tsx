@@ -292,7 +292,7 @@ export function ROIControlPanel({
                 size="sm"
                 onClick={onRegenerateEmbedding}
                 disabled={!canRegenerateEmbedding}
-                className="w-full bg-copper hover:bg-copper-light"
+                className="w-full border-brass/60 bg-transparent text-brass-light hover:bg-brass/10"
               >
                 {isRegenerating ? (
                   <Loader2 className="h-4 w-4 mr-1 animate-spin" />

@@ -9,9 +9,15 @@ export interface UploadFile {
   status: 'pending' | 'uploading' | 'completed' | 'failed'
   progress: number
   imageId?: string
+  batchId?: string
+  uploadedToStorage?: boolean
   uploadUrl?: string
   error?: string
   // EXIF metadata
+  contentSha256?: string
+  cameraId?: string | null
+  locationId?: string | null
+  sourceFolder?: string
   capturedAt?: Date | null
   make?: string | null
   model?: string | null
@@ -28,6 +34,10 @@ export interface UploadInitData {
 
 export interface FileWithMetadata {
   file: File
+  contentSha256?: string
+  cameraId?: string | null
+  locationId?: string | null
+  sourceFolder?: string
   capturedAt?: Date | null
   make?: string | null
   model?: string | null
@@ -49,6 +59,7 @@ interface UploadState {
   // State
   uploadQueue: UploadFile[]
   currentBatchId: string | null
+  isCancelled: boolean
   isPreparing: boolean
   isUploading: boolean
   overallProgress: number
@@ -61,11 +72,14 @@ interface UploadState {
   // Actions
   addFiles: (files: FileWithMetadata[]) => void
   removeFile: (id: string) => void
+  cancelFiles: (ids: string[]) => void
   clearQueue: () => void
   clearCompletedFiles: () => void
   setIsPreparing: (isPreparing: boolean) => void
   startUpload: (batchId: string, uploadData: UploadInitData[]) => void
   updateFileProgress: (id: string, progress: number) => void
+  markFileTransferred: (id: string) => void
+  retryFailedFiles: () => void
   markFileCompleted: (id: string) => void
   markFileFailed: (id: string, error: string) => void
   setPendingLocation: (location: LocationData | null) => void
@@ -76,6 +90,7 @@ interface UploadState {
 const initialState = {
   uploadQueue: [],
   currentBatchId: null,
+  isCancelled: false,
   isPreparing: false,
   isUploading: false,
   overallProgress: 0,
@@ -92,12 +107,16 @@ export const useUploadStore = create<UploadState>((set) => ({
   addFiles: (filesWithMetadata) =>
     set((state) => {
       const newFiles: UploadFile[] = filesWithMetadata.map(
-        ({ file, capturedAt, make, model, deviceIdentifier, exifSignature, exifData }) => ({
+        ({ file, capturedAt, make, model, deviceIdentifier, exifSignature, exifData, cameraId, locationId, sourceFolder, contentSha256 }) => ({
           id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
           file,
           filename: file.name,
           status: 'pending',
           progress: 0,
+          ...((contentSha256 != null) && { contentSha256 }),
+          cameraId: cameraId ?? null,
+          locationId: locationId ?? null,
+          ...((sourceFolder != null) && { sourceFolder }),
           capturedAt: capturedAt ?? null,
           make: make ?? null,
           model: model ?? null,
@@ -109,6 +128,7 @@ export const useUploadStore = create<UploadState>((set) => ({
 
       return {
         uploadQueue: [...state.uploadQueue, ...newFiles],
+        isCancelled: false,
         totalCount: state.totalCount + newFiles.length,
       }
     }),
@@ -148,8 +168,19 @@ export const useUploadStore = create<UploadState>((set) => ({
       }
     }),
 
+  cancelFiles: (ids) => set(state => {
+    const cancelledIds = new Set(ids)
+    if (!state.uploadQueue.some(file => cancelledIds.has(file.id))) return state
+    const uploadQueue = state.uploadQueue.filter(file => !cancelledIds.has(file.id) || file.status === 'completed')
+    return { uploadQueue, isCancelled: true, isPreparing: false, isUploading: false,
+      completedCount: uploadQueue.filter(file => file.status === 'completed').length,
+      failedCount: uploadQueue.filter(file => file.status === 'failed').length,
+      totalCount: uploadQueue.length, overallProgress: 0 }
+  }),
+
   clearQueue: () =>
     set(() => ({
+      isCancelled: false,
       uploadQueue: [],
       totalCount: 0,
       overallProgress: 0,
@@ -178,6 +209,7 @@ export const useUploadStore = create<UploadState>((set) => ({
           return {
             ...file,
             status: 'uploading' as const,
+            batchId,
             imageId: matchingData.imageId,
             uploadUrl: matchingData.uploadUrl,
           }
@@ -188,7 +220,7 @@ export const useUploadStore = create<UploadState>((set) => ({
       return {
         uploadQueue: updatedQueue,
         currentBatchId: batchId,
-        isPreparing: false,
+        isPreparing: state.isPreparing,
         isUploading: true,
       }
     })
@@ -214,12 +246,23 @@ export const useUploadStore = create<UploadState>((set) => ({
       }
     }),
 
+  markFileTransferred: (id) => set(state => ({ uploadQueue: state.uploadQueue.map(file => file.id === id ? { ...file, uploadedToStorage: true } : file) })),
+  retryFailedFiles: () => set(state => {
+    const uploadQueue = state.uploadQueue.filter(file => file.status === 'failed' && file.file !== undefined).map(file => {
+      const { error: _oldError, ...retryFile } = file
+      return { ...retryFile, status: 'pending' as const, progress: 0 }
+    })
+    return { uploadQueue, totalCount: uploadQueue.length, completedCount: 0, failedCount: 0, overallProgress: 0, isPreparing: true, isUploading: false }
+  }),
+
   markFileCompleted: (id) =>
     set((state) => {
+      const previous = state.uploadQueue.find(file => file.id === id)
+      if (!previous || previous.status === 'completed' || previous.status === 'failed') return state
       const updatedQueue = state.uploadQueue.map((file) => {
         if (file.id === id) {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { file: _fileData, ...rest } = file // Destructure to release file from memory
+
+          const { file: _fileData, error: _oldError, ...rest } = file // Destructure to release file from memory
           return { ...rest, status: 'completed' as const, progress: 100 }
         }
         return file
@@ -250,11 +293,12 @@ export const useUploadStore = create<UploadState>((set) => ({
 
   markFileFailed: (id, error) =>
     set((state) => {
+      const previous = state.uploadQueue.find(file => file.id === id)
+      if (!previous || previous.status === 'completed' || previous.status === 'failed') return state
       const updatedQueue = state.uploadQueue.map((file) => {
         if (file.id === id) {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { file: _fileData, ...rest } = file // Destructure to release file from memory
-          return { ...rest, status: 'failed' as const, error }
+
+          return { ...file, status: 'failed' as const, error }
         }
         return file
       })
@@ -292,10 +336,10 @@ export const useUploadStore = create<UploadState>((set) => ({
 
 // Batched progress updater - collects updates and flushes every 250ms
 // This dramatically reduces re-renders during bulk uploads
-let progressBatch: Map<string, number> = new Map()
+const progressBatch: Map<string, number> = new Map()
 let flushTimeout: ReturnType<typeof setTimeout> | null = null
 
-const flushProgressUpdates = () => {
+const flushProgressUpdates = (): void => {
   if (progressBatch.size === 0) return
 
   const updates = new Map(progressBatch)
@@ -319,13 +363,11 @@ const flushProgressUpdates = () => {
   })
 }
 
-export const batchedUpdateProgress = (id: string, progress: number) => {
+export const batchedUpdateProgress = (id: string, progress: number): void => {
   progressBatch.set(id, progress)
 
-  if (!flushTimeout) {
-    flushTimeout = setTimeout(() => {
+  flushTimeout ??= setTimeout(() => {
       flushTimeout = null
       flushProgressUpdates()
-    }, 250) // Flush every 250ms - max 4 state updates per second
-  }
+    }, 250); // Flush every 250ms - max 4 state updates per second
 }

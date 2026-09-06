@@ -24,7 +24,7 @@ const COMPASS_DIRECTIONS = [
 interface LocationCreateFormProps {
   lat: number
   lng: number
-  onSuccess: () => void
+  onSuccess: (locationId: string) => void
   onCancel: () => void
 }
 
@@ -33,9 +33,11 @@ export function LocationCreateForm({
   lng,
   onSuccess,
   onCancel,
-}: LocationCreateFormProps) {
+}: LocationCreateFormProps): React.JSX.Element {
   const [name, setName] = useState('')
-  const [selectedDirection, setSelectedDirection] = useState<number | undefined>(undefined)
+  const [selectedDirection, setSelectedDirection] = useState<
+    number | undefined
+  >(undefined)
   const [directionNotes, setDirectionNotes] = useState('')
   const [notes, setNotes] = useState('')
   const [color, setColor] = useState(DEFAULT_LOCATION_COLOR)
@@ -43,11 +45,11 @@ export function LocationCreateForm({
 
   const createLocation = useCreateLocation()
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     setError(null)
 
-    if (!name.trim()) {
+    if (name.trim().length === 0) {
       setError('Name is required')
       return
     }
@@ -61,27 +63,30 @@ export function LocationCreateForm({
       if (selectedDirection !== undefined) {
         data.directionCompass = selectedDirection
       }
-      if (directionNotes.trim()) {
+      if (directionNotes.trim().length > 0) {
         data.directionNotes = directionNotes.trim()
       }
-      if (notes.trim()) {
+      if (notes.trim().length > 0) {
         data.notes = notes.trim()
       }
-      if (color) {
+      if (color.length > 0) {
         data.color = color
       }
-      await createLocation.mutateAsync(data)
-      onSuccess()
+      const result = await createLocation.mutateAsync(data)
+      onSuccess(result.location.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create location')
     }
   }
 
   return (
-    <div className="bg-slate-deep/95 border border-slate-600 rounded-lg p-4 shadow-xl">
-      <h3 className="text-lg font-semibold text-cream mb-4">New Location</h3>
-
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <div>
+      <form
+        onSubmit={(event) => {
+          void handleSubmit(event)
+        }}
+        className="space-y-4"
+      >
         {/* Location Name */}
         <div className="space-y-2">
           <Label htmlFor="location-name" className="text-cream">
@@ -89,15 +94,17 @@ export function LocationCreateForm({
           </Label>
           <Input
             id="location-name"
+            required
+            maxLength={100}
             placeholder="e.g., North Pasture, Oak Ridge"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="bg-slate border-slate-600 text-cream placeholder:text-cream-dark/50"
+            className="h-12 bg-forest/30 border-forest-light text-parchment placeholder:text-weathered/60"
           />
         </div>
 
         {/* Coordinates (read-only) */}
-        <div className="text-xs text-cream-dark">
+        <div className="font-mono text-xs text-weathered">
           Coordinates: {lat.toFixed(6)}, {lng.toFixed(6)}
         </div>
 
@@ -114,20 +121,23 @@ export function LocationCreateForm({
         {/* Compass Direction */}
         <div className="space-y-2">
           <Label className="text-cream">Camera Direction (Optional)</Label>
-          <div className="grid grid-cols-4 gap-1">
+          <div className="grid grid-cols-4 gap-2">
             {COMPASS_DIRECTIONS.map(({ label, degrees }) => (
               <Button
                 key={degrees}
                 type="button"
                 variant={selectedDirection === degrees ? 'default' : 'outline'}
                 size="sm"
+                aria-pressed={selectedDirection === degrees}
                 onClick={() =>
-                  setSelectedDirection(selectedDirection === degrees ? undefined : degrees)
+                  setSelectedDirection(
+                    selectedDirection === degrees ? undefined : degrees,
+                  )
                 }
                 className={
                   selectedDirection === degrees
-                    ? 'bg-copper hover:bg-copper-light text-slate-deep'
-                    : 'bg-slate hover:bg-slate-600 border-slate-600 text-cream'
+                    ? 'min-h-11 border-brass bg-brass/10 text-brass-light hover:bg-brass/15'
+                    : 'min-h-11 bg-slate hover:bg-slate-600 border-slate-600 text-cream'
                 }
               >
                 {label}
@@ -165,8 +175,10 @@ export function LocationCreateForm({
         </div>
 
         {/* Error Message */}
-        {error && (
-          <div className="text-red-400 text-sm">{error}</div>
+        {error !== null && (
+          <div role="alert" className="text-destructive text-sm">
+            {error}
+          </div>
         )}
 
         {/* Actions */}
@@ -175,14 +187,14 @@ export function LocationCreateForm({
             type="button"
             variant="outline"
             onClick={onCancel}
-            className="flex-1 bg-slate hover:bg-slate-600 border-slate-600 text-cream"
+            className="min-h-12 flex-1 bg-slate hover:bg-slate-600 border-slate-600 text-cream"
           >
             Cancel
           </Button>
           <Button
             type="submit"
-            disabled={createLocation.isPending || !name.trim()}
-            className="flex-1 bg-copper hover:bg-copper-light text-slate-deep disabled:opacity-50"
+            disabled={createLocation.isPending || name.trim().length === 0}
+            className="min-h-12 flex-1 border-brass bg-brass/10 text-brass-light hover:bg-brass/15 disabled:opacity-50"
           >
             {createLocation.isPending ? (
               <>

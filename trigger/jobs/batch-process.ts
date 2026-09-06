@@ -6,6 +6,7 @@ import { generateImageVariantsJob } from "./generate-image-variants";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import pLimit from "p-limit";
+import { boundedSetting } from "@/lib/gemini/capacity";
 
 /**
  * Batch Process Job
@@ -48,6 +49,10 @@ export const batchProcess = task({
     // Cast to typed client - TypeScript has issues with Database generic in Trigger.dev context
     const supabase = createAdminClient() as SupabaseClient<Database>;
 
+    const { data: batch, error: batchReadError } = await supabase.from("processing_batches")
+      .select("id, cancelled_at, upload_sessions(status)").eq("id", batchId).single();
+    if (batchReadError) throw new Error(batchReadError.message);
+    if (batch.cancelled_at !== null || batch.upload_sessions?.status === "cancelled") return { skipped: true, batchId };
     try {
       // Update batch status to 'processing'
       logger.info("Updating batch status to processing", { batchId });
@@ -76,7 +81,7 @@ export const batchProcess = task({
 
       // Rate limit job triggering to avoid overwhelming the Trigger.dev API
       // Configurable via TRIGGER_BATCH_RATE environment variable
-      const batchRate = parseInt(process.env.TRIGGER_BATCH_RATE || '20', 10);
+      const batchRate = boundedSetting(process.env['TRIGGER_BATCH_RATE'], 20, 100);
       const triggerLimit = pLimit(batchRate);
 
       logger.info("Rate limiting batch triggers", {
@@ -108,12 +113,14 @@ export const batchProcess = task({
             await Promise.all([
               analyzePhoto.batchTrigger(
                 chunk.map(imageId => ({
-                  payload: { imageId, batchId, sessionId }
+                  payload: { imageId, batchId, sessionId },
+                  options: { idempotencyKey: `upload-analysis:${imageId}`, idempotencyKeyTTL: "30d" }
                 }))
               ),
               generateImageVariantsJob.batchTrigger(
                 chunk.map(imageId => ({
-                  payload: { imageId }
+                  payload: { imageId },
+                  options: { idempotencyKey: `upload-variants:${imageId}`, idempotencyKeyTTL: "30d" }
                 }))
               ),
             ]);

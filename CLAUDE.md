@@ -175,6 +175,15 @@ material (brass top-light), not a badge.
    if its version differs from the installed `@trigger.dev/sdk`. A worker running
    older code fails silently: the job simply never appears in the run list, and rows
    sit in their pending status forever with nothing marked failed.
+11. **`// @ts-nocheck` must stay on line 1.** Every `trigger/jobs/*.ts` relies on a
+   whole-file directive; an import inserted above it silently disables it and
+   `npm run type-check` goes red with the file's latent errors.
+12. **`tests/ui` mocks the `@/lib/upload` barrel as `{}`.** Anything a page needs at
+   render time (`runUploadSession`, `createXhrTransfer`, the store) must be imported
+   from its deep path, and must not touch the throttle or the store at import time.
+13. **A client child that calls `useSearchParams()` needs a `<Suspense>` boundary
+   in its page.** Removing a page's `await searchParams` read is enough to flip the
+   route static, and `next build` then aborts on the prerender (`/login`, B1).
 
 ## Skill routing
 

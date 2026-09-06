@@ -69,67 +69,76 @@ export async function getTrophyStats(
   try {
     // Get total trophy detections (needs the images join to filter by owner —
     // without it this query errored and the count silently fell back to 0).
-    const { count: totalTrophy } = await supabase
+    const { count: totalTrophy, error: totalError } = await supabase
       .from('detections')
       .select('*, images!inner(user_id)', { count: 'exact', head: true })
       .eq('images.user_id', userId)
-      .eq('size_class', 'trophy')
+      .eq('is_trophy', true)
       .is('deleted_at', null)
 
     // Get assigned count (trophy detections with deer_id)
-    const { count: assigned } = await supabase
+    const { count: assigned, error: assignedError } = await supabase
       .from('detections')
       .select('*, images!inner(user_id)', { count: 'exact', head: true })
       .eq('images.user_id', userId)
-      .eq('size_class', 'trophy')
+      .eq('is_trophy', true)
       .not('deer_id', 'is', null)
       .is('deleted_at', null)
 
     // Get pending match count
-    const { count: pendingMatches } = await supabase
+    const { count: pendingMatches, error: pendingError } = await supabase
       .from('match_candidates')
       .select('*, detection:detections!detection_id!inner(id, image_id, size_class, images!inner(user_id))', {
         count: 'exact',
         head: true
       })
       .eq('status', 'pending')
-      .eq('detection.size_class', 'trophy')
+      .eq('detection.is_trophy', true)
+      .is('detection.deleted_at', null)
       .eq('detection.images.user_id', userId)
 
     // Get cluster count
-    const { count: clusters } = await supabase
+    const { count: clusters, error: clustersError } = await supabase
       .from('trophy_clusters')
-      .select('*', { count: 'exact', head: true })
+      .select('*, trophy_cluster_members!inner(detection:detections!detection_id!inner(id))', { count: 'exact', head: true })
+      .eq('trophy_cluster_members.detection.is_trophy', true)
+      .is('trophy_cluster_members.detection.deleted_at', null)
       .eq('user_id', userId)
       .eq('status', 'pending')
 
     // Get unclustered count (trophy detections with fingerprints, not assigned, not in clusters)
-    const { count: unclustered } = await supabase
+    const { count: unclustered, error: unclusteredError } = await supabase
       .from('detections')
       .select('*, images!inner(user_id)', { count: 'exact', head: true })
       .eq('images.user_id', userId)
-      .eq('size_class', 'trophy')
+      .eq('is_trophy', true)
       .is('deer_id', null)
       .not('antler_fingerprint', 'is', null)
       .is('deleted_at', null)
 
     // Subtract clustered detections from unclustered
-    const { count: clustered } = await supabase
+    const { count: clustered, error: clusteredError } = await supabase
       .from('trophy_cluster_members')
-      .select('*, cluster:trophy_clusters!cluster_id(user_id, status)', {
+      .select('*, cluster:trophy_clusters!cluster_id!inner(user_id, status), detection:detections!detection_id!inner(id)', {
         count: 'exact',
         head: true
       })
       .eq('cluster.user_id', userId)
       .eq('cluster.status', 'pending')
+      .eq('detection.is_trophy', true)
+      .is('detection.deleted_at', null)
+      .is('detection.deer_id', null)
+      .not('detection.antler_fingerprint', 'is', null)
 
+    const failure = totalError ?? assignedError ?? pendingError ?? clustersError ?? unclusteredError ?? clusteredError
+    if (failure !== null) return { data: null, error: failure }
     return {
       data: {
         totalTrophyDetections: totalTrophy ?? 0,
         assignedCount: assigned ?? 0,
         pendingMatchCount: pendingMatches ?? 0,
         clusterCount: clusters ?? 0,
-        unclusteredCount: (unclustered ?? 0) - (clustered ?? 0),
+        unclusteredCount: Math.max(0, (unclustered ?? 0) - (clustered ?? 0)),
       },
       error: null,
     }
@@ -175,7 +184,8 @@ export async function getPendingMatchGroups(
         )
       `)
       .eq('status', 'pending')
-      .eq('detection.size_class', 'trophy')
+      .eq('detection.is_trophy', true)
+      .is('detection.deleted_at', null)
       .eq('detection.images.user_id', userId)
       .order('gemini_confidence', { ascending: false })
 
@@ -192,8 +202,8 @@ export async function getPendingMatchGroups(
       const sug = match.suggested_deer as unknown as {
         reference_detection: { crop_file_path: string | null } | null
       } | null
-      if (det?.crop_file_path) cropPaths.add(det.crop_file_path)
-      if (sug?.reference_detection?.crop_file_path)
+      if ((det?.crop_file_path !== null && det?.crop_file_path !== undefined && det?.crop_file_path !== '')) cropPaths.add(det.crop_file_path)
+      if ((sug?.reference_detection?.crop_file_path !== null && sug?.reference_detection?.crop_file_path !== undefined && sug?.reference_detection?.crop_file_path !== ''))
         cropPaths.add(sug.reference_detection.crop_file_path)
     }
     const signedUrlByPath = new Map<string, string>()
@@ -202,7 +212,7 @@ export async function getPendingMatchGroups(
         .from('photos')
         .createSignedUrls([...cropPaths], 3600)
       for (const s of signed ?? []) {
-        if (s.signedUrl && s.path) signedUrlByPath.set(s.path, s.signedUrl)
+        if ((s.signedUrl !== null && s.signedUrl !== undefined && s.signedUrl !== '') && (s.path !== null && s.path !== undefined && s.path !== '')) signedUrlByPath.set(s.path, s.signedUrl)
       }
     }
 
@@ -230,13 +240,13 @@ export async function getPendingMatchGroups(
       // Defensive: with the !inner join above these should never be null, but a
       // null embed (non-trophy/cross-tenant detection) must skip, not crash the
       // whole dashboard (previously threw at detection.crop_file_path -> 500).
-      if (!detection || !deer) continue
+      if (detection === null || deer === null) continue
 
       // Signed URLs were pre-computed in one batched call above.
-      const thumbnailUrl = detection.crop_file_path
+      const thumbnailUrl = (detection.crop_file_path !== null && detection.crop_file_path !== undefined && detection.crop_file_path !== '')
         ? signedUrlByPath.get(detection.crop_file_path) ?? null
         : null
-      const referenceUrl = deer.reference_detection?.crop_file_path
+      const referenceUrl = (deer.reference_detection?.crop_file_path !== null && deer.reference_detection?.crop_file_path !== undefined && deer.reference_detection?.crop_file_path !== '')
         ? signedUrlByPath.get(deer.reference_detection.crop_file_path) ?? null
         : null
 
@@ -253,7 +263,8 @@ export async function getPendingMatchGroups(
         })
       }
 
-      const group = grouped.get(deer.id)!
+      const group = grouped.get(deer.id)
+      if (group === undefined) continue
 
       // Check for possible broken tine (high visual, low fingerprint)
       const possibleBrokenTine =
@@ -323,7 +334,7 @@ export async function getTrophyClusters(
 
       // Get representative crop URL
       let representativeUrl: string | null = null
-      if (representative?.crop_file_path) {
+      if ((representative?.crop_file_path !== null && representative?.crop_file_path !== undefined && representative?.crop_file_path !== '')) {
         const { data: urlData } = await supabase.storage
           .from('photos')
           .createSignedUrl(representative.crop_file_path, 3600)
@@ -331,10 +342,10 @@ export async function getTrophyClusters(
       }
 
       // Get cluster members
-      const { data: members } = await supabase
+      const { data: members, count: memberCount, error: memberError } = await supabase
         .from('trophy_cluster_members')
         .select(`
-          detection:detections!detection_id(
+          detection:detections!detection_id!inner(
             id,
             image_id,
             crop_file_path,
@@ -344,10 +355,14 @@ export async function getTrophyClusters(
             deer_id,
             images!inner(captured_at)
           )
-        `)
+        `, { count: 'exact' })
         .eq('cluster_id', cluster.id)
+        .eq('detection.is_trophy', true)
+        .is('detection.deleted_at', null)
         .limit(10) // Show first 10 members
 
+      if (memberError !== null) return { data: null, error: memberError }
+      if ((members ?? []).length === 0) continue
       const memberDetections: TrophyDetection[] = []
 
       for (const member of members ?? []) {
@@ -363,7 +378,7 @@ export async function getTrophyClusters(
         }
 
         let thumbnailUrl: string | null = null
-        if (detection.crop_file_path) {
+        if ((detection.crop_file_path !== null && detection.crop_file_path !== undefined && detection.crop_file_path !== '')) {
           const { data: urlData } = await supabase.storage
             .from('photos')
             .createSignedUrl(detection.crop_file_path, 3600)
@@ -384,10 +399,10 @@ export async function getTrophyClusters(
 
       clustersWithMembers.push({
         id: cluster.id,
-        representative_detection_id: cluster.representative_detection_id,
-        representative_crop_url: representativeUrl,
+        representative_detection_id: memberDetections[0]?.id ?? cluster.representative_detection_id,
+        representative_crop_url: memberDetections[0]?.thumbnail_url ?? representativeUrl,
         status: cluster.status as 'pending' | 'named' | 'merged' | 'split' | 'dismissed',
-        member_count: cluster.member_count,
+        member_count: memberCount ?? memberDetections.length,
         avg_similarity: cluster.avg_similarity,
         min_similarity: cluster.min_similarity,
         members: memberDetections,
@@ -420,10 +435,13 @@ export async function getUnclusteredTrophies(
         estimated_point_range,
         antler_fingerprint,
         deer_id,
-        images!inner(user_id, captured_at)
+        images!inner(user_id, captured_at),
+        trophy_cluster_members!left(id, cluster:trophy_clusters!cluster_id!inner(status))
       `)
       .eq('images.user_id', userId)
-      .eq('size_class', 'trophy')
+      .eq('is_trophy', true)
+      .eq('trophy_cluster_members.cluster.status', 'pending')
+      .is('trophy_cluster_members', null)
       .is('deer_id', null)
       .not('antler_fingerprint', 'is', null)
       .is('deleted_at', null)
@@ -437,22 +455,12 @@ export async function getUnclusteredTrophies(
       return { data: null, error }
     }
 
-    // Filter out detections that are in clusters
-    const { data: clusteredIds } = await supabase
-      .from('trophy_cluster_members')
-      .select('detection_id, cluster:trophy_clusters!cluster_id(status)')
-      .eq('cluster.status', 'pending')
-
-    const clusteredSet = new Set(
-      (clusteredIds ?? []).map((c) => c.detection_id)
-    )
-
     // Batch-sign all crop URLs in one storage round-trip (was a per-detection
     // createSignedUrl await in the loop — up to 50 sequential round-trips).
     const cropPaths = new Set<string>()
     for (const detection of detections ?? []) {
       const p = (detection as unknown as { crop_file_path: string | null }).crop_file_path
-      if (p) cropPaths.add(p)
+      if ((p !== null && p !== undefined && p !== '')) cropPaths.add(p)
     }
     const signedUrlByPath = new Map<string, string>()
     if (cropPaths.size > 0) {
@@ -460,7 +468,7 @@ export async function getUnclusteredTrophies(
         .from('photos')
         .createSignedUrls([...cropPaths], 3600)
       for (const s of signed ?? []) {
-        if (s.signedUrl && s.path) signedUrlByPath.set(s.path, s.signedUrl)
+        if ((s.signedUrl !== null && s.signedUrl !== undefined && s.signedUrl !== '') && (s.path !== null && s.path !== undefined && s.path !== '')) signedUrlByPath.set(s.path, s.signedUrl)
       }
     }
 
@@ -478,10 +486,7 @@ export async function getUnclusteredTrophies(
         images: { user_id: string; captured_at: string | null }
       }
 
-      // Skip if in a cluster
-      if (clusteredSet.has(d.id)) continue
-
-      const thumbnailUrl = d.crop_file_path
+      const thumbnailUrl = (d.crop_file_path !== null && d.crop_file_path !== undefined && d.crop_file_path !== '')
         ? signedUrlByPath.get(d.crop_file_path) ?? null
         : null
 
@@ -531,12 +536,13 @@ export async function getTrophyDashboard(
       return { data: null, error: unclusteredResult.error }
     }
 
+    if (statsResult.data === null || pendingGroupsResult.data === null || clustersResult.data === null || unclusteredResult.data === null) return { data: null, error: new Error('Review data unavailable') }
     return {
       data: {
-        stats: statsResult.data!,
-        pendingGroups: pendingGroupsResult.data!,
-        clusters: clustersResult.data!,
-        unclustered: unclusteredResult.data!,
+        stats: statsResult.data,
+        pendingGroups: pendingGroupsResult.data,
+        clusters: clustersResult.data,
+        unclustered: unclusteredResult.data,
       },
       error: null,
     }

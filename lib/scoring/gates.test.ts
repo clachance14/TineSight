@@ -7,7 +7,19 @@ import {
   buckScoreFromDetections,
   TROPHY_CONFIRM_BAND_INCHES,
   DEFAULT_TROPHY_THRESHOLD_INCHES,
+  shouldAutomaticallyFingerprint,
+  AUTOMATIC_FINGERPRINT_MIN_SCORE,
 } from "./gates.ts";
+
+test("automatic fingerprints start at exactly 140 estimated gross inches", () => {
+  assert.equal(AUTOMATIC_FINGERPRINT_MIN_SCORE, 140);
+  for (const score of [120, 130, 139, 139.99, null, undefined, NaN, Infinity, -Infinity]) {
+    assert.equal(shouldAutomaticallyFingerprint(score), false, String(score));
+  }
+  for (const score of [140, 140.01, 160, 200]) {
+    assert.equal(shouldAutomaticallyFingerprint(score), true, String(score));
+  }
+});
 
 test("coarse cut drops only spikes", () => {
   assert.equal(passesCoarseCut("spike"), false);
@@ -36,6 +48,9 @@ test("trophy decision is on authoritative gross score vs threshold", () => {
   assert.equal(isTrophyScore(130, 130), true);
   assert.equal(isTrophyScore(180, 130), true);
   assert.equal(isTrophyScore(null, 130), false);
+  // The database decides on the rounded integer score_gross; the helper agrees with it.
+  assert.equal(isTrophyScore(129.6, 130), true);
+  assert.equal(isTrophyScore(129.4, 130), false);
 });
 
 test("buck score is the max across detections, ignoring nulls", () => {

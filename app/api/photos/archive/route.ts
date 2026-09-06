@@ -6,9 +6,10 @@ import { archivePhotos, parsePhotoIdBatch } from '@/lib/services/photos'
 interface ArchiveRequest {
   batch_id?: string
   photo_ids?: string[]
+  is_archived?: boolean
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   const supabase = await createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
 
@@ -16,18 +17,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const body = await request.json() as ArchiveRequest
+  const input: unknown = await request.json().catch(() => null)
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return NextResponse.json({ error: 'Invalid archive request' }, { status: 400 })
+  const body = input as ArchiveRequest
+  if (body.batch_id !== undefined && (typeof body.batch_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.batch_id))) return NextResponse.json({ error: 'Invalid batch_id' }, { status: 400 })
+  if (body.batch_id !== undefined && body.is_archived === false) return NextResponse.json({ error: 'Restore requires photo_ids' }, { status: 400 })
+
+  if (body.is_archived !== undefined && typeof body.is_archived !== 'boolean') return NextResponse.json({ error: 'is_archived must be boolean' }, { status: 400 })
 
   let archivedCount = 0
 
   if (body.batch_id) {
-    // Archive all empty photos in batch
+    // Archive the batch's Empty group. "Empty" has exactly one definition, the
+    // trigger-maintained triage_tier (migration 059), which is what the gallery
+    // shows and counts; re-deriving it here from the flag columns drifted from it
+    // (it ignored live non-deer detections).
     const { data, error } = await supabase
       .from('images')
       .update({ is_archived: true } as never)
       .eq('user_id', user.id)
       .eq('batch_id', body.batch_id)
-      .eq('has_deer', false)
+      .eq('triage_tier', 'empty')
       .select('id')
 
     if (error) {
@@ -42,7 +52,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: parsed.error }, { status: 400 })
     }
 
-    const { data, error } = await archivePhotos(user.id, parsed.ids)
+    const { data, error } = await archivePhotos(user.id, parsed.ids, body.is_archived ?? true)
     if (error !== null || data === null) {
       return NextResponse.json({ error: 'Failed to archive photos' }, { status: 500 })
     }

@@ -1,6 +1,11 @@
+import type { PostgrestFilterBuilder } from '@supabase/postgrest-js'
+import type { Database } from '@/types/database'
 import { cache } from 'react'
+import { photoOrder, photoCursorPredicate, encodePhotoCursor } from '@/lib/photos/order'
 import { createClient } from '@/lib/supabase/server'
 import type { Image, ImageInsert, ImageUpdate, Detection, Json } from '@/types/database'
+
+type PhotoQuery = PostgrestFilterBuilder<{ PostgrestVersion: '13.0.5' }, Database['public'], Image, Image[]>
 
 // Sort field options - extended for faceted sidebar
 export type PhotoSortField =
@@ -20,12 +25,6 @@ export type PhotoSortDirection = 'asc' | 'desc'
 // `string` so a typo in a comparison is a compile error — the grid branches on
 // 'failed' to decide between "Preparing…" and a terminal "No preview".
 export type VariantStatus = 'pending' | 'processing' | 'ready' | 'failed'
-
-// Result type for area filter helper
-interface AreaFilterResult {
-  batchIds: string[] | null  // null means no filter needed, [] means no matches
-  includeNullBatchId: boolean  // Whether to also include batch_id IS NULL
-}
 
 // Page size for id sweeps that must return a complete set. Requests are clamped by the
 // project's PostgREST max-rows regardless; the loops advance by rows actually returned.
@@ -79,89 +78,6 @@ async function resolveMatchedImageIds(
 }
 
 /**
- * Helper to get batch IDs for area filtering
- * Returns batch IDs to filter by, or indicates if no filter is needed
- */
-async function getAreaFilterBatchIds(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-  areaName: string
-): Promise<AreaFilterResult> {
-  if (areaName === '__no_area__') {
-    // Get batches without area_name (null)
-    const { data: noAreaBatches } = await supabase
-      .from('processing_batches')
-      .select('id')
-      .eq('user_id', userId)
-      .is('area_name', null)
-
-    const batchIds = noAreaBatches?.map(b => b.id) ?? []
-    // Include both: batches with null area AND images with null batch_id
-    return { batchIds, includeNullBatchId: true }
-  } else {
-    // Get batches with the specified area_name
-    const { data: areaBatches } = await supabase
-      .from('processing_batches')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('area_name', areaName)
-
-    if (areaBatches && areaBatches.length > 0) {
-      return { batchIds: areaBatches.map(b => b.id), includeNullBatchId: false }
-    } else {
-      // No batches found for this area - return empty to indicate no matches
-      return { batchIds: [], includeNullBatchId: false }
-    }
-  }
-}
-
-/**
- * Helper to get batch IDs for multi-area filtering (OR logic)
- * Returns batch IDs for any of the selected areas
- */
-async function getMultiAreaFilterBatchIds(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-  areaNames: string[]
-): Promise<AreaFilterResult> {
-  const includesNoArea = areaNames.includes('__no_area__')
-  const namedAreas = areaNames.filter(a => a !== '__no_area__')
-
-  let allBatchIds: string[] = []
-
-  // Get batches for named areas
-  if (namedAreas.length > 0) {
-    const { data: areaBatches } = await supabase
-      .from('processing_batches')
-      .select('id')
-      .eq('user_id', userId)
-      .in('area_name', namedAreas)
-
-    if (areaBatches) {
-      allBatchIds = areaBatches.map(b => b.id)
-    }
-  }
-
-  // Get batches with null area_name if "No Area" is selected
-  if (includesNoArea) {
-    const { data: noAreaBatches } = await supabase
-      .from('processing_batches')
-      .select('id')
-      .eq('user_id', userId)
-      .is('area_name', null)
-
-    if (noAreaBatches) {
-      allBatchIds = [...allBatchIds, ...noAreaBatches.map(b => b.id)]
-    }
-  }
-
-  return {
-    batchIds: allBatchIds,
-    includeNullBatchId: includesNoArea  // Include images with null batch_id if "No Area" selected
-  }
-}
-
-/**
  * Build OR filter string for other animals (hogs, cows, goats, people, vehicles)
  */
 function buildOtherAnimalsOrFilter(animals: OtherAnimalType[]): string {
@@ -197,10 +113,14 @@ export type OtherAnimalType = 'hogs' | 'cows' | 'goats' | 'people' | 'vehicles'
 export interface PhotoFilters {
   status?: string
   hasDeer?: boolean
+  triageView?: 'priority' | 'all' | 'trophy' | 'buck' | 'doe' | 'other' | 'empty' | 'unprocessed' | 'security'
+  reviewStatus?: 'unreviewed' | 'keep' | 'review_later'
+  emptyOnly?: boolean // Completed, no live detections, and no known animal/security activity
   hasDetections?: boolean  // true = with detections, false = without, undefined = all
   batchId?: string
   uploadSessionId?: string
   cameraId?: string
+  includeArchived?: boolean // Explicit all-photos view; otherwise active photos only
   isArchived?: boolean
   qualityStatus?: string
   minConfidence?: number  // 0-100 integer
@@ -209,6 +129,7 @@ export interface PhotoFilters {
   maxPoints?: number
   sizeClass?: string  // 'trophy' | 'standard' | 'basket' | 'spike' | 'unknown'
   minScore?: number  // photo-level: images.best_score >= minScore (authoritative gross, else estimate)
+  datePreset?: 'today' | 'last7days' | 'last30days' | 'custom'
   dateFrom?: string  // ISO date string
   dateTo?: string  // ISO date string
   deerId?: string  // Filter by named deer
@@ -271,62 +192,15 @@ function asIdRows(data: unknown): Array<{ id: string }> {
   )
 }
 
-/**
- * Batch-id lookups that need their own round-trip, resolved ONCE up front.
- *
- * Two reasons this is separate from filter application: the builders below have to be
- * synchronous (they are re-invoked per page, and re-running these per page would issue
- * the same queries repeatedly), and an active filter that matches nothing has to
- * short-circuit the whole call rather than produce a query that matches everything.
- */
-interface ResolvedBatchFilters {
-  /** null = filter inactive. Otherwise the batch ids to constrain to. */
-  sessionBatchIds: string[] | null
-  /** null = inactive. Covers `areaName` (legacy single) and `areaNames` (multi). */
-  areaResult: AreaFilterResult | null
-  /** An active filter resolved to nothing — the caller must return an empty result. */
-  matchesNothing: boolean
+function sourceBatchSelect(selection: string, filters?: PhotoFilters): string {
+  return filters?.uploadSessionId !== undefined || filters?.areaName !== undefined || (filters?.areaNames?.length ?? 0) > 0
+    ? `${selection}, source_batch:processing_batches!batch_id(area_name,upload_session_id)`
+    : selection
 }
 
-async function resolveBatchIdFilters(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-  filters?: PhotoFilters
-): Promise<ResolvedBatchFilters> {
-  const resolved: ResolvedBatchFilters = {
-    sessionBatchIds: null,
-    areaResult: null,
-    matchesNothing: false,
-  }
-
-  if (filters?.uploadSessionId !== undefined) {
-    const { data: sessionBatches } = await supabase
-      .from('processing_batches')
-      .select('id')
-      .eq('upload_session_id', filters.uploadSessionId)
-    resolved.sessionBatchIds = (sessionBatches ?? []).map(b => b.id)
-    if (resolved.sessionBatchIds.length === 0) {
-      resolved.matchesNothing = true
-      return resolved
-    }
-  }
-
-  // areaNames (multi) wins over areaName (legacy single) — they are alternatives,
-  // never combined, matching the precedence getPhotos has always used.
-  if (filters?.areaNames?.length) {
-    resolved.areaResult = await getMultiAreaFilterBatchIds(supabase, userId, filters.areaNames)
-  } else if (filters?.areaName !== undefined) {
-    resolved.areaResult = await getAreaFilterBatchIds(supabase, userId, filters.areaName)
-  }
-
-  if (resolved.areaResult !== null) {
-    const ids = resolved.areaResult.batchIds ?? []
-    if (ids.length === 0 && !resolved.areaResult.includeNullBatchId) {
-      resolved.matchesNothing = true
-    }
-  }
-
-  return resolved
+/** Dynamic embeds do not change top-level image fields. ID-only callers read only id. */
+function selectPhotos(supabase: Awaited<ReturnType<typeof createClient>>, filters: PhotoFilters | undefined, selection: string, exactCount = false): PhotoQuery {
+  return supabase.from('images').select(sourceBatchSelect(selection, filters), exactCount ? { count: 'exact' } : {}) as unknown as PhotoQuery
 }
 
 /**
@@ -342,39 +216,50 @@ async function resolveBatchIdFilters(
  * Canonical semantics are the GRID's, because that is what the user can see:
  * `otherAnimals` means "contains any of these animals", NOT "and no deer".
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types don't unify across select shapes
-function applyPhotoLevelFilters(query: any, filters: PhotoFilters | undefined, resolved: ResolvedBatchFilters): any {
-  /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+
+function applyPhotoLevelFilters(query: PhotoQuery, filters: PhotoFilters | undefined): PhotoQuery {
+
   // 'all' is the UI's "no filter" sentinel; passing it through would filter
   // detection_status to the literal string 'all' and match nothing.
+  // Reservations enter the gallery only once original storage has been verified.
+  query = query.not('upload_completed_at', 'is', null)
+  if (filters?.reviewStatus !== undefined) query = query.eq('review_status', filters.reviewStatus)
+  if (filters?.triageView === 'priority') query = query.or('triage_tier.eq.trophy,has_people.is.true,has_vehicles.is.true')
+  else if (filters?.triageView === 'security') query = query.or('has_people.is.true,has_vehicles.is.true')
+  else if (filters?.triageView !== undefined && filters.triageView !== 'all') query = query.eq('triage_tier', filters.triageView)
+  if (filters?.emptyOnly === true) {
+    query = query.eq('detection_status', 'completed').eq('has_deer', false)
+    for (const flag of ['has_hogs', 'has_cows', 'has_goats', 'has_people', 'has_vehicles']) query = query.eq(flag, false)
+  }
   if (filters?.status !== undefined && filters.status !== 'all') {
     query = query.eq('detection_status', filters.status)
   }
 
   if (filters?.hasDeer !== undefined) {
-    query = filters.hasDeer
-      ? query.not('classification', 'is', null)
-      : query.is('classification', null)
+    query = query.eq('has_deer', filters.hasDeer)
+  }
+  if (filters?.batchId !== undefined) query = query.eq('batch_id', filters.batchId)
+
+  const selectedAreas = (filters?.areaNames?.length ?? 0) > 0 ? filters?.areaNames ?? [] : filters?.areaName !== undefined ? [filters.areaName] : []
+  const includeNoArea = selectedAreas.includes('__no_area__')
+  const namedAreas = selectedAreas.filter(area => area !== '__no_area__')
+  if (filters?.uploadSessionId !== undefined) {
+    query = query.eq('source_batch.upload_session_id', filters.uploadSessionId).not('source_batch', 'is', null)
+  }
+  if (selectedAreas.length > 0) {
+    if (includeNoArea && namedAreas.length > 0) {
+      const quoted = namedAreas.map(area => JSON.stringify(area)).join(',')
+      query = query.or(`area_name.in.(${quoted}),area_name.is.null`, { referencedTable: 'source_batch' })
+    } else if (includeNoArea) query = query.is('source_batch.area_name', null)
+    else query = query.in('source_batch.area_name', namedAreas)
+    query = includeNoArea && filters?.uploadSessionId === undefined
+      ? query.or('source_batch.not.is.null,batch_id.is.null')
+      : query.not('source_batch', 'is', null)
   }
 
-  if (resolved.sessionBatchIds !== null) {
-    query = query.in('batch_id', resolved.sessionBatchIds)
-  }
-
-  if (resolved.areaResult !== null) {
-    const batchIds = resolved.areaResult.batchIds ?? []
-    if (resolved.areaResult.includeNullBatchId) {
-      query = batchIds.length > 0
-        ? query.or(`batch_id.in.(${batchIds.join(',')}),batch_id.is.null`)
-        : query.is('batch_id', null)
-    } else if (batchIds.length > 0) {
-      query = query.in('batch_id', batchIds)
-    }
-  }
-
-  if (filters?.otherAnimals?.length) {
-    const orFilter = buildOtherAnimalsOrFilter(filters.otherAnimals)
-    if (orFilter) {
+  if ((filters?.otherAnimals?.length ?? 0) > 0) {
+    const orFilter = buildOtherAnimalsOrFilter(filters?.otherAnimals ?? [])
+    if (orFilter !== '') {
       query = query.or(orFilter)
     }
   }
@@ -382,20 +267,26 @@ function applyPhotoLevelFilters(query: any, filters: PhotoFilters | undefined, r
   if (filters?.cameraId !== undefined) {
     query = query.eq('camera_id', filters.cameraId)
   }
-  if (filters?.isArchived !== undefined) {
-    query = query.eq('is_archived', filters.isArchived)
+  if (filters?.isArchived !== undefined || filters?.includeArchived !== true) {
+    query = query.eq('is_archived', filters?.isArchived ?? false)
   }
   if (filters?.dateFrom !== undefined) {
     query = query.gte('captured_at', filters.dateFrom)
   }
   if (filters?.dateTo !== undefined) {
-    query = query.lte('captured_at', filters.dateTo)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(filters.dateTo)) {
+      const end = new Date(`${filters.dateTo}T00:00:00.000Z`)
+      end.setUTCDate(end.getUTCDate() + 1)
+      query = query.lt('captured_at', end.toISOString())
+    } else {
+      query = query.lte('captured_at', filters.dateTo)
+    }
   }
   if (filters?.minScore !== undefined) {
     query = query.gte('best_score', filters.minScore)
   }
   return query
-  /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+
 }
 
 /**
@@ -403,9 +294,9 @@ function applyPhotoLevelFilters(query: any, filters: PhotoFilters | undefined, r
  * Evaluated by Postgres — no image-id list is ever serialized into the query string,
  * which PostgREST rejects past ~250-500 uuids.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above
-function applyDetectionEmbedFilters(query: any, filters: PhotoFilters | undefined): any {
-  /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+
+function applyDetectionEmbedFilters(query: PhotoQuery, filters: PhotoFilters | undefined): PhotoQuery {
+
   query = query.is('detections.deleted_at', null)
 
   if (filters?.qualityStatus !== undefined && filters.qualityStatus !== 'all') {
@@ -432,7 +323,7 @@ function applyDetectionEmbedFilters(query: any, filters: PhotoFilters | undefine
     query = query.lte('detections.point_min', filters.maxPoints)
   }
   return query
-  /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+
 }
 
 // Data types for creating and updating photos
@@ -480,7 +371,7 @@ export async function getPhotos(
   const needsSizeClassFilter = filters?.sizeClass !== undefined
   const needsPointsFilter = filters?.minPoints !== undefined || filters?.maxPoints !== undefined
   const needsDeerFilter = filters?.deerId !== undefined
-  const needsHasDetectionsFilter = filters?.hasDetections !== undefined
+  const needsHasDetectionsFilter = filters?.hasDetections !== undefined || filters?.emptyOnly === true
 
   // If filtering by detection-related fields, we need to join with detections
   if (needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter) {
@@ -508,13 +399,9 @@ export async function getPhotos(
     // Detection ABSENCE takes a left-join/is-null shape instead, also server-side.
     // Net effect: no image-id list is ever serialized into the query string, which
     // PostgREST rejects somewhere between 250 and 500 uuids (~18KB).
-    const canUseInnerJoin = filters?.hasDetections !== false
+    const canUseInnerJoin = filters?.hasDetections !== false && filters?.emptyOnly !== true
 
     // Batch-id lookups that need a round-trip, resolved once for this call.
-    const resolved = await resolveBatchIdFilters(supabase, userId, filters)
-    if (resolved.matchesNothing) {
-      return { data: [], error: null, count: 0 }
-    }
 
     // --- Distinct matching image-id set (the exact-count source) ---
     // Only the inner-join path needs it, and only for the COUNT — the data query
@@ -542,6 +429,10 @@ export async function getPhotos(
     // also reflect those, so matchedImageIds.length is no longer the total and we
     // fall back to the query's own exact count.
     const hasOtherImageFilters =
+      filters?.triageView !== undefined || filters?.reviewStatus !== undefined ||
+      filters?.includeArchived !== true ||
+      filters?.batchId !== undefined ||
+      filters?.areaName !== undefined ||
       filters?.status !== undefined ||
       filters?.hasDeer !== undefined ||
       filters?.uploadSessionId !== undefined ||
@@ -556,7 +447,7 @@ export async function getPhotos(
 
     // Short-circuit when a membership filter matches nothing. (hasDetections ===
     // false is the "absence" case and legitimately matches detection-less images.)
-    if (filters?.hasDetections !== false && matchedCount === 0) {
+    if (filters?.hasDetections !== false && filters?.emptyOnly !== true && matchedCount === 0) {
       return { data: [], error: null, count: 0 }
     }
 
@@ -564,13 +455,11 @@ export async function getPhotos(
     // inner-join path AND no other image-level filters narrow the set.
     const useExactCount = canUseInnerJoin && !hasOtherImageFilters
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types don't unify across the two select shapes; behaviour is verified empirically
-    let query: any
+
+    let query: PhotoQuery
     if (canUseInnerJoin) {
       query = applyDetectionEmbedFilters(
-        supabase
-          .from('images')
-          .select('*, detections!inner(id)', useExactCount ? {} : { count: 'exact' })
+        selectPhotos(supabase, filters, '*, detections!inner(id)', !useExactCount)
           .eq('user_id', userId),
         filters
       )
@@ -578,9 +467,7 @@ export async function getPhotos(
       // Detection ABSENCE. Expressed as a left-join that must come back empty, so
       // Postgres evaluates it — the old form sent every id that HAS a detection as
       // a `.not('id','in',(...))` list and overflowed the query string.
-      query = supabase
-        .from('images')
-        .select('*, detections!left(id)', { count: 'exact' })
+      query = selectPhotos(supabase, filters, '*, detections!left(id)', true)
         .eq('user_id', userId)
         // Constrain the embed to LIVE detections before testing it for emptiness.
         // Without this a photo whose only detection was soft-deleted still has a
@@ -591,32 +478,15 @@ export async function getPhotos(
         .is('detections', null)
     }
 
-    // Apply dynamic ordering based on sortBy (default: imported_at) and sortDirection (default: desc)
-    const sortField = filters?.sortBy ?? 'imported_at'
-    // Supabase ascending: true = smallest values first (oldest dates)
-    // desc (newest) needs ascending: false, asc (oldest) needs ascending: true
-    const ascending = filters?.sortDirection === 'asc'
-    if (sortField === 'captured_at') {
-      // Photos without captured_at (null) should appear last regardless of direction
-      query = query
-        .order('captured_at', { ascending, nullsFirst: false })
-        .order('id', { ascending })
-    } else if (sortField === 'best_score') {
-      // Highest score first (desc default); un-scored photos last regardless of direction.
-      query = query
-        .order('best_score', { ascending, nullsFirst: false })
-        .order('id', { ascending })
-    } else {
-      query = query
-        .order('imported_at', { ascending })
-        .order('id', { ascending })
-    }
+    const { field, ascending } = photoOrder(filters)
+    query = query.order(field, { ascending, nullsFirst: false }).order('id', { ascending })
+    if (filters?.cursor !== undefined && filters.cursor !== '') query = query.or(photoCursorPredicate(field, ascending, filters.cursor))
 
     // Apply other filters
     // Photo-level predicates come from ONE shared definition (see
     // applyPhotoLevelFilters) — these had drifted into five hand-maintained
     // copies with materially different filter sets.
-    query = applyPhotoLevelFilters(query, filters, resolved)
+    query = applyPhotoLevelFilters(query, filters)
 
     // Apply pagination
     const limit = filters?.limit ?? 50
@@ -648,47 +518,24 @@ export async function getPhotos(
   }
 
   // Batch-id lookups that need a round-trip, resolved once for this call.
-  const stdResolved = await resolveBatchIdFilters(supabase, userId, filters)
-  if (stdResolved.matchesNothing) {
-    return { data: [], error: null, count: 0 }
-  }
 
-  // Standard query without detection-based filters
-  // Apply dynamic ordering based on sortBy (default: imported_at) and sortDirection (default: desc)
-  const sortField = filters?.sortBy ?? 'imported_at'
-  const ascending = filters?.sortDirection === 'asc'
-
-  let query = supabase
-    .from('images')
-    .select('*', { count: 'exact' })
+  const { field, ascending } = photoOrder(filters)
+  let query = selectPhotos(supabase, filters, '*', true)
     .eq('user_id', userId)
-
-  if (sortField === 'captured_at') {
-    // Photos without captured_at (null) should appear last regardless of direction
-    query = query
-      .order('captured_at', { ascending, nullsFirst: false })
-      .order('id', { ascending })
-  } else if (sortField === 'best_score') {
-    // Highest score first (desc default); un-scored photos last regardless of direction.
-    query = query
-      .order('best_score', { ascending, nullsFirst: false })
-      .order('id', { ascending })
-  } else {
-    query = query
-      .order('imported_at', { ascending })
-      .order('id', { ascending })
-  }
+    .order(field, { ascending, nullsFirst: false })
+    .order('id', { ascending })
+  if (filters?.cursor !== undefined && filters.cursor !== '') query = query.or(photoCursorPredicate(field, ascending, filters.cursor))
 
   // Photo-level predicates come from ONE shared definition (see
   // applyPhotoLevelFilters).
-  query = applyPhotoLevelFilters(query, filters, stdResolved)
+  query = applyPhotoLevelFilters(query, filters)
 
   // Apply pagination
   const limit = filters?.limit ?? 50
   const offset = filters?.offset ?? 0
   query = query.range(offset, offset + limit - 1)
 
-  const { data, error, count } = await query
+  const { data, error, count } = await query.returns<Image[]>()
 
   if (error !== null) {
     return { data: null, error, count: null }
@@ -718,7 +565,7 @@ export async function getPhotoIds(
   const needsSizeClassFilter = filters?.sizeClass !== undefined
   const needsPointsFilter = filters?.minPoints !== undefined || filters?.maxPoints !== undefined
   const needsDeerFilter = filters?.deerId !== undefined
-  const needsHasDetectionsFilter = filters?.hasDetections !== undefined
+  const needsHasDetectionsFilter = filters?.hasDetections !== undefined || filters?.emptyOnly === true
 
   // If filtering by detection-related fields, we need to join with detections
   if (needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter) {
@@ -728,7 +575,7 @@ export async function getPhotoIds(
     // exact, uncapped, and never serialized into a URL. The absence branch derives
     // its answer from the images query instead, so it skips this.
     let matchedImageIds: string[] = []
-    if (filters?.hasDetections !== false) {
+    if (filters?.hasDetections !== false && filters?.emptyOnly !== true) {
       const { ids, error: matchedError } = await resolveMatchedImageIds(supabase, userId, filters)
       if (matchedError !== null) {
         return { data: null, error: matchedError, count: 0 }
@@ -737,6 +584,10 @@ export async function getPhotoIds(
     }
 
     const hasOtherImageFilters =
+      filters?.triageView !== undefined || filters?.reviewStatus !== undefined ||
+      filters?.includeArchived !== true ||
+      filters?.batchId !== undefined ||
+      filters?.areaName !== undefined ||
       (filters?.status !== undefined && filters.status !== 'all') ||
       filters?.hasDeer !== undefined ||
       filters?.uploadSessionId !== undefined ||
@@ -751,11 +602,11 @@ export async function getPhotoIds(
     // Detection-only: the matching id set IS the answer. Return it directly — exact
     // and scalable, with no images round-trip (avoids the URL-overflow that 500'd
     // on large sets like sex=buck).
-    if (filters?.hasDetections !== false && !hasOtherImageFilters) {
+    if (filters?.hasDetections !== false && filters?.emptyOnly !== true && !hasOtherImageFilters) {
       return { data: matchedImageIds, error: null, count: matchedImageIds.length }
     }
 
-    if (filters?.hasDetections !== false && matchedImageIds.length === 0) {
+    if (filters?.hasDetections !== false && filters?.emptyOnly !== true && matchedImageIds.length === 0) {
       return { data: [], error: null, count: 0 }
     }
 
@@ -765,19 +616,13 @@ export async function getPhotoIds(
     // and 500 uuids (~18KB, measured).
     // Resolve batch-id lookups once, up front: the factory below is re-invoked per
     // page and must stay synchronous.
-    const resolved = await resolveBatchIdFilters(supabase, userId, filters)
-    if (resolved.matchesNothing) {
-      return { data: [], error: null, count: 0 }
-    }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types vary by select shape; behaviour is verified empirically
-    const buildQuery = (): any => {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      let query: any
-      if (filters?.hasDetections === false) {
-        query = supabase
-          .from('images')
-          .select('id, detections!left(id)')
+
+    const buildQuery = (): PhotoQuery => {
+
+      let query: PhotoQuery
+      if (filters?.hasDetections === false || filters?.emptyOnly === true) {
+        query = selectPhotos(supabase, filters, 'id, detections!left(id)')
           .eq('user_id', userId)
           // Constrain the embed to live detections before testing it for emptiness,
           // or a photo whose only detection was soft-deleted falls out of BOTH the
@@ -786,9 +631,7 @@ export async function getPhotoIds(
           .is('detections', null)
       } else {
         query = applyDetectionEmbedFilters(
-          supabase
-            .from('images')
-            .select('id, detections!inner(id)')
+          selectPhotos(supabase, filters, 'id, detections!inner(id)')
             .eq('user_id', userId),
           filters
         )
@@ -798,8 +641,8 @@ export async function getPhotoIds(
       // with the grid: `areaName` was ignored here entirely (so a buck+area filter
       // selected every buck in the account) and `otherAnimals` additionally applied
       // has_deer=false (so it selected fewer photos than were displayed).
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-      return applyPhotoLevelFilters(query, filters, resolved).order('id')
+
+      return applyPhotoLevelFilters(query, filters).order('id')
     }
 
     // Page past the max-rows ceiling. This function's contract is the COMPLETE id
@@ -807,7 +650,7 @@ export async function getPhotoIds(
     // archive or delete silently acts on a subset of what the user selected.
     const ids: string[] = []
     for (let from = 0; ; ) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+
       const { data, error } = await buildQuery().range(from, from + PHOTO_ID_PAGE_SIZE - 1)
       if (error !== null) {
         return { data: null, error: error as Error, count: 0 }
@@ -825,21 +668,17 @@ export async function getPhotoIds(
   // Standard query without detection-based filters - select only id. This is the
   // DEFAULT "Select All" path, so truncation here silently under-selects for every
   // account over the max-rows ceiling.
-  const stdResolved = await resolveBatchIdFilters(supabase, userId, filters)
-  if (stdResolved.matchesNothing) {
-    return { data: [], error: null, count: 0 }
-  }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types vary by select shape
-  const buildStdQuery = (): any => {
-    const base = supabase.from('images').select('id').eq('user_id', userId)
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    return applyPhotoLevelFilters(base, filters, stdResolved).order('id')
+
+  const buildStdQuery = (): PhotoQuery => {
+    const base = selectPhotos(supabase, filters, 'id').eq('user_id', userId)
+
+    return applyPhotoLevelFilters(base, filters).order('id')
   }
 
   const ids: string[] = []
   for (let from = 0; ; ) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+
     const { data, error } = await buildStdQuery().range(from, from + PHOTO_ID_PAGE_SIZE - 1)
     if (error !== null) {
       return { data: null, error: error as Error, count: 0 }
@@ -877,7 +716,8 @@ export const getPhoto = cache(async (
     supabase
       .from('detections')
       .select('*, deer:deer_id(id, name)')
-      .eq('image_id', photoId),
+      .eq('image_id', photoId)
+      .is('deleted_at', null),
   ])
 
   if (photoResult.error !== null) {
@@ -918,35 +758,24 @@ export async function getAdjacentPhotos(
   const needsSizeClassFilter = filters?.sizeClass !== undefined
   const needsPointsFilter = filters?.minPoints !== undefined || filters?.maxPoints !== undefined
   const needsDeerFilter = filters?.deerId !== undefined
-  const needsHasDetectionsFilter = filters?.hasDetections !== undefined
+  const needsHasDetectionsFilter = filters?.hasDetections !== undefined || filters?.emptyOnly === true
   const hasDetectionFilters = needsQualityFilter || needsConfidenceFilter || needsSexFilter || needsSizeClassFilter || needsPointsFilter || needsDeerFilter || needsHasDetectionsFilter
 
   // See getPhotos for the rationale: every detection predicate is evaluated by
   // Postgres. Nothing resolves to an image-id list here, because PostgREST puts
   // `.in()` in the query string and rejects it past ~250-500 uuids — which would
   // dead-end lightbox next/prev on exactly the large accounts that need it.
-  const canUseInnerJoin = filters?.hasDetections !== false
-
-  // Resolve batch-id lookups once, before the factory: it is invoked twice (one
-  // query either side of the cursor) and must stay synchronous.
-  const resolved = await resolveBatchIdFilters(supabase, userId, filters)
-  if (resolved.matchesNothing) {
-    return { prevId: null, nextId: null }
-  }
+  const canUseInnerJoin = filters?.hasDetections !== false && filters?.emptyOnly !== true
 
   // A factory, not a builder. Neighbours are resolved with two independent bounded
   // queries (one either side of the cursor), and a PostgrestFilterBuilder resolves
   // once — so each side needs its own fully-filtered query.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-js builder types don't unify across the two select shapes; behaviour is verified empirically
-  const buildQuery = (): any => {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    let query: any = supabase
-      .from('images')
-      .select(
-        hasDetectionFilters
+
+  const buildQuery = (): PhotoQuery => {
+
+    let query: PhotoQuery = selectPhotos(supabase, filters, hasDetectionFilters
           ? (canUseInnerJoin ? 'id, detections!inner(id)' : 'id, detections!left(id)')
-          : 'id'
-      )
+          : 'id')
       .eq('user_id', userId)
 
     if (hasDetectionFilters) {
@@ -955,14 +784,14 @@ export async function getAdjacentPhotos(
         // Detection ABSENCE: the left-joined embed must come back empty, counting
         // only LIVE detections. A soft-deleted-only photo otherwise belongs to
         // neither the "with" nor the "without" view.
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+
         : query.is('detections.deleted_at', null).is('detections', null)
     }
 
     // Photo-level predicates come from the one shared definition, so lightbox
     // navigation can no longer walk outside the set the grid is showing — it
     // previously ignored uploadSessionId, areaName, areaNames and otherAnimals.
-    return applyPhotoLevelFilters(query, filters, resolved)
+    return applyPhotoLevelFilters(query, filters)
   }
 
   // Locate the cursor row. Everything below compares against it by key rather than
@@ -971,7 +800,7 @@ export async function getAdjacentPhotos(
   // returned -1, and the viewer reported no neighbours at all.
   const { data: current, error: currentError } = await supabase
     .from('images')
-    .select('imported_at')
+    .select('id, imported_at, captured_at, best_score')
     .eq('id', currentPhotoId)
     .eq('user_id', userId)
     .maybeSingle()
@@ -987,24 +816,23 @@ export async function getAdjacentPhotos(
     return { prevId: null, nextId: null }
   }
 
-  const cursor = current.imported_at
-
-  // Grid order is (imported_at DESC, id DESC), so prev = newer = a strictly GREATER
-  // key, next = older = a strictly LESS one. Each side is one indexed row, whatever
-  // the account size. The `.or(...)` row-value comparison mirrors the cursor logic
-  // getPhotos already uses.
+  const { field, ascending } = photoOrder(filters)
+  const cursor = encodePhotoCursor(current, field)
   const [prevRes, nextRes] = await Promise.all([
     buildQuery()
-      .or(`imported_at.gt.${cursor},and(imported_at.eq.${cursor},id.gt.${currentPhotoId})`)
-      .order('imported_at', { ascending: true })
-      .order('id', { ascending: true })
+      .or(photoCursorPredicate(field, ascending, cursor, 'before'))
+      .order(field, { ascending: !ascending, nullsFirst: true })
+      .order('id', { ascending: !ascending })
       .limit(1),
     buildQuery()
-      .or(`imported_at.lt.${cursor},and(imported_at.eq.${cursor},id.lt.${currentPhotoId})`)
-      .order('imported_at', { ascending: false })
-      .order('id', { ascending: false })
+      .or(photoCursorPredicate(field, ascending, cursor))
+      .order(field, { ascending, nullsFirst: false })
+      .order('id', { ascending })
       .limit(1),
   ])
+  if (prevRes.error || nextRes.error) {
+    throw new Error('Unable to load neighboring photos')
+  }
 
   // Note: neighbours are now resolved from the cursor's POSITION, so a photo that
   // does not itself match the active filters still navigates into the filtered set.
@@ -1013,7 +841,7 @@ export async function getAdjacentPhotos(
     prevId: (prevRes.data as Array<{ id: string }> | null)?.[0]?.id ?? null,
     nextId: (nextRes.data as Array<{ id: string }> | null)?.[0]?.id ?? null,
   }
-  /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+
   return result
 }
 
@@ -1136,15 +964,15 @@ export async function deletePhoto(
   // Collect all storage paths to delete
   const storagePaths: string[] = []
 
-  if (photo.file_path) {
+  if (photo.file_path !== null && photo.file_path !== '') {
     storagePaths.push(photo.file_path)
   }
-  if (photo.thumbnail_path) {
+  if (photo.thumbnail_path !== null && photo.thumbnail_path !== '') {
     storagePaths.push(photo.thumbnail_path)
   }
   if (detections) {
     for (const d of detections) {
-      if (d.crop_file_path) {
+      if (d.crop_file_path !== null && d.crop_file_path !== '') {
         storagePaths.push(d.crop_file_path)
       }
     }
@@ -1218,8 +1046,9 @@ export async function getSignedUploadUrl(
 }> {
   const supabase = await createClient()
 
-  // Construct storage path: user_id/batch_id/filename
-  const path = `${userId}/${batchId}/${filename}`
+  // Camera cards routinely reuse basenames. Every photo gets its own object key.
+  const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+  const path = `${userId}/${batchId}/${crypto.randomUUID()}-${safeFilename}`
 
   // Get signed upload URL (valid for 60 seconds - Supabase default)
   const { data, error } = await supabase.storage
@@ -1292,11 +1121,11 @@ export async function getSignedViewUrls(
   }
 
   // Map results back to paths
-  if (data) {
+  if (data !== null) {
     for (const item of data) {
-      if (item.error) {
+      if (item.error !== null && item.error !== '') {
         errors.push(`${item.path}: ${item.error}`)
-      } else if (item.signedUrl && item.path) {
+      } else if (item.signedUrl !== '' && item.path !== null && item.path !== '') {
         urlMap.set(item.path, item.signedUrl)
       }
     }
@@ -1470,7 +1299,8 @@ export async function updatePhotosLocation(
  */
 export async function archivePhotos(
   userId: string,
-  photoIds: string[]
+  photoIds: string[],
+  isArchived = true
 ): Promise<{ data: { count: number } | null; error: Error | null }> {
   if (photoIds.length === 0) {
     return { data: { count: 0 }, error: null }
@@ -1482,7 +1312,7 @@ export async function archivePhotos(
   for (const chunk of idChunks(photoIds)) {
     const { data, error } = await supabase
       .from('images')
-      .update({ is_archived: true } as never)
+      .update({ is_archived: isArchived } as never)
       .eq('user_id', userId)
       .in('id', chunk)
       .select('id')
@@ -1494,6 +1324,43 @@ export async function archivePhotos(
   }
 
   return { data: { count: archived }, error: null }
+}
+
+/**
+ * Set the review status of multiple photos (bulk operation).
+ *
+ * Same contract as archivePhotos: owner-scoped, readiness-guarded, and chunked so a
+ * full "Select All" can never overflow the PostgREST query string. The review route
+ * used to issue one unbounded `.in('id', ...)`, relying on client-side slicing.
+ */
+export async function setPhotoReviewStatus(
+  userId: string,
+  photoIds: string[],
+  reviewStatus: 'unreviewed' | 'keep' | 'review_later'
+): Promise<{ data: { count: number } | null; error: Error | null }> {
+  if (photoIds.length === 0) {
+    return { data: { count: 0 }, error: null }
+  }
+
+  const supabase = await createClient()
+  let updated = 0
+
+  for (const chunk of idChunks(photoIds)) {
+    const { data, error } = await supabase
+      .from('images')
+      .update({ review_status: reviewStatus } as never)
+      .eq('user_id', userId)
+      .in('id', chunk)
+      .not('upload_completed_at', 'is', null)
+      .select('id')
+
+    if (error !== null) {
+      return { data: null, error }
+    }
+    updated += data?.length ?? 0
+  }
+
+  return { data: { count: updated }, error: null }
 }
 
 /**
@@ -1537,10 +1404,10 @@ export async function deletePhotos(
 
     for (const photo of photos ?? []) {
       photoCount += 1
-      if (photo.file_path) storagePaths.push(photo.file_path)
-      if (photo.thumbnail_path) storagePaths.push(photo.thumbnail_path)
+      if (photo.file_path !== null && photo.file_path !== '') storagePaths.push(photo.file_path)
+      if (photo.thumbnail_path !== null && photo.thumbnail_path !== '') storagePaths.push(photo.thumbnail_path)
       // medium_path was omitted here historically, orphaning every medium variant.
-      if (photo.medium_path) storagePaths.push(photo.medium_path)
+      if (photo.medium_path !== null && photo.medium_path !== '') storagePaths.push(photo.medium_path)
     }
 
     const { data: detections } = await supabase
@@ -1549,7 +1416,7 @@ export async function deletePhotos(
       .in('image_id', chunk)
 
     for (const detection of detections ?? []) {
-      if (detection.crop_file_path) storagePaths.push(detection.crop_file_path)
+      if (detection.crop_file_path !== null && detection.crop_file_path !== '') storagePaths.push(detection.crop_file_path)
     }
   }
 
@@ -1585,7 +1452,7 @@ export async function deletePhotos(
 
   return {
     data: {
-      deletedCount: count || photoCount,
+      deletedCount: count > 0 ? count : photoCount,
       storageErrors,
     },
     error: null,
@@ -1649,7 +1516,7 @@ export async function checkDuplicates(
   // Build a Set of existing filename+size combinations for O(1) lookups
   const existingSet = new Set<string>()
   for (const img of existingImages ?? []) {
-    if (img.original_filename && img.file_size_bytes !== null) {
+    if (img.original_filename !== null && img.original_filename !== '' && img.file_size_bytes !== null) {
       existingSet.add(`${img.original_filename}::${img.file_size_bytes}`)
     }
   }
@@ -1714,7 +1581,7 @@ export async function createBulkPhotoRecords(
   const imageRecords = files.map(file => {
     // Parse captured_at from EXIF dateTime if available
     let capturedAt: string | null = null
-    if (file.exifData?.dateTime) {
+    if (file.exifData?.dateTime !== undefined && file.exifData.dateTime !== '') {
       try {
         // EXIF dateTime format: "YYYY:MM:DD HH:MM:SS"
         const exifDate = file.exifData.dateTime.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')
@@ -1733,8 +1600,8 @@ export async function createBulkPhotoRecords(
         }
       : null
 
-    // Storage path format: {userId}/{sessionId}/{filename}
-    const storagePath = `${userId}/${sessionId}/${file.filename}`
+    const safeFilename = file.filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const storagePath = `${userId}/${sessionId}/${crypto.randomUUID()}-${safeFilename}`
 
     return {
       user_id: userId,
@@ -1760,7 +1627,7 @@ export async function createBulkPhotoRecords(
   // Cast to expected type (original_filename may not be in generated types yet)
   const insertedImages = data as unknown as BulkInsertResult[]
 
-  if (!insertedImages || insertedImages.length === 0) {
+  if (insertedImages === null || insertedImages.length === 0) {
     return { records: [], error: new Error('No images were inserted') }
   }
 
@@ -1815,7 +1682,7 @@ export async function refreshUploadUrl(
     .eq('user_id', userId)
     .single()
 
-  if (fetchError !== null || !image) {
+  if (fetchError !== null || image === null) {
     console.error('Failed to fetch image for refresh:', fetchError)
     return null
   }

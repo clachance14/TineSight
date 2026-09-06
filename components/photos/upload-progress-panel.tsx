@@ -1,25 +1,24 @@
 'use client'
 
-import { useEffect, useRef, memo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRef, memo, type JSX } from 'react'
+import Link from 'next/link'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { X, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { useUploadStore } from '@/lib/stores/upload'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
-export function UploadProgressPanel() {
-  const router = useRouter()
+export function UploadProgressPanel({ onRetry }: { onRetry?: () => void } = {}): JSX.Element | null {
   const {
     uploadQueue,
     isPreparing,
+    isCancelled,
     isUploading,
     overallProgress,
     completedCount,
     failedCount,
     totalCount,
     reset,
-    clearCompletedFiles,
   } = useUploadStore()
 
   // Use simplified view for bulk uploads to avoid React performance issues
@@ -34,33 +33,24 @@ export function UploadProgressPanel() {
     overscan: 5, // Render 5 extra items above/below viewport
   })
 
-  // Auto-dismiss and navigate to photos after 3 seconds when upload is complete
-  useEffect(() => {
-    if (!isUploading && uploadQueue.length > 0 && overallProgress === 100) {
-      const timer = setTimeout(() => {
-        reset()
-        router.push('/photos')
-      }, 3000)
-      return () => clearTimeout(timer)
-    }
-    return undefined
-  }, [isUploading, uploadQueue.length, overallProgress, reset, router])
-
-  // Auto-clear completed files from memory during upload to prevent memory bloat
-  useEffect(() => {
-    if (completedCount > 0 && isUploading && totalCount > 50) {
-      const timer = setTimeout(() => {
-        clearCompletedFiles()
-      }, 5000) // Clear completed files after 5 seconds
-      return () => clearTimeout(timer)
-    }
-    return undefined
-  }, [completedCount, isUploading, totalCount, clearCompletedFiles])
+  // Completed rows hold metadata only. Keep the result visible until the
+  // operator chooses to browse or dismiss it; mounting this panel is not a navigation action.
 
   // Only show when preparing, uploading, or recently completed
   // Don't show for pending files - that's handled by PhotoUploader summary
   const hasActiveUploads = uploadQueue.some(
     (f) => f.status === 'uploading' || f.status === 'completed' || f.status === 'failed'
+  )
+
+  if (isCancelled) return (
+    <div className="fixed bottom-6 right-6 z-50 w-96">
+      <Card><CardHeader><CardTitle>Upload cancelled</CardTitle></CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p>No more files will be uploaded. View Photos to see the photos you kept.</p>
+          <div className="flex gap-4"><Link href="/photos">View photos</Link><button type="button" onClick={reset}>Dismiss</button></div>
+        </CardContent>
+      </Card>
+    </div>
   )
 
   if (!isPreparing && (uploadQueue.length === 0 || !hasActiveUploads)) {
@@ -75,8 +65,18 @@ export function UploadProgressPanel() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold">
-              {allComplete ? 'Upload Complete' : isPreparing ? 'Preparing Upload...' : 'Uploading Photos'}
+              {allComplete
+                ? failedCount > 0
+                  ? completedCount > 0
+                    ? 'Upload Finished With Errors'
+                    : 'Upload Failed'
+                  : 'Upload Complete'
+                : isPreparing
+                  ? 'Preparing Upload...'
+                  : 'Uploading Photos'}
             </CardTitle>
+            {!isUploading && !isPreparing && failedCount > 0 && onRetry && <button onClick={onRetry} className="min-h-11 text-sm text-copper">Retry failed photos</button>}
+            {!isUploading && !isPreparing && completedCount > 0 && <Link href="/photos" className="text-sm text-copper">View photos</Link>}
             <button
               onClick={() => reset()}
               className="rounded-sm opacity-70 hover:opacity-100 transition-opacity outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
@@ -156,11 +156,19 @@ export function UploadProgressPanel() {
                 </div>
               )}
 
-              {/* Success Message */}
-              {allComplete && (
+              {/* Outcome Message */}
+              {allComplete && failedCount === 0 && (
                 <div className="flex items-center gap-2 text-sm text-primary">
                   <CheckCircle2 className="h-4 w-4" />
                   <span>All photos uploaded successfully</span>
+                </div>
+              )}
+              {allComplete && failedCount > 0 && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <XCircle className="h-4 w-4" />
+                  <span>
+                    {failedCount} photo{failedCount === 1 ? '' : 's'} did not upload. Each one lists the reason above.
+                  </span>
                 </div>
               )}
             </>
@@ -181,25 +189,22 @@ interface FileProgressItemProps {
   }
 }
 
+function FileStatusIcon({ status }: { status: FileProgressItemProps['file']['status'] }): JSX.Element {
+  switch (status) {
+    case 'completed': return <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+    case 'failed': return <XCircle className="h-4 w-4 text-destructive shrink-0" />
+    case 'uploading': return <Loader2 className="h-4 w-4 text-muted-foreground animate-spin shrink-0" />
+    default: return <div className="h-4 w-4 shrink-0" />
+  }
+}
+
 // Simplified item for bulk uploads - no progress bar, just status icon and filename
 // Memoized to prevent unnecessary re-renders during bulk uploads
-const BulkFileItem = memo(function BulkFileItem({ file }: FileProgressItemProps) {
-  const StatusIcon = () => {
-    switch (file.status) {
-      case 'completed':
-        return <CheckCircle2 className="h-3 w-3 text-primary shrink-0" />
-      case 'failed':
-        return <XCircle className="h-3 w-3 text-destructive shrink-0" />
-      case 'uploading':
-        return <Loader2 className="h-3 w-3 text-muted-foreground animate-spin shrink-0" />
-      default:
-        return <div className="h-3 w-3 shrink-0" />
-    }
-  }
+const BulkFileItem = memo(function BulkFileItem({ file }: FileProgressItemProps): JSX.Element {
 
   return (
     <div className="flex items-center gap-2 text-xs">
-      <StatusIcon />
+      <FileStatusIcon status={file.status} />
       <span
         className={cn(
           'truncate',
@@ -213,32 +218,20 @@ const BulkFileItem = memo(function BulkFileItem({ file }: FileProgressItemProps)
 })
 
 // Memoized to prevent unnecessary re-renders
-const FileProgressItem = memo(function FileProgressItem({ file }: FileProgressItemProps) {
-  const truncateFilename = (name: string, maxLength = 35) => {
+const FileProgressItem = memo(function FileProgressItem({ file }: FileProgressItemProps): JSX.Element {
+  const truncateFilename = (name: string, maxLength = 35): string => {
     if (name.length <= maxLength) return name
-    const ext = name.split('.').pop()
+    const ext = name.split('.').pop() ?? ''
     const nameWithoutExt = name.slice(0, name.lastIndexOf('.'))
-    const truncated = nameWithoutExt.slice(0, maxLength - ext!.length - 4)
+    const truncated = nameWithoutExt.slice(0, maxLength - ext.length - 4)
     return `${truncated}...${ext}`
   }
 
-  const StatusIcon = () => {
-    switch (file.status) {
-      case 'completed':
-        return <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-      case 'failed':
-        return <XCircle className="h-4 w-4 text-destructive shrink-0" />
-      case 'uploading':
-        return <Loader2 className="h-4 w-4 text-muted-foreground animate-spin shrink-0" />
-      default:
-        return <div className="h-4 w-4 shrink-0" />
-    }
-  }
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
-        <StatusIcon />
+        <FileStatusIcon status={file.status} />
         <span
           className={cn(
             'text-sm truncate flex-1',
@@ -261,7 +254,7 @@ const FileProgressItem = memo(function FileProgressItem({ file }: FileProgressIt
       {file.status === 'uploading' && (
         <ProgressBar progress={file.progress} size="sm" />
       )}
-      {file.error && (
+      {(file.error != null) && (
         <p className="text-xs text-destructive pl-6">{file.error}</p>
       )}
     </div>
@@ -273,7 +266,7 @@ interface ProgressBarProps {
   size?: 'default' | 'sm'
 }
 
-function ProgressBar({ progress, size = 'default' }: ProgressBarProps) {
+function ProgressBar({ progress, size = 'default' }: ProgressBarProps): JSX.Element {
   return (
     <div
       className={cn(

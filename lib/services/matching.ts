@@ -43,7 +43,7 @@ export async function getPendingMatches(
     .from('match_candidates')
     .select(`
       *,
-      detection:detections!detection_id(
+      detection:detections!detection_id!inner(
         id, image_id, species, sex, antler_points, age_class, crop_file_path,
         images!inner(user_id)
       ),
@@ -69,11 +69,15 @@ export async function getPendingMatches(
 
   // Sign each candidate's crop so the operator can visually verify the sighting.
   // Signed in parallel; a deduped path map avoids re-signing shared crops.
+  for (const row of rows) {
+    if (row.detection?.crop_file_path != null && !/^crops\/[0-9a-f-]{36}\.jpg$/i.test(row.detection.crop_file_path)) row.detection.crop_file_path = null
+  }
+  const admin = createAdminClient()
   const paths = Array.from(
     new Set(rows.map((r) => r.detection?.crop_file_path).filter((p): p is string => p != null && p !== ''))
   )
   const signed = await Promise.all(
-    paths.map((path) => supabase.storage.from('photos').createSignedUrl(path, 3600))
+    paths.map((path) => admin.storage.from('photos').createSignedUrl(path, 3600))
   )
   const urlByPath = new Map<string, string>()
   paths.forEach((path, i) => {
@@ -161,7 +165,7 @@ export async function createMatchCandidate(
  */
 export async function confirmMatch(
   matchId: string,
-  _userId: string
+  userId: string
 ): Promise<{ data: { detection_id: string; deer_id: string } | null; error: Error | null }> {
   const supabase = await createClient()
 
@@ -176,24 +180,33 @@ export async function confirmMatch(
     return { data: null, error: new Error('Match not found') }
   }
 
+  const { data: ownedBuck } = await supabase.from('deer').select('id')
+    .eq('id', match.candidate_deer_id).eq('user_id', userId).maybeSingle()
+  if (!ownedBuck) return { data: null, error: new Error('Buck not found') }
+
   // Update detection to link to deer
-  await supabase
+  const { error: linkError } = await supabase
     .from('detections')
     .update({ deer_id: match.candidate_deer_id } as never)
     .eq('id', match.detection_id)
+    .is('deleted_at', null)
+    .select('id').single()
+  if (linkError) return { data: null, error: linkError }
 
   // Update match status
-  await supabase
+  const { error: matchError } = await supabase
     .from('match_candidates')
     .update({ status: 'confirmed', reviewed_at: new Date().toISOString() } as never)
     .eq('id', matchId)
+  if (matchError) return { data: null, error: matchError }
 
   // Reject other candidates for this detection
-  await supabase
+  const { error: rejectError } = await supabase
     .from('match_candidates')
     .update({ status: 'rejected', reviewed_at: new Date().toISOString() } as never)
     .eq('detection_id', match.detection_id)
     .neq('id', matchId)
+  if (rejectError) return { data: null, error: rejectError }
 
   return {
     data: { detection_id: match.detection_id, deer_id: match.candidate_deer_id },
@@ -207,9 +220,13 @@ export async function confirmMatch(
 export async function correctMatch(
   matchId: string,
   correctDeerId: string,
-  _userId: string
+  userId: string
 ): Promise<{ data: { detection_id: string; deer_id: string } | null; error: Error | null }> {
   const supabase = await createClient()
+
+  const { data: ownedBuck } = await supabase.from('deer').select('id')
+    .eq('id', correctDeerId).eq('user_id', userId).maybeSingle()
+  if (!ownedBuck) return { data: null, error: new Error('Buck not found') }
 
   // Get match candidate
   const { data: match, error: fetchError } = await supabase
@@ -223,10 +240,13 @@ export async function correctMatch(
   }
 
   // Update detection to link to correct deer
-  await supabase
+  const { error: linkError } = await supabase
     .from('detections')
     .update({ deer_id: correctDeerId } as never)
     .eq('id', match.detection_id)
+    .is('deleted_at', null)
+    .select('id').single()
+  if (linkError) return { data: null, error: linkError }
 
   // Update all match candidates for this detection as rejected
   await supabase
@@ -518,29 +538,14 @@ export async function batchConfirmMatches(
     return { data: null, error: new Error('Unauthorized') }
   }
 
+  const detectionIds = new Set(matchesData.map((match) => match.detection_id))
+  if (detectionIds.size !== matchesData.length) {
+    return { data: null, error: new Error('Choose only one buck per detection') }
+  }
   let confirmedCount = 0
-
-  // Process each match
   for (const match of matchesData) {
-    // Update detection to link to deer
-    await supabase
-      .from('detections')
-      .update({ deer_id: match.candidate_deer_id } as never)
-      .eq('id', match.detection_id)
-
-    // Update match status
-    await supabase
-      .from('match_candidates')
-      .update({ status: 'confirmed', reviewed_at: new Date().toISOString() } as never)
-      .eq('id', match.id)
-
-    // Reject other candidates for this detection
-    await supabase
-      .from('match_candidates')
-      .update({ status: 'rejected', reviewed_at: new Date().toISOString() } as never)
-      .eq('detection_id', match.detection_id)
-      .neq('id', match.id)
-
+    const { error } = await confirmMatch(match.id, userId)
+    if (error) return { data: null, error }
     confirmedCount++
   }
 
@@ -664,24 +669,30 @@ export async function findSightingCandidates(
   // 2. Detections already decided for THIS Buck are off the table. Confirmed ones
   //    also carry deer_id (excluded by the pool filter), but rejected ones don't —
   //    the sticky-reject rows are what keep them from re-surfacing here.
-  const { data: decided } = await supabase
-    .from('match_candidates')
-    .select('detection_id')
-    .eq('candidate_deer_id', deerId)
-    .in('status', ['rejected', 'confirmed'])
-  const excluded = new Set((decided ?? []).map((r) => r.detection_id))
+  const excluded = new Set<string>()
+  for (let offset = 0; ; offset += 500) {
+    const { data: decided, error } = await supabase
+      .from('match_candidates').select('detection_id')
+      .eq('candidate_deer_id', deerId).in('status', ['rejected', 'confirmed'])
+      .order('detection_id').range(offset, offset + 499)
+    if (error) return { data: null, error }
+    for (const row of decided ?? []) excluded.add(row.detection_id)
+    if ((decided?.length ?? 0) < 500) break
+  }
 
-  // 3. The candidate pool: unassigned, fingerprinted Detections the user owns
-  //    (detections have no user_id — scope via images.user_id per CLAUDE.md).
-  const { data: pool, error: poolErr } = await supabase
-    .from('detections')
-    .select('id, crop_file_path, score_gross, estimated_point_range, age_class, antler_fingerprint, images!inner(user_id, captured_at)')
-    .is('deer_id', null)
-    .not('antler_fingerprint', 'is', null)
-    .eq('images.user_id', userId)
-    .limit(MAX_FINGERPRINTED_SCAN)
-  if (poolErr) {
-    return { data: null, error: poolErr }
+  // The intentionally bounded search scans up to 2000 live fingerprints. Page
+  // below PostgREST's server cap; limit(2000) alone silently returned only 1000.
+  const pool: unknown[] = []
+  for (let offset = 0; offset < MAX_FINGERPRINTED_SCAN; offset += 500) {
+    const { data: page, error } = await supabase
+      .from('detections')
+      .select('id, crop_file_path, score_gross, estimated_point_range, age_class, antler_fingerprint, images!inner(user_id, captured_at)')
+      .is('deer_id', null).is('deleted_at', null)
+      .not('antler_fingerprint', 'is', null).eq('images.user_id', userId)
+      .order('id').range(offset, Math.min(offset + 499, MAX_FINGERPRINTED_SCAN - 1))
+    if (error) return { data: null, error }
+    pool.push(...(page ?? []))
+    if ((page?.length ?? 0) < 500) break
   }
 
   const rows = (pool ?? []) as unknown as Array<{
@@ -695,6 +706,9 @@ export async function findSightingCandidates(
   }>
 
   // 4. Rank by fingerprint similarity (free, pure compute).
+  for (const row of rows) {
+    if (row.crop_file_path != null && !/^crops\/[0-9a-f-]{36}\.jpg$/i.test(row.crop_file_path)) row.crop_file_path = null
+  }
   const ranked = rows
     .filter((d) => !excluded.has(d.id) && d.antler_fingerprint != null)
     .map((d) => {
@@ -710,6 +724,7 @@ export async function findSightingCandidates(
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, limit)
 
+  // Migration 054 makes crop pointers worker-managed (including legacy crop UUIDs).
   // 5. Sign crops (dedup shared paths). Crops live at a FLAT `crops/{id}.jpg`
   //    prefix, which the photos-bucket RLS doesn't grant to the user session
   //    (see migration 047/049 — the same gap that "?"-blanked these thumbnails).
@@ -766,6 +781,7 @@ export async function addSighting(
     .from('detections')
     .select('id, deer_id, images!inner(user_id)')
     .eq('id', detectionId)
+    .is('deleted_at', null)
     .single()
   const det = detection as unknown as { id: string; deer_id: string | null; images: { user_id: string } } | null
   if (!det || det.images.user_id !== userId) {
@@ -780,6 +796,9 @@ export async function addSighting(
     .from('detections')
     .update({ deer_id: deerId } as never)
     .eq('id', detectionId)
+    .is('deer_id', null)
+    .is('deleted_at', null)
+    .select('id').single()
   if (updErr) {
     return { data: null, error: updErr }
   }
@@ -813,6 +832,9 @@ export async function rejectSightingCandidate(
   similarity = 0
 ): Promise<{ error: Error | null }> {
   const supabase = await createClient()
+
+  const { data: ownedBuck } = await supabase.from('deer').select('id').eq('id', deerId).eq('user_id', userId).maybeSingle()
+  if (!ownedBuck) return { error: new Error('Buck not found') }
 
   // Verify ownership explicitly for a clean 404 instead of a silent RLS drop.
   const { data: detection } = await supabase

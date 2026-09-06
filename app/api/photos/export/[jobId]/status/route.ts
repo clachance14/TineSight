@@ -11,6 +11,8 @@ type JobStatus = 'pending' | 'processing' | 'completed' | 'failed'
 
 interface JobStatusResponse {
   status: JobStatus
+  current: number
+  total: number
   progress?: {
     current: number
     total: number
@@ -95,15 +97,18 @@ export async function GET(
     const status: JobStatus = mapTriggerStatus(run.status)
 
     // Build response
-    const response: JobStatusResponse = { status }
+    const response: JobStatusResponse = { status, current: 0, total: Array.isArray(payload?.['photoIds']) ? payload['photoIds'].length : 0 }
 
     // Extract progress from metadata if available
     if (run.metadata && typeof run.metadata === 'object') {
-      const metadata = run.metadata as Record<string, unknown>
+      const raw = run.metadata as Record<string, unknown>
+      const metadata = (raw['progress'] !== null && typeof raw['progress'] === 'object' ? raw['progress'] : raw) as Record<string, unknown>
       if (
         typeof metadata['current'] === 'number' &&
         typeof metadata['total'] === 'number'
       ) {
+        response.current = metadata['current']
+        response.total = metadata['total']
         response.progress = {
           current: metadata['current'],
           total: metadata['total'],
@@ -114,7 +119,10 @@ export async function GET(
     // For completed runs, get downloadUrl from output
     if (status === 'completed' && run.output) {
       const output = run.output as Record<string, unknown>
-      if (typeof output['downloadUrl'] === 'string') {
+      if (output['success'] === false) {
+        response.status = 'failed'
+        response.error = typeof output['error'] === 'string' ? output['error'] : 'Export job failed'
+      } else if (typeof output['downloadUrl'] === 'string') {
         response.downloadUrl = output['downloadUrl']
       }
     }

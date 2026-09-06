@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
+import { PageState } from '@/components/layout/page-state'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Search, Image as ImageIcon, LayoutGrid } from 'lucide-react'
@@ -36,7 +38,7 @@ export function DeerCatalog({ onDeerClick }: DeerCatalogProps): React.JSX.Elemen
   const [sort, setSort] = useState<SortKey>('score')
   const [view, setView] = useState<CatalogView>('immersive')
 
-  const { data, isLoading, error } = useQuery<{ deer: DeerProfile[] }>({
+  const { data, isLoading, error, refetch } = useQuery<{ deer: DeerProfile[] }>({
     queryKey: ['deer-catalog', search],
     queryFn: async (): Promise<{ deer: DeerProfile[] }> => {
       const url = search.length > 0 ? `/api/deer?search=${encodeURIComponent(search)}` : '/api/deer'
@@ -60,7 +62,7 @@ export function DeerCatalog({ onDeerClick }: DeerCatalogProps): React.JSX.Elemen
   const gridDeer = featured ? sorted.filter((d) => d.id !== featured.id) : sorted
 
   if (error) {
-    return <div className="py-8 text-center text-saddle-light">Failed to load deer catalog</div>
+    return <PageState error title="Your catalog couldn’t load." description="Try again to reconnect to your saved bucks."><Button onClick={() => { void refetch() }}>Try again</Button></PageState>
   }
 
   return (
@@ -69,10 +71,11 @@ export function DeerCatalog({ onDeerClick }: DeerCatalogProps): React.JSX.Elemen
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-cream-dark" />
         <Input
+          aria-label="Search bucks by name"
           placeholder="Search the catalog…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
+          className="h-12 pl-9"
         />
       </div>
 
@@ -82,13 +85,14 @@ export function DeerCatalog({ onDeerClick }: DeerCatalogProps): React.JSX.Elemen
           <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-cream-dark">
             The Catalog · {deer.length} Buck{deer.length === 1 ? '' : 's'}
           </span>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-3 font-sans text-[11px] font-semibold uppercase tracking-[0.12em]">
               {([['score', 'Score'], ['recent', 'Last seen'], ['trophy', 'Trophies']] as const).map(([k, label]) => (
                 <button
                   key={k}
+                  aria-pressed={sort === k}
                   onClick={() => setSort(k)}
-                  className={sort === k ? 'text-copper' : 'text-cream-dark hover:text-cream'}
+                  className={`min-h-11 ${sort === k ? 'text-copper' : 'text-cream-dark hover:text-cream'}`}
                 >
                   {label}{sort === k ? ' ▾' : ''}
                 </button>
@@ -98,14 +102,16 @@ export function DeerCatalog({ onDeerClick }: DeerCatalogProps): React.JSX.Elemen
               <button
                 onClick={() => setView('immersive')}
                 aria-label="Immersive view"
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold ${view === 'immersive' ? 'bg-slate-light text-cream' : 'text-cream-dark hover:text-cream'}`}
+                aria-pressed={view === 'immersive'}
+                className={`flex min-h-11 items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold ${view === 'immersive' ? 'bg-slate-light text-cream' : 'text-cream-dark hover:text-cream'}`}
               >
                 <ImageIcon className="h-3.5 w-3.5" /> Immersive
               </button>
               <button
                 onClick={() => setView('compact')}
                 aria-label="Compact view"
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold ${view === 'compact' ? 'bg-slate-light text-cream' : 'text-cream-dark hover:text-cream'}`}
+                aria-pressed={view === 'compact'}
+                className={`flex min-h-11 items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold ${view === 'compact' ? 'bg-slate-light text-cream' : 'text-cream-dark hover:text-cream'}`}
               >
                 <LayoutGrid className="h-3.5 w-3.5" /> Compact
               </button>
@@ -122,18 +128,9 @@ export function DeerCatalog({ onDeerClick }: DeerCatalogProps): React.JSX.Elemen
           ))}
         </div>
       ) : deer.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="rounded-xl border border-cream/10 bg-slate px-10 py-8">
-            <h3 className="font-display text-xl font-semibold text-cream">
-              {search.length > 0 ? 'No deer found' : 'Your trophy room is empty'}
-            </h3>
-            <p className="mx-auto mt-2 max-w-xs text-sm text-cream-dark">
-              {search.length > 0
-                ? 'Try a different name.'
-                : 'Confirm a re-ID or name your first buck to start the collection.'}
-            </p>
-          </div>
-        </div>
+        <PageState title={search.length > 0 ? 'No bucks match that name.' : 'Every buck has a story.'} description={search.length > 0 ? 'Try another name, or clear your search to see the full catalog.' : 'Upload your trail camera photos, then review sightings and name your first buck to start your collection.'}>
+          {search.length > 0 ? <Button onClick={() => setSearch('')}>Clear search</Button> : <div className="flex flex-wrap gap-3"><Button asChild><Link href="/upload">Upload photos</Link></Button><Button asChild variant="outline"><Link href="/trophy">Review sightings</Link></Button></div>}
+        </PageState>
       ) : (
         <div className="space-y-5">
           {/* Featured hero */}

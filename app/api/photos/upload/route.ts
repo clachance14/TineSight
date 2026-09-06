@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createBatch, linkBatchToSession, type CreateBatchLocationData } from '@/lib/services/batches'
 import { getSignedUploadUrl } from '@/lib/services/photos'
@@ -18,11 +18,13 @@ const ALLOWED_CONTENT_TYPES = [
 ]
 
 interface UploadFileRequest {
+  contentSha256?: string
   id: string
   filename: string
   contentType: string
   size: number
   // EXIF metadata fields
+  cameraId?: string | null
   capturedAt?: string // ISO date string
   make?: string
   model?: string
@@ -59,7 +61,7 @@ interface UploadInitiationResponse {
  * POST /api/photos/upload
  * Initiates a photo upload batch by creating database records and generating signed upload URLs
  */
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse<{ error: string; }> | NextResponse<UploadInitiationResponse & { warnings?: string[]; }>> {
   try {
     // Authenticate user
     const supabase = await createClient()
@@ -75,7 +77,7 @@ export async function POST(request: NextRequest) {
     // Parse and validate request body
     const body = (await request.json()) as UploadInitiationRequest
 
-    if (body.files === undefined || !Array.isArray(body.files) || body.files.length === 0) {
+    if (body.files === undefined || !Array.isArray(body.files) || body.files.length === 0 || body.files.length > 100) {
       return NextResponse.json(
         { error: 'Invalid request: files array is required and must not be empty' },
         { status: 400 }
@@ -95,6 +97,8 @@ export async function POST(request: NextRequest) {
         validationErrors.push(`File ${index}: size must be a positive number`)
       }
 
+      if (file.contentSha256 !== undefined && !/^[0-9a-f]{64}$/.test(file.contentSha256)) validationErrors.push(`File ${index}: invalid content hash`)
+
       // Validate file size
       if (file.size > MAX_FILE_SIZE) {
         validationErrors.push(
@@ -103,7 +107,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Validate content type
-      if (!ALLOWED_CONTENT_TYPES.includes(file.contentType.toLowerCase())) {
+      if (typeof file.contentType !== 'string' || !ALLOWED_CONTENT_TYPES.includes(file.contentType.toLowerCase())) {
         validationErrors.push(
           `File ${index} (${file.filename}): unsupported content type ${file.contentType}`
         )
@@ -117,11 +121,22 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (body.uploadSessionId != null) {
+      const { data: session } = await supabase.from('upload_sessions').select('id, status').eq('id', body.uploadSessionId).eq('user_id', user.id).single()
+      if (!session || session.status === 'cancelled') return NextResponse.json({ error: 'Upload session unavailable' }, { status: 409 })
+    }
+
+    const explicitCameraIds = [...new Set(body.files.map(file => file.cameraId).filter((id): id is string => !(id == null)))]
+    if (explicitCameraIds.length > 0) {
+      const { data: cameras, error } = await supabase.from('cameras').select('id').eq('user_id', user.id).in('id', explicitCameraIds)
+      if (error || cameras?.length !== explicitCameraIds.length) return NextResponse.json({ error: 'Invalid camera assignment' }, { status: 400 })
+    }
+
     // Resolve location ID - either use provided ID, find existing, or create new
     let resolvedLocationId: string | undefined = body.locationId
 
     // If locationId provided, verify user owns it
-    if (body.locationId) {
+    if (body.locationId != null) {
       const { data: location } = await supabase
         .from('locations')
         .select('id')
@@ -133,7 +148,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid location' }, { status: 400 })
       }
       resolvedLocationId = body.locationId
-    } else if (body.areaName) {
+    } else if (body.areaName != null) {
       // Try to find existing location with same name first
       const { data: existing } = await supabase
         .from('locations')
@@ -149,8 +164,8 @@ export async function POST(request: NextRequest) {
         try {
           const { data: newLocation } = await createLocation(user.id, {
             name: body.areaName.trim(),
-            lat: body.locationLat!,
-            lng: body.locationLng!,
+            lat: body.locationLat ?? 0,
+            lng: body.locationLng ?? 0,
             ...(body.directionCompass !== undefined && { directionCompass: body.directionCompass }),
             ...(body.directionNotes !== undefined && { directionNotes: body.directionNotes }),
           })
@@ -175,7 +190,7 @@ export async function POST(request: NextRequest) {
             ...(body.areaName !== undefined && { areaName: body.areaName }),
             ...(body.directionCompass !== undefined && { directionCompass: body.directionCompass }),
             ...(body.directionNotes !== undefined && { directionNotes: body.directionNotes }),
-            ...(resolvedLocationId && { locationId: resolvedLocationId }),
+            ...((resolvedLocationId != null) && { locationId: resolvedLocationId }),
           }
         : undefined
 
@@ -194,7 +209,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Link batch to upload session if provided
-    if (body.uploadSessionId) {
+    if (body.uploadSessionId != null) {
       const { error: linkError } = await linkBatchToSession(batch.id, body.uploadSessionId)
 
       if (linkError) {
@@ -203,20 +218,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Single camera lookup - all files in a batch are assumed from the same camera
-    let sharedCameraId: string | null = null
-    const firstFile = body.files[0]
-    if (firstFile && (firstFile.make || firstFile.model || firstFile.deviceIdentifier || firstFile.exifSignature)) {
-      const cameraMetadata = {
-        make: firstFile.make ?? null,
-        model: firstFile.model ?? null,
-        deviceIdentifier: firstFile.deviceIdentifier ?? null,
-        exifSignature: firstFile.exifSignature ?? null,
-      }
-      const { data: camera } = await findOrCreateCamera(user.id, cameraMetadata)
-      if (camera !== null) {
-        sharedCameraId = camera.id
-      }
+    // Resolve each source independently; a transport chunk may span cameras.
+    const cameraIds = new Map<string, Promise<string | null>>()
+    const cameraFor = (file: UploadFileRequest): Promise<string | null> => {
+      if (file.cameraId != null) return Promise.resolve(file.cameraId)
+      // Make/model identifies a product, not an individual physical camera.
+      if (file.deviceIdentifier == null) return Promise.resolve(null)
+      const metadata = { make: file.make ?? null, model: file.model ?? null, deviceIdentifier: file.deviceIdentifier ?? null, exifSignature: file.exifSignature ?? null }
+      const key = JSON.stringify(metadata)
+      if (!cameraIds.has(key)) cameraIds.set(key, findOrCreateCamera(user.id, metadata).then(result => result.data?.id ?? null))
+      return cameraIds.get(key) ?? Promise.resolve(null)
     }
 
     // Parallelize signed URL generation (camera already resolved)
@@ -232,22 +243,24 @@ export async function POST(request: NextRequest) {
         return { file, error: `${file.filename}: Failed to generate upload URL` }
       }
 
-      return { file, uploadData, cameraId: sharedCameraId, error: null }
+      return { file, uploadData, cameraId: await cameraFor(file), error: null }
     })
 
     const results = await Promise.all(uploadPromises)
 
     // Separate successes and errors
-    const successes = results.filter(r => r.error === null && r.uploadData)
-    const errors = results.filter(r => r.error !== null).map(r => r.error!)
+    const successes = results.filter(r => r.error === null && r.uploadData !== undefined)
+    const errors = results.filter(r => r.error !== null).map(r => r.error)
 
     // Batch insert all photos at once
     const photoRecords = successes.map(r => ({
       user_id: user.id,
-      file_path: r.uploadData!.path,
+      file_path: r.uploadData.path,
       batch_id: batch.id,
       camera_id: r.cameraId ?? null,
       file_size_bytes: r.file.size,
+      original_filename: r.file.filename,
+      content_sha256: r.file.contentSha256 ?? null,
       detection_status: 'pending' as const,
       captured_at: r.file.capturedAt ?? null,
       exif_data: r.file.exifData ?? null,
@@ -258,19 +271,23 @@ export async function POST(request: NextRequest) {
       .insert(photoRecords)
       .select()
 
-    if (insertError || !photos) {
+    if (insertError !== null) {
       console.error('Failed to batch insert photos:', insertError)
       return NextResponse.json({ error: 'Failed to create photo records' }, { status: 500 })
     }
 
     // Build upload response
-    const uploads = successes.map((r, index) => ({
+    const photosByPath = new Map(photos.map(photo => [photo.file_path, photo]))
+    const uploads = successes.map((r) => {
+      const photo = photosByPath.get(r.uploadData.path)
+      if (photo === undefined) throw new Error("Uploaded photo reservation is missing")
+      return ({
       fileId: r.file.id,
       filename: r.file.filename,
-      uploadUrl: r.uploadData!.signedUrl,
-      imageId: photos[index]!.id,
-      path: r.uploadData!.path,
-    }))
+      uploadUrl: r.uploadData.signedUrl,
+      imageId: photo.id,
+      path: r.uploadData.path,
+    })})
 
     // If all files failed, return error
     if (uploads.length === 0) {

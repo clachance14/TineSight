@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -53,22 +54,23 @@ export default async function ShowcasePage({ params }: ShowcasePageProps): Promi
   )
 
   return (
-    <main className="min-h-screen bg-slate-deep text-cream">
-      <header className="border-b border-cream/10 px-5 py-6 text-center">
-        <p className="text-xs uppercase tracking-widest text-copper">TineSight</p>
-        <h1 className="mt-1 font-display text-2xl font-semibold sm:text-3xl">{title}</h1>
-        <p className="mt-1 text-sm text-cream-dark">
-          {bucks.length} trophy buck{bucks.length === 1 ? '' : 's'}
+    <main className="min-h-dvh bg-deep-forest text-parchment">
+      <header className="mx-auto max-w-6xl border-b border-forest-light px-5 pb-8 pt-10 sm:px-8 sm:pt-14">
+        <Link href="/" className="inline-flex min-h-11 items-center font-display text-2xl tracking-[0.12em] text-brass">TINESIGHT</Link>
+        <p className="mt-10 text-[11px] uppercase tracking-[0.18em] text-weathered">A collection from the field</p>
+        <h1 className="mt-3 break-words font-display text-4xl sm:text-5xl">{title}</h1>
+        <p className="mt-4 font-mono text-xs text-weathered">
+          {bucks.length} buck{bucks.length === 1 ? '' : 's'}
         </p>
       </header>
 
-      <div className="mx-auto grid max-w-2xl grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+      <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-5 py-8 sm:grid-cols-2 sm:px-8 lg:grid-cols-3">
         {bucks.map((b) => (
           <article
             key={b.deerId}
-            className="overflow-hidden rounded-xl bg-slate shadow-lg"
+            className="overflow-hidden rounded-xl border border-forest-light bg-forest/20"
           >
-            <div className="relative aspect-[4/3] w-full bg-slate-deep">
+            <div className="relative aspect-[4/5] w-full bg-slate-deep">
               {b.imageUrl !== null ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
@@ -79,16 +81,16 @@ export default async function ShowcasePage({ params }: ShowcasePageProps): Promi
                   decoding="async"
                 />
               ) : (
-                <div className="flex h-full w-full items-center justify-center text-4xl">🦌</div>
+                <div className="flex h-full w-full items-center justify-center font-display text-6xl text-weathered/40" aria-label="No photo available">{b.name.slice(0, 1)}</div>
               )}
               {b.score !== null && (
-                <span className="absolute right-2 top-2 rounded-full bg-copper px-2.5 py-1 text-xs font-semibold text-white">
+                <span className="absolute right-2 top-2 rounded-md border border-brass/40 bg-deep-forest/90 px-3 py-2 font-mono text-xs text-brass-light">
                   {b.score}&quot; gross
                 </span>
               )}
             </div>
-            <div className="flex items-center justify-between px-4 py-3">
-              <h2 className="font-medium">{b.name}</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-5">
+              <h2 className="break-words font-display text-2xl italic">{b.name}</h2>
               <span className="text-sm text-cream-dark">
                 {b.sightings} sighting{b.sightings === 1 ? '' : 's'}
               </span>
@@ -98,7 +100,7 @@ export default async function ShowcasePage({ params }: ShowcasePageProps): Promi
       </div>
 
       <footer className="px-5 py-8 text-center text-xs text-cream-dark">
-        Powered by TineSight · AI-cataloged trophy bucks
+        Collected in TineSight · Every buck has a story.
       </footer>
     </main>
   )

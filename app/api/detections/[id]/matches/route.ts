@@ -123,7 +123,7 @@ export async function GET(
         .map(({ filePath }) => filePath)
         .filter((p): p is string => p !== null)
 
-      const cachedUrls = await getCachedSignedUrls(filePaths)
+      const cachedUrls = await getCachedSignedUrls(filePaths, user.id)
 
       // Build lookup for file path -> URL
       const urlLookup = new Map<string, string | null>()

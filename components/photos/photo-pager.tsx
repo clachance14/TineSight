@@ -17,7 +17,7 @@ type Phase =
   | { kind: 'dragging'; dx: number }
   | { kind: 'settling'; toPercent: -200 | -100 | 0 }
 
-export function PhotoPager({ hasPrev, hasNext, renderSlide, onSettle }: PhotoPagerProps) {
+export function PhotoPager({ hasPrev, hasNext, renderSlide, onSettle }: PhotoPagerProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
   const lastRef = useRef<{ x: number; t: number } | null>(null)
@@ -92,7 +92,7 @@ export function PhotoPager({ hasPrev, hasNext, renderSlide, onSettle }: PhotoPag
     // React batches both updates into one paint: the neighbor slide that just
     // animated to center is re-keyed into the middle slot and stays put — no flash.
     setPhase({ kind: 'idle' })
-    if (commit) onSettle(commit)
+    if (commit !== null) onSettle(commit)
   }, [phase.kind, onSettle])
 
   const transform =
@@ -106,6 +106,17 @@ export function PhotoPager({ hasPrev, hasNext, renderSlide, onSettle }: PhotoPag
     <div
       ref={containerRef}
       className="relative w-full overflow-hidden touch-pan-y"
+      onTouchStartCapture={(event) => {
+        // A second finger hands the gesture to inline zoom, cancelling any swipe.
+        if (event.touches.length > 1) {
+          startRef.current = null
+          lastRef.current = null
+          axisRef.current = null
+          commitRef.current = null
+          setPhase({ kind: 'idle' })
+        }
+      }}
+      onTouchCancel={() => { startRef.current = null; axisRef.current = null; setPhase({ kind: 'idle' }) }}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
@@ -115,9 +126,9 @@ export function PhotoPager({ hasPrev, hasNext, renderSlide, onSettle }: PhotoPag
         style={{ transform, transition }}
         onTransitionEnd={onTransitionEnd}
       >
-        <div className="w-full shrink-0">{renderSlide(-1)}</div>
+        <div className="w-full shrink-0" inert aria-hidden="true">{renderSlide(-1)}</div>
         <div className="w-full shrink-0">{renderSlide(0)}</div>
-        <div className="w-full shrink-0">{renderSlide(1)}</div>
+        <div className="w-full shrink-0" inert aria-hidden="true">{renderSlide(1)}</div>
       </div>
     </div>
   )

@@ -1,5 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { format } from 'date-fns'
+import { assertExportSize } from '@/lib/export/limits'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import type { Database } from '@/types/database'
+type ExportClient = SupabaseClient<Database>
 
 /**
  * Photo data for export with camera and detection info
@@ -7,6 +11,7 @@ import { format } from 'date-fns'
 export interface PhotoForExport {
   id: string
   file_path: string
+  file_size_bytes?: number | null
   captured_at: string | null
   imported_at: string
   camera: {
@@ -43,7 +48,8 @@ export interface UploadResult {
  */
 export async function getPhotosForExport(
   userId: string,
-  photoIds: string[]
+  photoIds: string[],
+  client?: ExportClient
 ): Promise<{
   data: PhotoForExport[] | null
   error: Error | null
@@ -52,60 +58,37 @@ export async function getPhotosForExport(
     return { data: [], error: null }
   }
 
-  const supabase = await createClient()
+  const supabase = client ?? await createClient()
 
-  // Get photos with camera info
-  const { data: photos, error: photosError } = await supabase
-    .from('images')
-    .select('id, file_path, captured_at, imported_at, has_deer, camera:camera_id(name)')
-    .eq('user_id', userId)
-    .in('id', photoIds)
-
-  if (photosError !== null) {
-    return { data: null, error: photosError }
-  }
-
-  if (!photos || photos.length === 0) {
-    return { data: [], error: null }
-  }
-
-  // Get best detection for each photo (highest confidence, non-deleted)
-  const { data: detections, error: detectionsError } = await supabase
-    .from('detections')
-    .select('image_id, sex, estimated_point_range, point_min, confidence')
-    .in('image_id', photoIds)
-    .is('deleted_at', null)
-    .order('confidence', { ascending: false })
-
-  if (detectionsError !== null) {
-    return { data: null, error: detectionsError }
-  }
-
-  // Map best detection per image (first one due to ordering by confidence desc)
-  const bestDetectionMap = new Map<string, { sex: string | null; estimated_point_range: string | null; point_min: number | null }>()
-
-  for (const detection of detections ?? []) {
-    if (!bestDetectionMap.has(detection.image_id)) {
-      bestDetectionMap.set(detection.image_id, {
-        sex: detection.sex,
-        estimated_point_range: detection.estimated_point_range,
-        point_min: detection.point_min,
+  const result: PhotoForExport[] = []
+  const uniqueIds = [...new Set(photoIds)]
+  // Keep UUID filters below proxy URL limits. Fetch only each image's best live
+  // detection so large exports never rely on a truncated global detection list.
+  for (let offset = 0; offset < uniqueIds.length; offset += 100) {
+    const { data: photos, error } = await supabase
+      .from('images')
+      .select('id, file_path, file_size_bytes, captured_at, imported_at, has_deer, camera:camera_id(name), detections(sex, estimated_point_range, point_min, confidence)')
+      .eq('user_id', userId)
+      .in('id', uniqueIds.slice(offset, offset + 100))
+      .is('detections.deleted_at', null)
+      .order('confidence', { referencedTable: 'detections', ascending: false, nullsFirst: false })
+      .order('id', { referencedTable: 'detections', ascending: true })
+      .limit(1, { referencedTable: 'detections' })
+    if (error) return { data: null, error }
+    for (const photo of photos ?? []) {
+      if (photo.file_path.split('/')[0] !== userId || /(^|\/)\.{1,2}(\/|$)|[%\\]/.test(photo.file_path)) {
+        return { data: null, error: new Error('Invalid photo storage ownership') }
+      }
+      const best = photo.detections[0]
+      result.push({
+        id: photo.id, file_path: photo.file_path, file_size_bytes: photo.file_size_bytes, captured_at: photo.captured_at,
+        imported_at: photo.imported_at, has_deer: photo.has_deer, camera: photo.camera,
+        bestDetection: best ? { sex: best.sex, estimated_point_range: best.estimated_point_range, point_min: best.point_min } : null,
       })
     }
   }
-
-  // Combine data
-  const photosForExport: PhotoForExport[] = photos.map(photo => ({
-    id: photo.id,
-    file_path: photo.file_path,
-    captured_at: photo.captured_at,
-    imported_at: photo.imported_at,
-    camera: photo.camera,
-    bestDetection: bestDetectionMap.get(photo.id) ?? null,
-    has_deer: photo.has_deer,
-  }))
-
-  return { data: photosForExport, error: null }
+  try { assertExportSize(result) } catch (error) { return { data: null, error: error as Error } }
+  return { data: result, error: null }
 }
 
 /**
@@ -177,8 +160,8 @@ export function generateExportFilename(
 /**
  * Download a photo buffer from Supabase Storage
  */
-export async function downloadPhotoBuffer(filePath: string): Promise<DownloadResult> {
-  const supabase = await createClient()
+export async function downloadPhotoBuffer(filePath: string, client?: ExportClient): Promise<DownloadResult> {
+  const supabase = client ?? await createClient()
 
   const { data, error } = await supabase.storage
     .from('photos')
@@ -204,10 +187,11 @@ export async function downloadPhotoBuffer(filePath: string): Promise<DownloadRes
  */
 export async function uploadZipToStorage(
   userId: string,
-  zipBuffer: Buffer,
-  filename: string
+  zipBuffer: Buffer | NodeJS.ReadableStream,
+  filename: string,
+  client?: ExportClient
 ): Promise<UploadResult> {
-  const supabase = await createClient()
+  const supabase = client ?? await createClient()
 
   const filePath = `${userId}/${filename}`
 
@@ -229,11 +213,11 @@ export async function uploadZipToStorage(
  * Generate a signed URL for downloading a ZIP file
  * Valid for 1 hour
  */
-export async function getExportDownloadUrl(filePath: string): Promise<{
+export async function getExportDownloadUrl(filePath: string, client?: ExportClient): Promise<{
   data: string | null
   error: Error | null
 }> {
-  const supabase = await createClient()
+  const supabase = client ?? await createClient()
 
   const { data, error } = await supabase.storage
     .from('exports')

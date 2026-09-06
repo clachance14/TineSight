@@ -59,14 +59,10 @@ export const DetectionCardWithFeedback = memo(function DetectionCardWithFeedback
   const { selectedDetectionId, openPanel } = useDetectionEdit()
   const isSelected = selectedDetectionId === detection.id
 
-  // Tap-to-locate, second-tap-to-edit: first tap pins (locates) this detection;
-  // tapping the already-pinned row opens the edit panel.
+  // Selecting a deer opens its details before any editing tools.
   const handleActivate = () => {
-    if (isActive) {
-      openPanel(detection.id)
-    } else {
-      setPinnedDetectionId(detection.id)
-    }
+    setPinnedDetectionId(detection.id)
+    openPanel(detection.id)
   }
 
   // Format deer info from Gemini analysis
@@ -116,6 +112,7 @@ export const DetectionCardWithFeedback = memo(function DetectionCardWithFeedback
       )}
       onClick={handleActivate}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           handleActivate()
@@ -238,7 +235,7 @@ export const DetectionCardWithFeedback = memo(function DetectionCardWithFeedback
               }}
               className="inline-flex items-center rounded-md bg-copper px-3 py-1.5 text-sm font-medium text-cream transition-colors hover:bg-copper-light"
             >
-              Adjust ROI
+              View details
             </button>
             {detection.deerId && (
               <Link

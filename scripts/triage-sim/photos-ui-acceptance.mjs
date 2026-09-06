@@ -1,0 +1,51 @@
+import { execFileSync } from 'node:child_process'
+import { writeFile } from 'node:fs/promises'
+import assert from 'node:assert/strict'
+const binary='/home/clachance14/.claude/skills/gstack/browse/dist/browse'
+const env={...process.env,BROWSE_STATE_FILE:'/tmp/tinesight-photos-ui-browser/browse.json'}
+const run=(...args)=>execFileSync(binary,args,{env,encoding:'utf8',timeout:30000}).trim()
+const js=code=>run('js',code)
+const pause=()=>new Promise(r=>setTimeout(r,200))
+async function until(test){for(let i=0;i<100;i++){if(test())return;await pause()}throw new Error('Browser condition timed out')}
+const text=()=>run('text')
+const click=label=>js(`Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()===${JSON.stringify(label)}).click()`)
+const evidence=[]
+const presetName='UI acceptance '+Date.now()
+run('viewport','1280x800');run('goto','http://127.0.0.1:5410/photos?triageView=all')
+await until(()=>text().includes('Showing 50 of 1000'))
+for(let n=0;n<60&&!text().includes('Showing 1000 of 1000');n++){js('document.querySelector("main").scrollTop=1000000');await pause()}
+await until(()=>text().includes('Showing 1000 of 1000'))
+const images=Number(js('document.querySelectorAll("[data-photo-grid] img").length'));assert(images<70)
+evidence.push({check:'all 1000 loaded, bounded virtualized DOM',images})
+assert(js(`getComputedStyle(document.querySelector('[data-photo-grid]')).overflowY`)==='visible')
+assert(Number(js(`Math.abs(document.querySelector('[data-photo-toolbar]').getBoundingClientRect().top-document.querySelector('main').getBoundingClientRect().top)`))<2)
+evidence.push({check:'page owns scrolling, toolbar pinned at page top, grid has no scrolling box'})
+js('document.querySelector("main").scrollTop=2000');await pause()
+const top=Number(js('document.querySelector("main").scrollTop'))
+js('document.querySelector("[data-photo-grid] button").click()');await until(()=>text().includes('Photo review'))
+js(`document.querySelector('a[aria-label="Back to filtered photos"]').click()`);await until(()=>js('Boolean(document.querySelector("main"))')==='true')
+await pause();const restored=Number(js('document.querySelector("main").scrollTop'));assert(Math.abs(restored-top)<2,`${top} -> ${restored}`)
+evidence.push({check:'return scroll position',top,restored})
+run('viewport','390x844');click('Select photos');await pause();click('Select loaded');await pause();assert(text().includes('1,000 selected'))
+assert(Number(js('document.querySelector("[data-photo-toolbar]").getBoundingClientRect().bottom'))<700)
+click('Cancel selection');click('Saved views');await until(()=>text().includes('Name this view'));run('fill','#photo-view-name',presetName);click('Save current view');await until(()=>!text().includes('Name this view'))
+js(`document.querySelector('button[aria-label="Other photo groups"]').click()`);await until(()=>text().includes('Empty photos'))
+js('Array.from(document.querySelectorAll("button")).find(e=>e.textContent.startsWith("Empty photos")).click()');await until(()=>text().includes('of 600 photos'))
+evidence.push({check:'mobile selection, save view, secondary empty group'})
+click('Saved views');await until(()=>text().includes(presetName));click(presetName);await until(()=>text().includes('of 1000 photos'))
+assert(js('location.search').includes('triageView=all'))
+js('Array.from(document.querySelectorAll("button")).find(e=>e.textContent.trim()==="Filters").click()');await until(()=>text().includes('Photo filters'))
+assert(Number(js('document.documentElement.scrollWidth'))===390)
+run('screenshot','.gstack/triage-runs/photos-ui/mobile-filters.png');run('press','Escape')
+evidence.push({check:'saved view restores scope; phone filter sheet has no horizontal overflow'})
+run('goto','http://127.0.0.1:5410/photos?triageView=all&minScore=999');await until(()=>text().includes('No photos match this view'))
+evidence.push({check:'empty view'})
+await fetch('http://127.0.0.1:9410/__sim/fault',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:'/rest/v1/images',method:'GET',remaining:12,status:503})})
+run('goto','http://127.0.0.1:5410/photos?triageView=security&sortDirection=asc');await until(()=>text().includes('Failed to load photos'))
+run('screenshot','.gstack/triage-runs/photos-ui/gallery-error.png')
+// Consume the remaining finite fixture failures, then retry using the visible control.
+for(let i=0;i<12;i++)await fetch('http://127.0.0.1:9410/rest/v1/images?limit=0')
+click('Try again');await until(()=>text().includes('of 200 photos'))
+evidence.push({check:'gallery error and retry preserve security filter'})
+await writeFile('.gstack/triage-runs/photos-ui/acceptance.json',JSON.stringify(evidence,null,2)+'\n')
+console.log('PASS photos UI acceptance',JSON.stringify(evidence))

@@ -99,18 +99,24 @@ export class DuplicateChecker {
     const results = await Promise.all(batches.map((batch) => this.checkBatch(batch)))
 
     // Merge results
+    const existingHashes: string[] = []
+    const existingKeys: string[] = []
     const existing: string[] = []
     const toUpload: string[] = []
     let duplicateCount = 0
 
     for (const result of results) {
       existing.push(...result.existing)
+      existingKeys.push(...(result.existingKeys ?? []))
+      existingHashes.push(...(result.existingHashes ?? []))
       toUpload.push(...result.toUpload)
       duplicateCount += result.duplicateCount
     }
 
     return {
       existing,
+      existingKeys,
+      existingHashes,
       toUpload,
       totalChecked: files.length,
       duplicateCount,
@@ -162,13 +168,13 @@ export class DuplicateChecker {
     const result = await this.checkDuplicates(checkFiles)
 
     // Create a Set for O(1) lookup
-    const existingSet = new Set(result.existing)
+    const existingSet = new Set(result.existingHashes ?? [])
 
     // Filter and update statuses
     const toUpload: FileWithMetadataExtended[] = []
 
     for (const file of files) {
-      if (existingSet.has(file.filename)) {
+      if ('contentSha256' in file && typeof file.contentSha256 === 'string' && existingSet.has(file.contentSha256)) {
         // Mark as skipped (duplicate)
         file.status = 'skipped'
       } else {

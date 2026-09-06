@@ -1,4 +1,5 @@
 // @ts-nocheck - Supabase Database generic types not properly resolved in build context
+import { withGeminiUsageContext } from "@/lib/gemini/usage";
 import { task, logger } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { detectDeer, classifyDeerCrop } from "@/lib/gemini/client";
@@ -7,13 +8,14 @@ import { cropToMemory, uploadCropBuffer } from "@/lib/image/crop";
 import { generateBlurDataUrl } from "@/lib/image/blurhash";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
-import type { DetectionOnlyBox } from "@/lib/gemini/types";
-import crypto from "crypto";
+import { detectionOnlySchema, type DetectionOnlyBox, type DetectionOnlyResult } from "@/lib/gemini/types";
+import { detectionIdentity } from "@/lib/image/detection-identity";
 import pLimit from "p-limit";
+import { GEMINI_TASK_QUEUE, GEMINI_CROP_CONCURRENCY } from "@/lib/gemini/capacity";
 import { generateFingerprint } from "./generate-fingerprint";
 import { generateImageVariantsJob } from "./generate-image-variants";
 import { estimateAntlerScore } from "@/lib/gemini/client";
-import { passesCoarseCut, passesScoreEstimateBand, DEFAULT_TROPHY_THRESHOLD_INCHES } from "@/lib/scoring/gates";
+import { passesCoarseCut, shouldAutomaticallyFingerprint, AUTOMATIC_FINGERPRINT_MIN_SCORE } from "@/lib/scoring/gates";
 import { assertFullResolutionPath, assertFullResolutionDimensions } from "@/lib/image/analysis-source";
 import sharp from "sharp";
 
@@ -55,16 +57,14 @@ export const analyzePhoto = task({
   // Limit concurrent Gemini API calls to manage rate limits
   // Gemini Flash has generous limits but we want controlled parallelism
   // Configurable via TRIGGER_CONCURRENCY_LIMIT environment variable
-  queue: {
-    concurrencyLimit: parseInt(process.env.TRIGGER_CONCURRENCY_LIMIT || '50', 10),
-  },
+  queue: GEMINI_TASK_QUEUE,
   retry: {
     maxAttempts: 3,
     factor: 2,
     minTimeoutInMs: 1000,
     maxTimeoutInMs: 10000,
   },
-  run: async (payload: AnalyzePhotoPayload) => {
+  run: async (payload: AnalyzePhotoPayload, { ctx }) => {
     const { imageId, batchId } = payload;
 
     logger.info("Starting photo analysis", { imageId, batchId });
@@ -72,6 +72,10 @@ export const analyzePhoto = task({
     // Cast to typed client - TypeScript has issues with Database generic in Trigger.dev context
     const supabase = createAdminClient() as SupabaseClient<Database>;
 
+    const claimAt = new Date().toISOString();
+    const { data: claims, error: claimError } = await supabase.rpc("claim_photo_work", { p_image_id: imageId, p_kind: "analysis", p_claim_at: claimAt });
+    if (claimError) throw new Error(claimError.message);
+    if (claims === null || claims.length === 0) return { skipped: true, imageId, reason: "already_claimed_or_complete" };
     try {
       // Check if batch was cancelled before this job started
       const jobStartTime = new Date();
@@ -103,7 +107,7 @@ export const analyzePhoto = task({
 
       const { data: imageRecord, error: fetchError } = await supabase
         .from("images")
-        .select("id, file_path, user_id, variant_status")
+        .select("id, file_path, user_id, variant_status, analysis_result")
         .eq("id", imageId)
         .single();
 
@@ -145,21 +149,13 @@ export const analyzePhoto = task({
         }
       }
 
-      // Fetch the account's trophy threshold (gross inches) for the score gate.
-      const { data: ownerProfile } = await supabase
-        .from("profiles")
-        .select("trophy_threshold")
-        .eq("id", imageRecord.user_id)
-        .single();
-      const trophyThreshold = ownerProfile?.trophy_threshold ?? DEFAULT_TROPHY_THRESHOLD_INCHES;
-
-      logger.info("Trophy threshold resolved", { imageId, trophyThreshold });
-
       // Step 2: Update image status to 'processing'
       const { error: statusError } = await supabase
         .from("images")
         .update({ detection_status: "processing" })
-        .eq("id", imageId);
+        .eq("id", imageId)
+        .eq("analysis_claimed_at", claimAt)
+        .eq("is_cancelled", false);
 
       if (statusError) {
         logger.warn("Failed to update image status to processing", {
@@ -234,39 +230,60 @@ export const analyzePhoto = task({
       // Step 5: Stage 1 - Call Gemini for deer detection (bounding boxes only)
       logger.info("Stage 1: Calling Gemini for deer detection", { imageId });
 
-      const { result: detectionResult, metrics: detectionMetrics } = await detectDeer(imageBase64, mimeType);
+      // A persisted checkpoint (a retry after the worker died between detection and
+      // the detection inserts) goes through the SAME schema as fresh Gemini output;
+      // a stored value that fails to parse is treated as absent and re-detected.
+      // Only the validated result is persisted, so a replay never re-records the
+      // original call's metrics as a second batch_metrics row.
+      const storedCheckpoint = detectionOnlySchema.safeParse(imageRecord.analysis_result);
+      let detectionResult: DetectionOnlyResult;
+      let detectionMetrics: GeminiMetrics | null = null;
+      if (storedCheckpoint.success) {
+        detectionResult = storedCheckpoint.data;
+        logger.info("Stage 1: Reusing persisted detection checkpoint", { imageId });
+      } else {
+        const fresh = await withGeminiUsageContext({ batchId, imageId }, () => detectDeer(imageBase64, mimeType));
+        detectionResult = fresh.result;
+        detectionMetrics = fresh.metrics;
+        const { error: checkpointError } = await supabase.from("images")
+          .update({ analysis_result: detectionResult })
+          .eq("id", imageId).eq("analysis_claimed_at", claimAt).eq("is_cancelled", false);
+        if (checkpointError) throw new Error(`Could not save detection checkpoint: ${checkpointError.message}`);
+      }
 
       logger.info("Stage 1: Gemini detection completed", {
         imageId,
-        model: detectionMetrics.modelUsed,
+        model: detectionMetrics?.modelUsed ?? "checkpoint",
         deerPresent: detectionResult.deer_present,
         detectionCount: detectionResult.detections.length,
         qualityScore: detectionResult.image_quality_score,
-        tokenUsage: detectionMetrics.totalTokens,
+        tokenUsage: detectionMetrics?.totalTokens ?? 0,
       });
 
-      // Persist detection metrics to batch_metrics table
-      const { error: detectionMetricsError } = await supabase
-        .from("batch_metrics")
-        .insert({
-          batch_id: batchId,
-          image_id: imageId,
-          gemini_call_type: "detection",
-          model_used: detectionMetrics.modelUsed,
-          prompt_tokens: detectionMetrics.promptTokens,
-          response_tokens: detectionMetrics.responseTokens,
-          total_tokens: detectionMetrics.totalTokens,
-          is_rate_limited: detectionMetrics.wasRateLimited,
-          retry_count: detectionMetrics.retryCount,
-          duration_ms: detectionMetrics.durationMs,
-        });
+      // Persist detection metrics to batch_metrics (fresh calls only; see above)
+      if (detectionMetrics !== null) {
+        const { error: detectionMetricsError } = await supabase
+          .from("batch_metrics")
+          .insert({
+            batch_id: batchId,
+            image_id: imageId,
+            gemini_call_type: "detection",
+            model_used: detectionMetrics.modelUsed,
+            prompt_tokens: detectionMetrics.promptTokens,
+            response_tokens: detectionMetrics.responseTokens,
+            total_tokens: detectionMetrics.totalTokens,
+            is_rate_limited: detectionMetrics.wasRateLimited,
+            retry_count: detectionMetrics.retryCount,
+            duration_ms: detectionMetrics.durationMs,
+          });
 
-      if (detectionMetricsError) {
-        logger.warn("Failed to persist detection metrics", {
-          imageId,
-          error: detectionMetricsError.message,
-        });
-        // Don't throw - metrics are optional
+        if (detectionMetricsError) {
+          logger.warn("Failed to persist detection metrics", {
+            imageId,
+            error: detectionMetricsError.message,
+          });
+          // Don't throw - metrics are optional
+        }
       }
 
       // Filter out low-confidence detections to reduce false positives
@@ -317,8 +334,8 @@ export const analyzePhoto = task({
         people: personDetections.length,
       });
 
-      // Create concurrency limiter (10 parallel Gemini calls max)
-      const limit = pLimit(10);
+      // Bound paid calls within each job as well as across the shared queue.
+      const limit = pLimit(GEMINI_CROP_CONCURRENCY);
 
       // Start timing Stage 2
       const stage2Start = Date.now();
@@ -354,7 +371,7 @@ export const analyzePhoto = task({
       // Process BUCKS in parallel (with Gemini classification)
       const buckPromises = buckDetections.map((detection: DetectionOnlyBox, index: number) =>
         limit(async () => {
-          const detectionId = crypto.randomUUID();
+          const detectionId = detectionIdentity(imageId, "buck", index);
 
           logger.info(`Stage 2: Processing buck ${index + 1}/${buckDetections.length}`, {
             imageId,
@@ -370,7 +387,7 @@ export const analyzePhoto = task({
 
           // Step 2 & 3: Classify with Gemini AND upload crop in parallel
           const [classificationResult, cropPath] = await Promise.all([
-            classifyDeerCrop(cropBase64, "image/jpeg"),
+            withGeminiUsageContext({ batchId, imageId, detectionId }, () => classifyDeerCrop(cropBase64, "image/jpeg")),
             uploadCropBuffer(supabase, cropBuffer, detectionId),
           ]);
 
@@ -406,10 +423,10 @@ export const analyzePhoto = task({
           let scoreEstimate: { gross_score_estimate: number; confidence: number } | null = null;
           if (passesCoarseCut(classification.size_class)) {
             try {
-              const { result: estimate, metrics: estimateMetrics } = await estimateAntlerScore(
+              const { result: estimate, metrics: estimateMetrics } = await withGeminiUsageContext({ batchId, imageId, detectionId }, () => estimateAntlerScore(
                 cropBase64,
                 "image/jpeg"
-              );
+              ));
               scoreEstimate = estimate;
               classificationMetrics.push({
                 batch_id: batchId,
@@ -441,6 +458,7 @@ export const analyzePhoto = task({
           const coords = computeBboxCoords(detection.box_2d);
 
           return {
+            id: detectionId,
             image_id: imageId,
             bbox_x: coords.bboxX,
             bbox_y: coords.bboxY,
@@ -470,7 +488,7 @@ export const analyzePhoto = task({
       // Process DOES/FAWNS in parallel (NO Gemini classification - just crop + upload)
       const doePromises = doeDetections.map((detection: DetectionOnlyBox, index: number) =>
         limit(async () => {
-          const detectionId = crypto.randomUUID();
+          const detectionId = detectionIdentity(imageId, "doe", index);
 
           logger.info(`Stage 2: Processing doe/fawn ${index + 1}/${doeDetections.length}`, {
             imageId,
@@ -491,6 +509,7 @@ export const analyzePhoto = task({
 
           // Default classification for does/fawns - no Gemini call needed
           return {
+            id: detectionId,
             image_id: imageId,
             bbox_x: coords.bboxX,
             bbox_y: coords.bboxY,
@@ -517,7 +536,7 @@ export const analyzePhoto = task({
       const nonDeerDetections = [...hogDetections, ...cowDetections, ...goatDetections, ...vehicleDetections, ...personDetections];
       const nonDeerPromises = nonDeerDetections.map((detection: DetectionOnlyBox, index: number) =>
         limit(async () => {
-          const detectionId = crypto.randomUUID();
+          const detectionId = detectionIdentity(imageId, "other", index);
 
           logger.info(`Stage 2: Processing non-deer ${index + 1}/${nonDeerDetections.length}`, {
             imageId,
@@ -538,6 +557,7 @@ export const analyzePhoto = task({
           const coords = computeBboxCoords(detection.box_2d);
 
           return {
+            id: detectionId,
             image_id: imageId,
             bbox_x: coords.bboxX,
             bbox_y: coords.bboxY,
@@ -626,6 +646,8 @@ export const analyzePhoto = task({
         }
       }
 
+      if (failedCount > 0) throw new Error(`${failedCount} detections could not be processed; retrying photo`);
+
       // Step 7: Insert detection records into database
       if (detectionRecords.length > 0) {
         logger.info("Inserting detection records", {
@@ -635,7 +657,7 @@ export const analyzePhoto = task({
 
         const { error: insertError } = await supabase
           .from("detections")
-          .insert(detectionRecords);
+          .upsert(detectionRecords, { onConflict: "id", ignoreDuplicates: true });
 
         if (insertError) {
           logger.error("Failed to insert detections", {
@@ -651,7 +673,7 @@ export const analyzePhoto = task({
         });
 
         // Step 7b: Queue fingerprint generation for bucks whose score estimate
-        // is within the confirm band (>= threshold - band). The fingerprint
+        // is at least 140 gross inches. The fingerprint
         // produces the authoritative score and the final trophy decision.
         // See docs/adr/0004-trophy-gated-ai-cost-cascade.md.
         const { data: insertedDetections } = await supabase
@@ -661,30 +683,30 @@ export const analyzePhoto = task({
           .eq("class", "deer")
           .not("score_estimate", "is", null);
 
-        const bandDetections = (insertedDetections ?? []).filter((d) =>
-          passesScoreEstimateBand(d.score_estimate, trophyThreshold)
+        const eligibleDetections = (insertedDetections ?? []).filter((d) =>
+          shouldAutomaticallyFingerprint(d.score_estimate)
         );
 
-        if (bandDetections.length > 0) {
-          logger.info("Queuing fingerprint generation for in-band bucks", {
+        if (eligibleDetections.length > 0) {
+          logger.info("Queuing fingerprint generation for eligible bucks", {
             imageId,
-            inBandCount: bandDetections.length,
-            trophyThreshold,
+            eligibleCount: eligibleDetections.length,
+            minimumEstimatedScore: AUTOMATIC_FINGERPRINT_MIN_SCORE,
           });
 
           // Using triggerAndWait would block, so we use trigger() for async queuing
-          const fingerprintPromises = bandDetections.map((detection) =>
+          const fingerprintPromises = eligibleDetections.map((detection) =>
             generateFingerprint.trigger({
               detectionId: detection.id,
               userId: imageRecord.user_id,
-            })
+            }, { idempotencyKey: `upload-fingerprint:${detection.id}`, idempotencyKeyTTL: "30d" })
           );
 
           try {
             await Promise.all(fingerprintPromises);
             logger.info("Fingerprint generation jobs queued successfully", {
               imageId,
-              count: bandDetections.length,
+              count: eligibleDetections.length,
             });
           } catch (fpError) {
             // Don't fail the main job if fingerprint queuing fails
@@ -732,38 +754,19 @@ export const analyzePhoto = task({
           retry_count: 0, // Reset retry count on success
           error_message: null, // Clear any previous error
         })
-        .eq("id", imageId);
+        .eq("id", imageId)
+        .eq("analysis_claimed_at", claimAt)
+        .eq("is_cancelled", false);
 
       if (updateError) {
         logger.error("Failed to update image with analysis results", {
           imageId,
           error: updateError.message,
         });
-        // Don't throw - detections are already saved
+        throw new Error(`Failed to persist photo completion: ${updateError.message}`)
       }
 
-      // Step 9: Increment batch processed_images and successful_images counters
-      logger.info("Updating batch counters", { batchId });
-
-      const { error: batchError } = await supabase.rpc(
-        "increment_batch_counters",
-        {
-          batch_id: batchId,
-          increment_processed: 1,
-          increment_successful: 1,
-        }
-      );
-
-      if (batchError) {
-        logger.error("Failed to update batch counters", {
-          batchId,
-          error: batchError.message,
-        });
-        // Don't throw - analysis processing succeeded
-      }
-
-      // Note: Batch auto-completion is now handled by the batch_auto_complete database trigger
-      // The trigger automatically marks batches as 'completed' when processed_images >= total_images
+      // Terminal photo transitions update batch counters atomically in PostgreSQL.
 
       logger.info("Photo analysis completed successfully", {
         imageId,
@@ -815,33 +818,18 @@ export const analyzePhoto = task({
       const { error: failError } = await supabase
         .from("images")
         .update({
-          detection_status: "failed",
+          detection_status: ctx.attempt.number >= 3 ? "failed" : "pending",
           retry_count: currentRetryCount + 1,
           error_message: error instanceof Error ? error.message : String(error),
         })
-        .eq("id", imageId);
+        .eq("id", imageId)
+        .eq("analysis_claimed_at", claimAt)
+        .eq("is_cancelled", false);
 
       if (failError) {
         logger.error("Failed to mark image as failed", {
           imageId,
           error: failError.message,
-        });
-      }
-
-      // Increment batch processed_images and failed_images counters
-      const { error: batchError } = await supabase.rpc(
-        "increment_batch_counters",
-        {
-          batch_id: batchId,
-          increment_processed: 1,
-          increment_failed: 1,
-        }
-      );
-
-      if (batchError) {
-        logger.error("Failed to update batch counters on error", {
-          batchId,
-          error: batchError.message,
         });
       }
 

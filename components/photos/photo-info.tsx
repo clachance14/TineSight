@@ -1,11 +1,10 @@
 'use client'
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { DetectionCardWithFeedback } from '@/components/photos/detection-card-with-feedback'
 import type { PhotoViewDTO } from '@/lib/services/photo-view'
 
-function formatDate(s: string | null) {
-  if (!s) return 'Unknown'
+function formatDate(s: string | null): string {
+  if (s === null || s === '') return 'Unknown'
   return new Date(s).toLocaleString('en-US', {
     year: 'numeric',
     month: 'short',
@@ -15,8 +14,8 @@ function formatDate(s: string | null) {
   })
 }
 
-function formatShortDate(s: string | null) {
-  if (!s) return 'Unknown'
+function formatShortDate(s: string | null): string {
+  if (s === null || s === '') return 'Unknown'
   return new Date(s).toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -25,12 +24,12 @@ function formatShortDate(s: string | null) {
   })
 }
 
-function formatFileSize(bytes: number | null) {
-  if (!bytes) return null
+function formatFileSize(bytes: number | null): string | null {
+  if (bytes === null || bytes === 0) return null
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-function statusBadge(status: string) {
+function statusBadge(status: string): React.JSX.Element {
   const badges: Record<string, { label: string; className: string }> = {
     pending: { label: 'Pending', className: 'bg-slate text-cream-dark' },
     processing: { label: 'Processing', className: 'bg-blue-500/20 text-blue-300' },
@@ -45,8 +44,8 @@ function statusBadge(status: string) {
   )
 }
 
-function classificationBadge(c: string | null) {
-  if (!c) return <span className="text-cream-dark text-sm">No classification</span>
+function classificationBadge(c: string | null): React.JSX.Element {
+  if (c === null || c === '') return <span className="text-cream-dark text-sm">No classification</span>
   const badges: Record<string, { label: string; className: string }> = {
     deer: { label: 'Deer', className: 'bg-copper/20 text-copper-light' },
     empty: { label: 'Empty', className: 'bg-slate text-cream-dark' },
@@ -62,7 +61,7 @@ function classificationBadge(c: string | null) {
   )
 }
 
-export function PhotoInfo({ photo }: { photo: PhotoViewDTO }) {
+export function PhotoInfo({ photo }: { photo: PhotoViewDTO }): React.JSX.Element {
   const fileSizeStr = formatFileSize(photo.fileSizeBytes)
 
   return (
@@ -72,7 +71,7 @@ export function PhotoInfo({ photo }: { photo: PhotoViewDTO }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1 text-sm text-cream-dark">
         <span>
           <span className="text-cream-dark">Captured</span>{' '}
-          <span className="font-medium text-cream">{formatDate(photo.capturedAt)}</span>
+          <span className="font-mono text-xs text-cream">{formatDate(photo.capturedAt)}</span>
         </span>
         <span className="text-cream-dark/40">·</span>
         {statusBadge(photo.detectionStatus)}
@@ -83,7 +82,7 @@ export function PhotoInfo({ photo }: { photo: PhotoViewDTO }) {
             <span className="text-cream">{Math.round(photo.confidence * 100)}%</span>
           </>
         )}
-        {fileSizeStr && (
+        {fileSizeStr !== null && (
           <>
             <span className="text-cream-dark/40">·</span>
             <span>{fileSizeStr}</span>
@@ -96,14 +95,14 @@ export function PhotoInfo({ photo }: { photo: PhotoViewDTO }) {
       </div>
 
       {/* Detections panel */}
-      <Card>
-        <CardHeader className="pb-2 md:pb-4 px-3 md:px-6 pt-3 md:pt-6">
-          <CardTitle className="text-base md:text-lg">Detections ({photo.detections.length})</CardTitle>
-          <CardDescription className="hidden md:block">
-            Tap to locate on the photo · tap again to adjust
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="px-3 md:px-6 pb-3 md:pb-6 pt-0">
+      <section className="border-t border-forest-light pt-3">
+        <header className="mb-3 space-y-1">
+          <h2 className="font-fraunces text-lg text-parchment">Detections ({photo.detections.length})</h2>
+          <p className="text-xs text-weathered">
+            Select a deer to view details and edit its ROI
+          </p>
+        </header>
+        <div>
           {photo.detections.length === 0 ? (
             <p className="text-sm text-cream-dark text-center py-2 md:py-4">No detections found</p>
           ) : (
@@ -113,8 +112,8 @@ export function PhotoInfo({ photo }: { photo: PhotoViewDTO }) {
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     </>
   )
 }

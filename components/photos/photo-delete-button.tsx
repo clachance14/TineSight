@@ -95,7 +95,7 @@ export function PhotoDeleteButton({ photoId, returnUrl = '/photos' }: PhotoDelet
   return (
     <AlertDialog open={isOpen} onOpenChange={setIsOpen}>
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="icon" className="text-red-400 hover:text-red-300 hover:bg-red-500/10 border-red-500/30">
+        <Button aria-label="Delete photo" variant="outline" size="icon" className="min-h-11 min-w-11 text-red-400 hover:text-red-300 hover:bg-red-500/10 border-red-500/30">
           <Trash2 className="h-4 w-4" />
         </Button>
       </AlertDialogTrigger>

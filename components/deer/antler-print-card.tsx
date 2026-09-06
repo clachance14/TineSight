@@ -6,6 +6,7 @@ import { AntlerFingerprint } from '@/types/fingerprint'
 import { AlertCircle, CheckCircle2, XCircle } from 'lucide-react'
 
 interface AntlerPrintCardProps {
+  compact?: boolean
   fingerprint: AntlerFingerprint | null
 }
 
@@ -89,16 +90,16 @@ function Stat({
 /**
  * Display antler fingerprint data for a deer profile
  */
-export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JSX.Element {
+export function AntlerPrintCard({ fingerprint, compact = false }: AntlerPrintCardProps): React.JSX.Element {
   // Handle null fingerprint gracefully
   if (!fingerprint) {
     return (
-      <Card>
-        <CardHeader>
+      <Card className={compact ? 'gap-3 py-3' : undefined}>
+        <CardHeader className={compact ? 'px-3' : undefined}>
           <CardTitle>Antler Print</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col items-center justify-center py-8 text-center">
+          <div className={compact ? 'flex flex-col items-center justify-center py-3 text-center' : 'flex flex-col items-center justify-center py-8 text-center'}>
             <AlertCircle className="h-12 w-12 text-cream-dark mb-3" />
             <p className="text-sm text-cream-dark">Fingerprint not available</p>
             <p className="text-xs text-cream-dark/70 mt-1">
@@ -143,8 +144,8 @@ export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JS
   }
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className={compact ? 'gap-3 py-3' : undefined}>
+      <CardHeader className={compact ? 'px-3' : undefined}>
         <div className="flex items-center justify-between">
           <CardTitle>Antler Print</CardTitle>
           <Badge variant={scoreClassDisplay.variant}>
@@ -152,11 +153,11 @@ export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JS
           </Badge>
         </div>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className={compact ? 'grid gap-3 px-3 sm:grid-cols-2' : 'space-y-5'}>
         {/* Scores */}
-        <div className="space-y-2">
+        <div className={compact ? 'flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg bg-slate/50 p-3 sm:col-span-2' : 'space-y-2'}>
           <h3 className="text-sm font-semibold text-cream">B&C Score</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <div className={compact ? 'flex gap-6' : 'grid grid-cols-2 gap-3'}>
             <div className="space-y-0.5">
               <p className="text-xs text-cream-dark">Gross Score</p>
               <p className="text-lg font-semibold text-cream">{scores.gross_score.toFixed(1)}"</p>
@@ -174,9 +175,9 @@ export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JS
         </div>
 
         {/* Key Measurements — 2-up tile grid */}
-        <div className="space-y-2.5">
+        <div className={compact ? 'space-y-2' : 'space-y-2.5'}>
           <h3 className="text-sm font-semibold text-cream">Measurements</h3>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          <div className={compact ? 'grid grid-cols-2 gap-x-4 gap-y-2' : 'grid grid-cols-2 gap-x-4 gap-y-3'}>
             <Stat label="Inside Spread" value={formatMeasurement(measurements.inside_spread)} />
             <Stat
               label="Main Beams"
@@ -202,9 +203,9 @@ export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JS
         </div>
 
         {/* Derived Ratios — 2-up tile grid with confidence icons */}
-        <div className="space-y-2.5">
+        <div className={compact ? 'space-y-2' : 'space-y-2.5'}>
           <h3 className="text-sm font-semibold text-cream">Identifying Ratios</h3>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          <div className={compact ? 'grid grid-cols-2 gap-x-4 gap-y-2' : 'grid grid-cols-2 gap-x-4 gap-y-3'}>
             {ratios.g2_to_g3 !== null && (
               <Stat
                 label="G2:G3 Ratio"
@@ -238,7 +239,7 @@ export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JS
 
         {/* Distinctive Features — chips wrap denser than a bullet list */}
         {distinctiveFeatures.length > 0 && (
-          <div className="space-y-2.5">
+          <div className={compact ? 'space-y-2 sm:col-span-2' : 'space-y-2.5'}>
             <h3 className="text-sm font-semibold text-cream">Distinctive Features</h3>
             <div className="flex flex-wrap gap-1.5">
               {distinctiveFeatures.map((feature, index) => (
@@ -254,7 +255,7 @@ export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JS
         )}
 
         {/* Overall Confidence */}
-        <div className="pt-3 border-t border-cream/10">
+        <div className={compact ? 'border-t border-cream/10 pt-2 sm:col-span-2 sm:grid sm:grid-cols-[1fr_160px] sm:items-center sm:gap-4' : 'pt-3 border-t border-cream/10'}>
           <div className="flex justify-between items-center">
             <span className="text-sm text-cream-dark">Overall Confidence</span>
             <div className="flex items-center gap-2">
@@ -262,7 +263,7 @@ export function AntlerPrintCard({ fingerprint }: AntlerPrintCardProps): React.JS
               <ConfidenceIndicator confidence={confidence.overall} />
             </div>
           </div>
-          <div className="mt-2">
+          <div className={compact ? 'mt-2 sm:mt-0' : 'mt-2'}>
             <div className="h-2 bg-slate rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all ${
