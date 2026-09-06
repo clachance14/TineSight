@@ -1,33 +1,23 @@
 import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
-import { NextResponse } from 'next/server'
+import { ensureUserProfile } from '@/lib/auth/ensure-profile'
+import { authNextPath } from '@/lib/auth/navigation'
+import { redirect } from 'next/navigation'
 
-export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url)
+export async function GET(request: Request): Promise<never> {
+  const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/photos'
-
-  if (code) {
-    const supabase = await createClient()
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-
-    if (!error && data.user) {
-      // Ensure profile exists (idempotent upsert)
-      try {
-        const adminClient = createAdminClient()
-        await adminClient.from('profiles').upsert({
-          id: data.user.id,
-          email: data.user.email!,
-          full_name: data.user.user_metadata?.['full_name'] ?? '',
-        }, { onConflict: 'id' })
-      } catch (err) {
-        console.error('Profile upsert error:', err)
-      }
-
-      return NextResponse.redirect(`${origin}${next}`)
-    }
+  const tokenHash = searchParams.get('token_hash')
+  const type = searchParams.get('type')
+  const next = authNextPath(searchParams.get('next') ?? (type === 'recovery' ? '/reset-password' : null))
+  const supabase = await createClient()
+  // Supports both existing PKCE links and token-hash email templates. Token-hash
+  // links do not require the browser that originally requested the email.
+  const result = tokenHash !== null && (type === 'email' || type === 'signup' || type === 'recovery' || type === 'invite' || type === 'email_change')
+    ? await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
+    : code !== null ? await supabase.auth.exchangeCodeForSession(code) : null
+  if (result !== null && result.error === null && result.data.user !== null) {
+    if (!await ensureUserProfile(result.data.user)) return redirect('/login?error=account-setup')
+    return redirect(next)
   }
-
-  // Return the user to an error page with instructions
-  return NextResponse.redirect(`${origin}/login?error=Could not authenticate`)
+  return redirect('/login?error=callback-failed')
 }

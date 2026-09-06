@@ -9,7 +9,7 @@ import { resetPassword } from '@/lib/services/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 
 const forgotPasswordSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -17,7 +17,7 @@ const forgotPasswordSchema = z.object({
 
 type ForgotPasswordFormData = z.infer<typeof forgotPasswordSchema>
 
-export function ForgotPasswordForm() {
+export function ForgotPasswordForm(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -30,7 +30,7 @@ export function ForgotPasswordForm() {
     resolver: zodResolver(forgotPasswordSchema),
   })
 
-  const onSubmit = async (data: ForgotPasswordFormData) => {
+  const onSubmit = async (data: ForgotPasswordFormData): Promise<void> => {
     setError(null)
     setSuccess(false)
     setIsLoading(true)
@@ -49,19 +49,19 @@ export function ForgotPasswordForm() {
 
   if (success) {
     return (
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md border-forest-light bg-forest/20 py-4 shadow-none">
         <CardHeader>
-          <CardTitle>Check your email</CardTitle>
-          <CardDescription>
-            We've sent you a password reset link. Click the link in the email to create a new password.
+          <h1 className="font-display text-3xl font-normal">Check your email</h1>
+          <CardDescription className="pt-2 text-sm leading-7 text-weathered">
+            We&apos;ve sent you a password reset link. Click the link in the email to create a new password.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
+          <div className="space-y-6">
             <p className="text-sm text-muted-foreground">
-              If you don't see the email, check your spam folder.
+              If you don&apos;t see the email, check your spam folder.
             </p>
-            <Button asChild variant="outline" className="w-full">
+            <Button asChild variant="outline" className="min-h-12 w-full">
               <Link href="/login">Back to login</Link>
             </Button>
           </div>
@@ -71,17 +71,17 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <Card className="w-full max-w-md">
+    <Card className="w-full max-w-md border-forest-light bg-forest/20 py-4 shadow-none">
       <CardHeader>
-        <CardTitle>Reset your password</CardTitle>
-        <CardDescription>
-          Enter your email and we'll send you a reset link
+        <h1 className="font-display text-3xl font-normal">Reset your password</h1>
+        <CardDescription className="pt-2 text-sm leading-7 text-weathered">
+          Enter your email and we&apos;ll send you a reset link
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          {error && (
-            <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
+        <form onSubmit={(event) => { void handleSubmit(onSubmit)(event) }} className="space-y-6">
+          {error !== null && (
+            <div role="alert" className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
               <p className="text-sm text-destructive">{error}</p>
             </div>
           )}
@@ -91,6 +91,7 @@ export function ForgotPasswordForm() {
             <Input
               id="email"
               type="email"
+              autoComplete="email" inputMode="email" className="h-12 text-base md:text-base"
               placeholder="you@example.com"
               aria-invalid={!!errors.email}
               disabled={isLoading}
@@ -101,14 +102,14 @@ export function ForgotPasswordForm() {
             )}
           </div>
 
-          <Button type="submit" className="w-full" disabled={isLoading}>
+          <Button type="submit" className="min-h-12 w-full" disabled={isLoading}>
             {isLoading ? 'Sending...' : 'Send reset link'}
           </Button>
 
           <div className="text-center">
             <Link
               href="/login"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="inline-flex min-h-11 items-center text-sm text-weathered hover:text-parchment"
             >
               Back to login
             </Link>

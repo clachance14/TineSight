@@ -1,68 +1,50 @@
 import { createClient } from '@/lib/supabase/client'
+import type { AuthError, Session, User } from '@supabase/supabase-js'
 
-export async function signUp(email: string, password: string, fullName?: string): Promise<{
-  data: { user: { id: string; email?: string } | null } | null
+type AuthResult = {
+  data: { user: User | null; session: Session | null } | null
   error: Error | null
-}> {
-  const supabase = createClient()
+}
 
-  // Sign up the user - profile is automatically created by handle_new_user() trigger
+async function ensureProfile(): Promise<Error | null> {
+  try {
+    const response = await fetch('/api/auth/create-profile', { method: 'POST' })
+    if (!response.ok) return new Error('Could not finish account setup. Please try signing in again.')
+    return null
+  } catch {
+    return new Error('Connection lost while setting up your account. Please sign in to try again.')
+  }
+}
+
+export async function signUp(email: string, password: string, fullName?: string): Promise<AuthResult> {
+  const supabase = createClient()
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      data: {
-        full_name: fullName ?? '',
-      },
+      emailRedirectTo: `${window.location.origin}/auth/callback`,
+      data: { full_name: fullName ?? '' },
     },
   })
-
-  if (error !== null) {
-    return { data: null, error }
-  }
-
-  // Create profile via server-side API (bypasses RLS)
-  if (data.user !== null) {
-    try {
-      const response = await fetch('/api/auth/create-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: data.user.id,
-          email: data.user.email ?? email,
-          fullName: fullName ?? '',
-        }),
-      })
-      if (!response.ok) {
-        const body = await response.json()
-        console.error('Profile creation failed:', response.status, body)
-      }
-    } catch (err) {
-      console.error('Failed to create profile:', err)
-    }
-  }
-
+  if (error !== null) return { data: null, error }
+  if (data.session !== null) return { data, error: await ensureProfile() }
   return { data, error: null }
 }
 
-export async function signIn(email: string, password: string) {
+export async function signIn(email: string, password: string): Promise<AuthResult> {
   const supabase = createClient()
-
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  })
-
-  return { data, error }
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error !== null) return { data: null, error }
+  return { data, error: await ensureProfile() }
 }
 
-export async function signOut() {
+export async function signOut(): Promise<{ error: AuthError | null }> {
   const supabase = createClient()
   const { error } = await supabase.auth.signOut()
   return { error }
 }
 
-export async function resetPassword(email: string) {
+export async function resetPassword(email: string): Promise<{ error: AuthError | null }> {
   const supabase = createClient()
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -72,7 +54,7 @@ export async function resetPassword(email: string) {
   return { error }
 }
 
-export async function updatePassword(newPassword: string) {
+export async function updatePassword(newPassword: string): Promise<{ error: AuthError | null }> {
   const supabase = createClient()
 
   const { error } = await supabase.auth.updateUser({
@@ -82,7 +64,7 @@ export async function updatePassword(newPassword: string) {
   return { error }
 }
 
-export async function getUser() {
+export async function getUser(): Promise<{ user: User | null; error: AuthError | null }> {
   const supabase = createClient()
   const { data: { user }, error } = await supabase.auth.getUser()
   return { user, error }

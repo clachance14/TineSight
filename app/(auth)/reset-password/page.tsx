@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -9,7 +10,7 @@ import { updatePassword } from '@/lib/services/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 
 const resetPasswordSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
@@ -21,7 +22,7 @@ const resetPasswordSchema = z.object({
 
 type ResetPasswordFormData = z.infer<typeof resetPasswordSchema>
 
-export default function ResetPasswordPage() {
+export default function ResetPasswordPage(): React.JSX.Element {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -34,7 +35,7 @@ export default function ResetPasswordPage() {
     resolver: zodResolver(resetPasswordSchema),
   })
 
-  const onSubmit = async (data: ResetPasswordFormData) => {
+  const onSubmit = async (data: ResetPasswordFormData): Promise<void> => {
     setError(null)
     setIsLoading(true)
 
@@ -48,22 +49,23 @@ export default function ResetPasswordPage() {
     }
 
     // Redirect to login with success message
-    router.push('/login?message=Password updated successfully. Please sign in with your new password.')
+    router.push('/login?message=password-updated')
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-8 px-5 py-12">
+      <Link href="/" className="font-display text-3xl tracking-[0.14em] text-brass">TINESIGHT</Link>
+      <Card className="w-full max-w-md border-forest-light bg-forest/20 py-4 shadow-none">
         <CardHeader>
-          <CardTitle>Create new password</CardTitle>
-          <CardDescription>
+          <h1 className="font-display text-3xl font-normal">Create new password</h1>
+          <CardDescription className="pt-2 text-sm leading-7 text-weathered">
             Enter your new password below
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            {error && (
-              <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
+          <form onSubmit={(event) => { void handleSubmit(onSubmit)(event) }} className="space-y-6">
+            {error !== null && (
+              <div role="alert" className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
                 <p className="text-sm text-destructive">{error}</p>
               </div>
             )}
@@ -73,6 +75,7 @@ export default function ResetPasswordPage() {
               <Input
                 id="password"
                 type="password"
+                autoComplete="new-password" className="h-12 text-base md:text-base"
                 placeholder="At least 8 characters"
                 aria-invalid={!!errors.password}
                 disabled={isLoading}
@@ -88,6 +91,7 @@ export default function ResetPasswordPage() {
               <Input
                 id="confirmPassword"
                 type="password"
+                autoComplete="new-password" className="h-12 text-base md:text-base"
                 placeholder="Re-enter your password"
                 aria-invalid={!!errors.confirmPassword}
                 disabled={isLoading}
@@ -98,7 +102,7 @@ export default function ResetPasswordPage() {
               )}
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="min-h-12 w-full" disabled={isLoading}>
               {isLoading ? 'Updating password...' : 'Update password'}
             </Button>
           </form>
